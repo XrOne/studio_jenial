@@ -158,3 +158,15 @@ export interface ComplianceResult {
   critique: string;
   revisedPrompt?: string;
 }
+
+// --- VERTEX AI EXTENSIONS ---
+export enum VideoProvider {
+  GEMINI = 'Gemini API',
+  VERTEX = 'Vertex AI',
+}
+
+export interface VertexConfig {
+  projectId: string;
+  location: string;
+  accessToken: string;
+}

@@ -213,6 +213,31 @@ app.get('/api/proxy-video', async (req, res) => {
   }
 });
 
+// 4. Vertex AI Video Generation (NEW)
+import { generateVideoVertex } from './providers/vertexProvider.ts';
+
+app.post('/api/video/vertex/generate', async (req, res) => {
+  try {
+    const { projectId, location, accessToken, model, prompt, config } = req.body;
+
+    if (!projectId || !location || !accessToken) {
+      return res.status(400).json({ error: 'Missing Vertex AI credentials (projectId, location, accessToken)' });
+    }
+
+    console.log(`[Vertex] Request received for model: ${model}`);
+    
+    const result = await generateVideoVertex(
+      { projectId, location, accessToken },
+      { model, prompt, config }
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error('[Vertex] Route Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- Start Server ---
 const port = process.env.PORT || 3001;
 
