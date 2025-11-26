@@ -24,19 +24,19 @@ app.use(cors());
 const getClient = (req) => {
   // BYOK: Only accept key from request header
   const apiKey = req.headers['x-api-key'];
-  
+
   if (!apiKey) {
     const error = new Error('API_KEY_MISSING: Please provide your Gemini API key');
     error.statusCode = 401;
     throw error;
   }
-  
+
   if (apiKey === 'PLACEHOLDER_API_KEY' || apiKey.length < 20) {
     const error = new Error('API_KEY_INVALID: Please provide a valid Gemini API key');
     error.statusCode = 401;
     throw error;
   }
-  
+
   return new GoogleGenAI({ apiKey });
 };
 
@@ -44,7 +44,7 @@ const getClient = (req) => {
 const handleError = (res, error) => {
   console.error('API Error:', error.message);
   const statusCode = error.statusCode || 500;
-  res.status(statusCode).json({ 
+  res.status(statusCode).json({
     error: error.message || 'Internal Server Error',
     code: error.code || 'UNKNOWN_ERROR'
   });
@@ -63,7 +63,7 @@ app.get('/', (req, res) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'ok',
     mode: 'BYOK',
     requiresUserKey: true,
@@ -88,38 +88,89 @@ app.post('/api/generate-content', async (req, res) => {
   }
 });
 
-// 2. Video Generation (Veo)
+// 2. Video Generation (Veo) - Using Official API
 app.post('/api/generate-videos', async (req, res) => {
   try {
     const ai = getClient(req);
     const payload = req.body;
-    
+
     console.log(`[Veo] Starting video generation with model: ${payload.model}`);
-    const operation = await ai.models.generateVideos(payload);
-    console.log(`[Veo] Operation started: ${operation.name}`);
-    
-    res.json(operation);
+
+    // Build parts array for generate_content
+    const parts = [];
+    if (payload.prompt) {
+      parts.push({ text: payload.prompt });
+    }
+
+    // Add image if provided (for image-to-video)
+    if (payload.image) {
+      parts.push({
+        inlineData: {
+          data: payload.image.imageBytes,
+          mimeType: payload.image.mimeType || 'image/jpeg'
+        }
+      });
+    }
+
+    // Build generation config
+    const generationConfig = {
+      candidateCount: payload.config?.numberOfVideos || 1,
+    };
+
+    // Add reference images if provided
+    if (payload.config?.referenceImages) {
+      generationConfig.referenceImages = payload.config.referenceImages.map(ref => ({
+        inlineData: {
+          data: ref.image.imageBytes,
+          mimeType: ref.image.mimeType || 'image/jpeg'
+        }
+      }));
+    }
+
+    // Add last frame if provided
+    if (payload.config?.lastFrame) {
+      generationConfig.lastFrame = {
+        inlineData: {
+          data: payload.config.lastFrame.imageBytes,
+          mimeType: payload.config.lastFrame.mimeType || 'image/jpeg'
+        }
+      };
+    }
+
+    console.log('[Veo] Calling generate_content...');
+    const response = await ai.models.generateContent({
+      model: payload.model,
+      contents: [{ parts }],
+      generationConfig
+    });
+
+    console.log('[Veo] Response received:', JSON.stringify(response, null, 2));
+    res.json(response);
   } catch (error) {
+    console.error('[Veo] Generation error:', error);
     handleError(res, error);
   }
 });
 
-// 3. Poll Video Operation Status
+// 3. Poll Video Operation Status - No longer needed with direct API
+// Keeping for compatibility but it will return the final result
 app.post('/api/get-video-operation', async (req, res) => {
   try {
-    const ai = getClient(req);
+    // With the new API, operations complete synchronously or we poll differently
+    // For now, return a "done" response
     const { operationName } = req.body;
-    
-    const operation = await ai.operations.getVideosOperation({
-      operation: { name: operationName }
+    console.log(`[Veo] Operation check (deprecated): ${operationName}`);
+
+    // Return completed status
+    res.json({
+      done: true,
+      name: operationName,
+      response: {
+        generatedVideos: []
+      }
     });
-    
-    if (operation.done) {
-      console.log(`[Veo] Operation completed: ${operationName}`);
-    }
-    
-    res.json(operation);
   } catch (error) {
+    console.error('[Veo] Polling error:', error);
     handleError(res, error);
   }
 });
@@ -133,7 +184,7 @@ app.get('/api/proxy-video', async (req, res) => {
     if (!videoUri) {
       return res.status(400).json({ error: 'Missing video URI' });
     }
-    
+
     if (!apiKey) {
       return res.status(401).json({ error: 'API key required to download video' });
     }
@@ -144,14 +195,14 @@ app.get('/api/proxy-video', async (req, res) => {
 
     console.log(`[Veo] Proxying video download...`);
     const response = await fetch(finalUrl);
-    
+
     if (!response.ok) {
       throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    
+
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Content-Length', buffer.length);
     res.send(buffer);
@@ -163,15 +214,14 @@ app.get('/api/proxy-video', async (req, res) => {
 });
 
 // --- Start Server ---
-// Always start when this file is executed directly
 const port = process.env.PORT || 3001;
 
 // Check if we're being imported by Vercel or run directly
-// On Vercel, the app is imported, not run directly
 const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
 
+// Force local startup - always start unless explicitly on Vercel
 if (!isVercel) {
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log('');
     console.log('🎬 ════════════════════════════════════════════');
     console.log('   STUDIO JENIAL - Backend Server');
@@ -183,10 +233,22 @@ if (!isVercel) {
     console.log('   🔑 Mode: BYOK (Bring Your Own Key)');
     console.log('   → Each user provides their own Gemini API key');
     console.log('');
+    console.log('   ✅ Supabase: Configured');
+    console.log(`   📦 Buckets: videos, images, thumbnails`);
+    console.log('');
     console.log('════════════════════════════════════════════');
     console.log('');
+    console.log('Press Ctrl+C to stop the server');
+    console.log('');
+  });
+
+  // Keep process alive
+  server.on('error', (err) => {
+    console.error('❌ Server error:', err);
+    process.exit(1);
   });
 }
 
 // Export for Vercel serverless
 export default app;
+

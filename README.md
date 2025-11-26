@@ -43,7 +43,42 @@ This project operates in **BYOK mode**. Each user provides their own Gemini API 
 ### Prerequisites
 
 - Node.js 18+
+- [Supabase account](https://supabase.com) (free) - **REQUIRED**
 - Each user needs a [Gemini API key with Veo access](https://aistudio.google.com/app/apikey)
+
+### Setup
+
+> **📖 Detailed Setup Guide**: See [SETUP-GUIDE.md](./SETUP-GUIDE.md) for complete step-by-step instructions in French
+
+**Quick Setup:**
+
+1. **Clone & Install**
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/studio-jenial.git
+   cd studio-jenial
+   npm install
+   ```
+
+2. **Configure Supabase**
+   - Create a Supabase project at [supabase.com](https://supabase.com)
+   - Run the SQL script from `supabase-setup.sql` in your Supabase SQL Editor
+   - Copy `.env.example` to `.env.local`
+   - Add your Supabase credentials to `.env.local`:
+     ```bash
+     VITE_SUPABASE_URL=https://your-project.supabase.co
+     VITE_SUPABASE_ANON_KEY=your_anon_key
+     ```
+
+3. **Start Development**
+   ```bash
+   npm run start
+   ```
+   
+4. **Open & Configure**
+   - Open http://localhost:5173
+   - Enter your Gemini API key when prompted
+
+
 
 ### Local Development
 
@@ -87,16 +122,12 @@ git push origin main
 1. Go to [vercel.com](https://vercel.com)
 2. Click "Import Project"
 3. Select your GitHub repo
-4. Deploy! (No environment variables needed for BYOK mode)
+4. **REQUIRED**: Add environment variables:
+   - `VITE_SUPABASE_URL` - Your Supabase project URL
+   - `VITE_SUPABASE_ANON_KEY` - Your Supabase anon key
+5. Deploy!
 
-### 3. Optional: Enable Cloud Sync
-
-If you want users to sync their shots to the cloud:
-
-1. Create a [Supabase](https://supabase.com) project
-2. Add these environment variables in Vercel:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
+> ⚠️ **Important**: Supabase configuration is now **REQUIRED** for storing generated videos and images.
 
 ---
 

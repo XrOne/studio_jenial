@@ -20,6 +20,11 @@ import {
   VeoModel,
   VideoFile,
 } from '../types';
+import {
+  isSupabaseConfigured,
+  uploadVideoToSupabase,
+  uploadImageToSupabase
+} from './supabaseClient';
 
 // ===========================================
 // MODEL CONFIGURATION - Latest Google Models (Nov 2025)
@@ -29,16 +34,16 @@ import {
 const MODELS = {
   // Gemini 3 Pro - Latest reasoning model
   PRO: 'gemini-3-pro-preview',
-  
+
   // Gemini 2.5 Flash - Fast and efficient
   FLASH: 'gemini-2.5-flash',
-  
+
   // Gemini 3 Pro Image (Nano Banana Pro) - High-fidelity image generation
   IMAGE_PRO: 'gemini-3-pro-image-preview',
-  
+
   // Gemini 2.5 Flash Image (Nano Banana) - Fast image generation/editing
   IMAGE_FLASH: 'gemini-2.5-flash-image',
-  
+
   // TTS Preview
   TTS: 'gemini-2.5-flash-preview-tts',
 };
@@ -67,11 +72,11 @@ const API_BASE = '/api';
 
 const apiCall = async (endpoint: string, body: any) => {
   const apiKey = getApiKey();
-  
+
   if (!apiKey) {
     throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
   }
-  
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'x-api-key': apiKey,
@@ -107,7 +112,7 @@ const extractText = (response: any): string => {
 export const generateVideo = async (
   params: GenerateVideoParams,
   signal: AbortSignal,
-): Promise<{objectUrl: string; blob: Blob; uri: string; video: any}> => {
+): Promise<{ objectUrl: string; blob: Blob; uri: string; video: any; supabaseUrl?: string }> => {
   console.log('Starting video generation...', params);
 
   try {
@@ -193,47 +198,60 @@ export const generateVideo = async (
       throw new Error('A prompt description is required.');
     }
 
-    // 1. Start Generation
-    let operation = await apiCall('/generate-videos', payload);
-    console.log('Operation started:', operation);
+    // 1. Start Generation using new API structure
+    const response = await apiCall('/generate-videos', payload);
+    console.log('✅ [Veo] API Response:', JSON.stringify(response, null, 2));
 
-    // 2. Poll Status
-    while (!operation.done) {
-      if (signal.aborted) throw new DOMException('Aborted by user', 'AbortError');
-      await new Promise((resolve) => setTimeout(resolve, 10000));
-      console.log('Polling...');
-      
-      operation = await apiCall('/get-video-operation', {
-        operationName: operation.name
-      });
+    // 2. Extract video from response (new structure from generate_content)
+    if (!response.candidates || response.candidates.length === 0) {
+      throw new Error('No video generated - API returned empty candidates');
     }
 
-    // 3. Process Result
-    if (operation?.response) {
-      const videos = operation.response.generatedVideos;
-      if (!videos || videos.length === 0) throw new Error('No videos generated.');
-
-      const firstVideo = videos[0];
-      const videoUri = firstVideo.video.uri;
-
-      console.log('Downloading video from:', videoUri);
-
-      // 4. Fetch Video via Proxy
-      const apiKey = getApiKey();
-      const res = await fetch(`${API_BASE}/proxy-video?uri=${encodeURIComponent(videoUri)}`, {
-        signal,
-        headers: { 'x-api-key': apiKey }
-      });
-
-      if (!res.ok) throw new Error(`Failed to download video: ${res.statusText}`);
-
-      const videoBlob = await res.blob();
-      const objectUrl = URL.createObjectURL(videoBlob);
-
-      return {objectUrl, blob: videoBlob, uri: videoUri, video: firstVideo.video};
-    } else {
-      throw new Error('Operation completed but no videos found.');
+    const candidate = response.candidates[0];
+    if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+      throw new Error('No content in API response');
     }
+
+    const videoPart = candidate.content.parts.find((part: any) => part.video);
+    if (!videoPart || !videoPart.video || !videoPart.video.uri) {
+      throw new Error('No video URI in response');
+    }
+
+    const videoUri = videoPart.video.uri;
+    console.log('✅ [Veo] Video URI:', videoUri);
+
+    // 3. Fetch Video via Proxy
+    const apiKey = getApiKey();
+    const res = await fetch(`${API_BASE}/proxy-video?uri=${encodeURIComponent(videoUri)}`, {
+      signal,
+      headers: { 'x-api-key': apiKey }
+    });
+
+    if (!res.ok) throw new Error(`Failed to download video: ${res.statusText}`);
+
+    const videoBlob = await res.blob();
+    const objectUrl = URL.createObjectURL(videoBlob);
+
+    // Optional: Upload to Supabase if configured
+    let supabaseUrl: string | null = null;
+    if (isSupabaseConfigured()) {
+      try {
+        console.log('Uploading video to Supabase...');
+        supabaseUrl = await uploadVideoToSupabase(videoBlob, `veo-${params.model}-${Date.now()}.mp4`);
+        console.log('Video uploaded to Supabase:', supabaseUrl);
+      } catch (uploadError) {
+        console.warn('Failed to upload to Supabase (continuing anyway):', uploadError);
+        // Don't fail the whole operation if Supabase upload fails
+      }
+    }
+
+    return {
+      objectUrl,
+      blob: videoBlob,
+      uri: videoUri,
+      video: videoPart.video,
+      supabaseUrl
+    };
 
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
@@ -309,8 +327,8 @@ export const generateSequenceFromConversation = async (
   dogma: Dogma | null,
   duration: number,
   extensionContext?: ImageFile | null,
-): Promise<string | {creativePrompt: string; veoOptimizedPrompt: string}> => {
-  
+): Promise<string | { creativePrompt: string; veoOptimizedPrompt: string }> => {
+
   const contextInstruction = extensionContext
     ? `User wants to EXTEND a video. Last frame provided.`
     : `User wants a NEW video. Duration: ${duration}s.`;
@@ -328,10 +346,10 @@ export const generateSequenceFromConversation = async (
     if (msg.content) parts.push({ text: msg.content });
     if (msg.image) {
       parts.push({
-         inlineData: { 
-           data: msg.image.base64, 
-           mimeType: msg.image.file.type || 'image/jpeg' 
-         }
+        inlineData: {
+          data: msg.image.base64,
+          mimeType: msg.image.file.type || 'image/jpeg'
+        }
       });
     }
     return {
@@ -347,19 +365,19 @@ export const generateSequenceFromConversation = async (
   });
 
   const text = extractText(response);
-  
+
   try {
     const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/);
     const jsonStr = jsonMatch ? jsonMatch[1] : text;
-    
+
     if (jsonStr.trim().startsWith('{')) {
-       const parsed = JSON.parse(jsonStr);
-       if (parsed.creativePrompt && parsed.veoOptimizedPrompt) return parsed;
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.creativePrompt && parsed.veoOptimizedPrompt) return parsed;
     }
   } catch (e) {
     console.log("Parsing JSON failed, returning raw text", e);
   }
-  
+
   return text;
 };
 
@@ -396,6 +414,17 @@ export const editImage = async (
       const res = await fetch(`data:image/png;base64,${base64}`);
       const blob = await res.blob();
       const file = new File([blob], 'edited.png', { type: 'image/png' });
+
+      // Optional: Upload to Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const supabaseUrl = await uploadImageToSupabase(blob, 'edited-image.png');
+          console.log('Edited image uploaded to Supabase:', supabaseUrl);
+        } catch (uploadError) {
+          console.warn('Failed to upload image to Supabase:', uploadError);
+        }
+      }
+
       return { file, base64 };
     }
   }
@@ -403,28 +432,39 @@ export const editImage = async (
 };
 
 export const generateImageFromText = async (prompt: string, dogma: Dogma | null): Promise<ImageFile> => {
-    const dogmaInstruction = dogma?.text ? `\nStyle: ${dogma.text}` : '';
-    
-    const response = await apiCall('/generate-content', {
-      model: MODELS.IMAGE_PRO,
-      contents: { parts: [{ text: prompt + dogmaInstruction }] }
-    });
+  const dogmaInstruction = dogma?.text ? `\nStyle: ${dogma.text}` : '';
 
-    const content = response.candidates?.[0]?.content;
-    for (const part of content.parts) {
-      if (part.inlineData) {
-        const base64 = part.inlineData.data;
-        const res = await fetch(`data:image/png;base64,${base64}`);
-        const blob = await res.blob();
-        return { file: new File([blob], 'gen.png', { type: 'image/png' }), base64 };
+  const response = await apiCall('/generate-content', {
+    model: MODELS.IMAGE_PRO,
+    contents: { parts: [{ text: prompt + dogmaInstruction }] }
+  });
+
+  const content = response.candidates?.[0]?.content;
+  for (const part of content.parts) {
+    if (part.inlineData) {
+      const base64 = part.inlineData.data;
+      const res = await fetch(`data:image/png;base64,${base64}`);
+      const blob = await res.blob();
+
+      // Optional: Upload to Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const supabaseUrl = await uploadImageToSupabase(blob, 'generated-image.png');
+          console.log('Generated image uploaded to Supabase:', supabaseUrl);
+        } catch (uploadError) {
+          console.warn('Failed to upload image to Supabase:', uploadError);
+        }
       }
+
+      return { file: new File([blob], 'gen.png', { type: 'image/png' }), base64 };
     }
-    throw new Error('No image generated');
+  }
+  throw new Error('No image generated');
 };
 
 export const generateCharacterImage = async (
-  prompt: string, 
-  contextImages: { file: File; base64: string }[], 
+  prompt: string,
+  contextImages: { file: File; base64: string }[],
   styleImage: ImageFile | null
 ): Promise<ImageFile> => {
   const parts: any[] = [];
@@ -449,6 +489,17 @@ export const generateCharacterImage = async (
       const base64 = part.inlineData.data;
       const res = await fetch(`data:image/png;base64,${base64}`);
       const blob = await res.blob();
+
+      // Optional: Upload to Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const supabaseUrl = await uploadImageToSupabase(blob, 'character-image.png');
+          console.log('Character image uploaded to Supabase:', supabaseUrl);
+        } catch (uploadError) {
+          console.warn('Failed to upload image to Supabase:', uploadError);
+        }
+      }
+
       return { file: new File([blob], 'char.png', { type: 'image/png' }), base64 };
     }
   }
@@ -470,7 +521,7 @@ export const generateSpeech = async (text: string, voiceName: string): Promise<s
       }
     }
   });
-  
+
   const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!audioData) throw new Error("No audio data received");
   return audioData;
@@ -488,10 +539,10 @@ export const generateStoryboard = async (
   endFrame: ImageFile | null
 ): Promise<Storyboard> => {
   const parts: any[] = [];
-  if(startFrame) parts.push({ inlineData: { data: startFrame.base64, mimeType: startFrame.file.type }, text: "Start Frame" });
-  if(endFrame) parts.push({ inlineData: { data: endFrame.base64, mimeType: endFrame.file.type }, text: "End Frame" });
+  if (startFrame) parts.push({ inlineData: { data: startFrame.base64, mimeType: startFrame.file.type }, text: "Start Frame" });
+  if (endFrame) parts.push({ inlineData: { data: endFrame.base64, mimeType: endFrame.file.type }, text: "End Frame" });
   referenceImages.forEach(img => parts.push({ inlineData: { data: img.base64, mimeType: img.file.type } }));
-  
+
   const systemPrompt = `Create 5-keyframe storyboard JSON for: "${prompt}". Dogma: ${dogma?.text}. Return JSON { "prompt": "", "keyframes": [{ "timestamp": "", "description": "", "imageBase64": "PLACEHOLDER" }] }`;
   parts.push({ text: systemPrompt });
 
@@ -503,17 +554,17 @@ export const generateStoryboard = async (
 
   const text = extractText(response);
   const storyboard = JSON.parse(text);
-  
+
   // Parallel generation for images
   const imagePromises = storyboard.keyframes.map(async (kf: any) => {
     try {
       const img = await generateImageFromText(kf.description, dogma);
       return { ...kf, imageBase64: img.base64 };
-    } catch(e) {
+    } catch (e) {
       return kf;
     }
   });
-  
+
   storyboard.keyframes = await Promise.all(imagePromises);
   return storyboard;
 };
@@ -539,7 +590,7 @@ export const regenerateSinglePrompt = async (
   },
 ): Promise<string> => {
   const { instruction, promptToRevise, dogma, promptBefore, promptAfter } = params;
-  
+
   const systemInstruction = `Revise ONE prompt in a sequence. Dogma: ${dogma?.text}.
   Context: Before: "${promptBefore}", After: "${promptAfter}".
   Target: "${promptToRevise}". User Change: "${instruction}".
@@ -561,7 +612,7 @@ export const regenerateSinglePrompt = async (
 export const reviseFollowingPrompts = async (
   params: ReviseFollowingPromptsParams,
 ): Promise<string[]> => {
-  const {dogma, promptBefore, editedPrompt, promptsToRevise} = params;
+  const { dogma, promptBefore, editedPrompt, promptsToRevise } = params;
   const systemInstruction = `Continuity Editor. Dogma: ${dogma?.text}.
   Before: ${promptBefore}. EDITED: ${editedPrompt}.
   Old Next Prompts: ${JSON.stringify(promptsToRevise)}.
@@ -582,17 +633,17 @@ export const reviseFollowingPrompts = async (
 };
 
 export const getRevisionAssistant = async () => {
-    return null; 
+  return null;
 }
 
 export const getRevisionAssistantResponse = async (params: any) => {
-    const res = await generateSequenceFromConversation(
-        params.messages,
-        params.dogma,
-        0,
-    );
-    if(typeof res === 'string') return res;
-    return { isFinalRevision: true, revisedPrompt: res.veoOptimizedPrompt || res.creativePrompt };
+  const res = await generateSequenceFromConversation(
+    params.messages,
+    params.dogma,
+    0,
+  );
+  if (typeof res === 'string') return res;
+  return { isFinalRevision: true, revisedPrompt: res.veoOptimizedPrompt || res.creativePrompt };
 };
 
 // ===========================================
@@ -600,7 +651,7 @@ export const getRevisionAssistantResponse = async (params: any) => {
 // ===========================================
 
 export const generateDogmaFromMedia = async (
-  mediaFile: File, 
+  mediaFile: File,
   mediaBase64: string
 ): Promise<Omit<Dogma, 'id'>> => {
   const systemPrompt = `You are an expert Art Director. Analyze this media (image or video frame) and extract its "Visual DNA" to create a Dogma for our video generation studio.
@@ -629,9 +680,9 @@ export const generateDogmaFromMedia = async (
   const text = extractText(response);
   const res = JSON.parse(text);
   return {
-      title: res.title || "Extracted Style",
-      text: res.text || "No description generated.",
-      referenceImages: []
+    title: res.title || "Extracted Style",
+    text: res.text || "No description generated.",
+    referenceImages: []
   };
 };
 
@@ -640,28 +691,28 @@ export const analyzeVideoCompliance = async (
   prompt: string,
   dogma: Dogma | null
 ): Promise<ComplianceResult> => {
-    const dogmaText = dogma?.text || "Standard Cinematic Rules";
-    const systemPrompt = `You are the "Critic Agent". Your job is to compare the generated video frame against the User Prompt and the active Dogma.
+  const dogmaText = dogma?.text || "Standard Cinematic Rules";
+  const systemPrompt = `You are the "Critic Agent". Your job is to compare the generated video frame against the User Prompt and the active Dogma.
     Dogma: ${dogmaText}
     Prompt: ${prompt}
     
     Analyze the image. Does it respect the lighting, style, and content requested?
     Output JSON: { "score": number (0-100), "critique": "Short constructive critique (max 2 sentences).", "revisedPrompt": "An improved version of the prompt to fix the issues (optional)." }`;
 
-    const response = await apiCall('/generate-content', {
-        model: MODELS.PRO,
-        contents: {
-            parts: [
-                { inlineData: { data: frameBase64, mimeType: 'image/jpeg' } },
-                { text: "Critique this." }
-            ]
-        },
-        config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: 'application/json'
-        }
-    });
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO,
+    contents: {
+      parts: [
+        { inlineData: { data: frameBase64, mimeType: 'image/jpeg' } },
+        { text: "Critique this." }
+      ]
+    },
+    config: {
+      systemInstruction: systemPrompt,
+      responseMimeType: 'application/json'
+    }
+  });
 
-    const text = extractText(response);
-    return JSON.parse(text);
+  const text = extractText(response);
+  return JSON.parse(text);
 };
