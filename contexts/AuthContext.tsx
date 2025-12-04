@@ -22,6 +22,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [isAdmin, setIsAdmin] = useState(false);
 
     useEffect(() => {
+        if (!supabase) {
+            console.error('Supabase client not initialized. Missing environment variables?');
+            setLoading(false);
+            return;
+        }
+
         // Check active session
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
@@ -50,7 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const checkBetaStatus = async (email: string | undefined) => {
-        if (!email) return;
+        if (!email || !supabase) return;
 
         try {
             // Check if user is in beta_testers table
@@ -79,6 +85,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const signInWithGoogle = async () => {
+        if (!supabase) {
+            alert('Authentication service not configured. Please check environment variables.');
+            return;
+        }
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
