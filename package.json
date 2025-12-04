@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.22.0",
+    "@google-cloud/aiplatform": "^3.0.0",
     "@supabase/supabase-js": "^2.39.3",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
