@@ -5,7 +5,6 @@
  * Uses BYOK (Bring Your Own Key) pattern where credentials are passed per request.
  */
 
-import { PredictionServiceClient } from '@google-cloud/aiplatform';
 import { helpers } from '@google-cloud/aiplatform';
 
 interface VertexConfig {
@@ -27,22 +26,8 @@ export const generateVideoVertex = async (
   const { projectId, location, accessToken } = vertexConfig;
   const endpoint = `https://${location}-aiplatform.googleapis.com`;
 
-  // Initialize client with specific endpoint and credentials
-  const client = new PredictionServiceClient({
-    apiEndpoint: endpoint,
-    credentials: {
-      access_token: accessToken // Using access token provided by frontend (user must generate it)
-      // Note: For a pure API Key flow with Vertex, it's complex. 
-      // Usually Vertex requires OAuth2 or Service Account.
-      // If the user provides a Service Account JSON, we would parse it.
-      // For this implementation, we assume the "Key" provided is an Access Token 
-      // OR we try to use it as an API Key if the library supports it (Vertex usually doesn't support raw API keys for prediction easily without OAuth).
-
-      // HOWEVER, the prompt asks for "Key + ProjectId + Location".
-      // We will treat the "Key" as an Access Token for simplicity in BYOK context, 
-      // or we can try to instantiate with an API Key if the user has one associated with the project.
-    }
-  });
+  // We use manual fetch for BYOK to easily pass the access token
+  // without complex GoogleAuth client setup.
 
   const publisher = 'google';
   const model = params.model || 'veo-2.0-generate-preview'; // Default to a Veo model
