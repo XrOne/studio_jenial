@@ -101,6 +101,8 @@ export interface GenerateVideoParams {
   inputVideo?: VideoFile | null;
   inputVideoObject?: any | null; // Changed from Video to any
   isLooping?: boolean;
+  provider?: VideoProvider;
+  vertexConfig?: VertexConfig;
 }
 
 export interface RegeneratePromptParams {

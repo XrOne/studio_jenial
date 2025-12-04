@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import * as React from 'react';
-import {useCallback, useEffect, useRef, useState} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   generateImageFromText,
   generatePromptFromImage,
@@ -25,6 +25,7 @@ import {
   Storyboard,
   VeoModel,
   VideoFile,
+  VideoProvider,
 } from '../types';
 import AIEditorModal from './AIEditorModal';
 import CameraKit from './CameraKit';
@@ -50,7 +51,7 @@ import {
   XMarkIcon,
   MessageSquareIcon,
 } from './icons';
-import {fileToBase64, ImageUpload} from './PromptForm';
+import { fileToBase64, ImageUpload } from './PromptForm';
 import ImageGenerationModal from './ImageGenerationModal';
 import StoryboardPreviewModal from './StoryboardPreviewModal';
 import VideoAnalysisModal from './VideoAnalysisModal';
@@ -120,12 +121,11 @@ const CustomSelect: React.FC<{
   icon: React.ReactNode;
   children: React.ReactNode;
   disabled?: boolean;
-}> = ({label, value, onChange, icon, children, disabled = false}) => (
+}> = ({ label, value, onChange, icon, children, disabled = false }) => (
   <div>
     <label
-      className={`text-xs block mb-1.5 font-medium ${
-        disabled ? 'text-gray-500' : 'text-gray-400'
-      }`}>
+      className={`text-xs block mb-1.5 font-medium ${disabled ? 'text-gray-500' : 'text-gray-400'
+        }`}>
       {label}
     </label>
     <div className="relative">
@@ -140,9 +140,8 @@ const CustomSelect: React.FC<{
         {children}
       </select>
       <ChevronDownIcon
-        className={`w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${
-          disabled ? 'text-gray-600' : 'text-gray-400'
-        }`}
+        className={`w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${disabled ? 'text-gray-600' : 'text-gray-400'
+          }`}
       />
     </div>
   </div>
@@ -216,6 +215,9 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   >(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const [isBananaOpen, setIsBananaOpen] = useState(false);
+  const [videoProvider, setVideoProvider] = useState<VideoProvider>(
+    (localStorage.getItem('video_provider') as VideoProvider) || VideoProvider.GEMINI
+  );
 
   // --- Assistant-specific State ---
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -340,7 +342,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   }, [userInput, characters, onMentionedCharactersChange]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, finalResult]);
 
   useEffect(() => {
@@ -409,11 +411,11 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
 
     const currentMessages: ChatMessage[] = [
       ...messages,
-      {role: 'user', content: userInput, image: assistantImage},
+      { role: 'user', content: userInput, image: assistantImage },
     ];
     setMessages(currentMessages);
     setUserInput('');
-    
+
     // CRITICAL FIX: Do NOT clear the assistant image here. 
     // We want it to persist in the Context Radar (PromptConception).
     // User can manually remove it with the X button if needed.
@@ -433,7 +435,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
       if (typeof result === 'string') {
         setMessages((prev) => [
           ...prev,
-          {role: 'assistant', content: result, image: null},
+          { role: 'assistant', content: result, image: null },
         ]);
       } else if (result.creativePrompt && result.veoOptimizedPrompt) {
         setFinalResult(result as AssistantResult);
@@ -474,6 +476,12 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
             ? videoForExtension ?? inputVideoObject
             : null,
         isLooping,
+        provider: videoProvider,
+        vertexConfig: videoProvider === VideoProvider.VERTEX ? {
+          projectId: localStorage.getItem('vertex_project_id') || '',
+          location: localStorage.getItem('vertex_location') || '',
+          accessToken: localStorage.getItem('vertex_token') || ''
+        } : undefined,
       };
       onGenerate(params);
     },
@@ -503,10 +511,10 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
       const matches = finalResult.veoOptimizedPrompt.match(mentionRegex);
       const finalMentionedCharacters = matches
         ? characters.filter((char) =>
-            matches
-              .map((m) => m.substring(1).toLowerCase())
-              .includes(char.name.toLowerCase()),
-          )
+          matches
+            .map((m) => m.substring(1).toLowerCase())
+            .includes(char.name.toLowerCase()),
+        )
         : [];
 
       const durationNum = parseInt(duration, 10);
@@ -535,9 +543,9 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
                 for (let i = 0; i < byteString.length; i++) {
                   ia[i] = byteString.charCodeAt(i);
                 }
-                const blob = new Blob([ab], {type: img.type});
-                const file = new File([blob], img.name, {type: img.type});
-                return {file, base64: img.base64};
+                const blob = new Blob([ab], { type: img.type });
+                const file = new File([blob], img.name, { type: img.type });
+                return { file, base64: img.base64 };
               }),
           );
           setCharacterMentionRef(characterImages);
@@ -685,24 +693,24 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   const handleBananaAction = (targetImage?: ImageFile) => {
     const imgToEdit = targetImage || assistantImage;
     if (imgToEdit) {
-        // If image exists, open AI Editor (Banana Edit)
-        setEditingImage({
-            image: imgToEdit,
-            onConfirm: (newImage) => {
-                if (targetImage) {
-                   // If we edited a specific target (like startFrame), update it
-                   if (targetImage === startFrame) setStartFrame(newImage);
-                   if (targetImage === endFrame) setEndFrame(newImage);
-                   // Also update assistant image to keep context
-                   onAssistantImageChange(newImage);
-                } else {
-                   onAssistantImageChange(newImage);
-                }
-            }
-        });
+      // If image exists, open AI Editor (Banana Edit)
+      setEditingImage({
+        image: imgToEdit,
+        onConfirm: (newImage) => {
+          if (targetImage) {
+            // If we edited a specific target (like startFrame), update it
+            if (targetImage === startFrame) setStartFrame(newImage);
+            if (targetImage === endFrame) setEndFrame(newImage);
+            // Also update assistant image to keep context
+            onAssistantImageChange(newImage);
+          } else {
+            onAssistantImageChange(newImage);
+          }
+        }
+      });
     } else {
-        // If no image, open Image Generator (Banana Gen)
-        setIsBananaOpen(true);
+      // If no image, open Image Generator (Banana Gen)
+      setIsBananaOpen(true);
     }
   };
 
@@ -828,70 +836,82 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         <form
           onSubmit={handleFinalSubmit}
           className="w-full flex flex-col gap-3">
-          
-            <div
-              className="p-4 bg-[#2c2c2e] rounded-xl border border-gray-700"
-              title="Advanced generation settings">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <CustomSelect
-                  label="Model"
-                  value={model}
-                  onChange={handleModelChange}
-                  icon={<VideoIcon className="w-5 h-5 text-gray-400" />}>
-                  {Object.entries(modelDisplayNames).map(([key, name]) => (
+
+          <div
+            className="p-4 bg-[#2c2c2e] rounded-xl border border-gray-700"
+            title="Advanced generation settings">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <CustomSelect
+                label="Video Engine"
+                value={videoProvider}
+                onChange={(e) => {
+                  const val = e.target.value as VideoProvider;
+                  setVideoProvider(val);
+                  localStorage.setItem('video_provider', val);
+                }}
+                icon={<VideoIcon className="w-5 h-5 text-gray-400" />}>
+                <option value={VideoProvider.GEMINI}>Gemini API (Default)</option>
+                <option value={VideoProvider.VERTEX}>Vertex AI (Veo)</option>
+              </CustomSelect>
+              <CustomSelect
+                label="Model"
+                value={model}
+                onChange={handleModelChange}
+                icon={<VideoIcon className="w-5 h-5 text-gray-400" />}>
+                {Object.entries(modelDisplayNames).map(([key, name]) => (
+                  <option key={key} value={key}>
+                    {name}
+                  </option>
+                ))}
+              </CustomSelect>
+              <CustomSelect
+                label="Aspect Ratio"
+                value={aspectRatio}
+                onChange={(e) =>
+                  setAspectRatio(e.target.value as AspectRatio)
+                }
+                icon={
+                  <RectangleStackIcon className="w-5 h-5 text-gray-400" />
+                }
+                disabled={
+                  generationMode === GenerationMode.EXTEND_VIDEO &&
+                  !!inputVideoObject
+                }>
+                {Object.entries(aspectRatioDisplayNames).map(
+                  ([key, name]) => (
                     <option key={key} value={key}>
                       {name}
                     </option>
-                  ))}
-                </CustomSelect>
-                <CustomSelect
-                  label="Aspect Ratio"
-                  value={aspectRatio}
-                  onChange={(e) =>
-                    setAspectRatio(e.target.value as AspectRatio)
-                  }
-                  icon={
-                    <RectangleStackIcon className="w-5 h-5 text-gray-400" />
-                  }
-                  disabled={
-                    generationMode === GenerationMode.EXTEND_VIDEO &&
-                    !!inputVideoObject
-                  }>
-                  {Object.entries(aspectRatioDisplayNames).map(
-                    ([key, name]) => (
-                      <option key={key} value={key}>
-                        {name}
-                      </option>
-                    ),
-                  )}
-                </CustomSelect>
-                <CustomSelect
-                  label="Video Quality"
-                  value={resolution}
-                  onChange={(e) =>
-                    setResolution(e.target.value as Resolution)
-                  }
-                  icon={<TvIcon className="w-5 h-5 text-gray-400" />}
-                  disabled={
-                    generationMode === GenerationMode.EXTEND_VIDEO &&
-                    !!inputVideoObject
-                  }>
-                  {Object.entries(qualityDisplayNames).map(([key, name]) => (
-                    <option
-                      key={key}
-                      value={key}
-                      disabled={
-                        model === VeoModel.VEO_FAST && key === Resolution.P1080
-                      }>
-                      {name}{' '}
-                      {model === VeoModel.VEO_FAST && key === Resolution.P1080
-                        ? '(Veo only)'
-                        : ''}
-                    </option>
-                  ))}
-                </CustomSelect>
-              </div>
+                  ),
+                )}
+              </CustomSelect>
+              <CustomSelect
+                label="Video Quality"
+                value={resolution}
+                onChange={(e) =>
+                  setResolution(e.target.value as Resolution)
+                }
+                icon={<TvIcon className="w-5 h-5 text-gray-400" />}
+                disabled={
+                  generationMode === GenerationMode.EXTEND_VIDEO &&
+                  !!inputVideoObject
+                }>
+                {Object.entries(qualityDisplayNames).map(([key, name]) => (
+                  <option
+                    key={key}
+                    value={key}
+                    disabled={
+                      model === VeoModel.VEO_FAST && key === Resolution.P1080
+                    }>
+                    {name}{' '}
+                    {model === VeoModel.VEO_FAST && key === Resolution.P1080
+                      ? '(Veo only)'
+                      : ''}
+                  </option>
+                ))}
+              </CustomSelect>
             </div>
+          </div>
 
           {renderMediaUploads()}
 
@@ -914,11 +934,10 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
                           key={mode}
                           type="button"
                           onClick={() => handleSelectMode(mode)}
-                          className={`w-full flex items-center gap-3 p-2 rounded-md text-left text-sm transition-colors ${
-                            generationMode === mode
+                          className={`w-full flex items-center gap-3 p-2 rounded-md text-left text-sm transition-colors ${generationMode === mode
                               ? 'bg-indigo-600 text-white'
                               : 'text-gray-300 hover:bg-gray-700'
-                          }`}>
+                            }`}>
                           {modeIcons[mode]}
                           <span>{mode}</span>
                         </button>
@@ -934,7 +953,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
                 className="w-full bg-transparent focus:outline-none resize-none text-base text-gray-200 placeholder-gray-500 max-h-48 py-2"
                 rows={1}
               />
-              
+
               <button
                 type="submit"
                 title="Generate Video"
@@ -969,9 +988,8 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
                 type="button"
                 onClick={() => setIsCameraKitOpen((p) => !p)}
                 title="Camera Kit"
-                className={`p-2 rounded-full hover:bg-gray-700 ${
-                  isCameraKitOpen ? 'bg-gray-700 text-white' : 'text-gray-400'
-                }`}>
+                className={`p-2 rounded-full hover:bg-gray-700 ${isCameraKitOpen ? 'bg-gray-700 text-white' : 'text-gray-400'
+                  }`}>
                 <CameraIcon className="w-5 h-5" />
               </button>
               <button
@@ -1008,15 +1026,15 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
       <div className="flex flex-col gap-2 mt-2">
         <div className="flex justify-between items-center border-t border-gray-700 pt-2 px-1">
           <div className="flex items-center gap-1">
-             {/* Banana Button (Edit/Generate Image) */}
-             <button
+            {/* Banana Button (Edit/Generate Image) */}
+            <button
               type="button"
               onClick={() => handleBananaAction()}
               title={assistantImage ? "Edit Image (Banana)" : "Generate Image (Banana)"}
               className="p-2 rounded-full hover:bg-gray-700 text-gray-400">
               <PencilIcon className="w-5 h-5" />
             </button>
-            
+
             <button
               type="button"
               onClick={() => handleGenerateStoryboard(userInput)}
@@ -1032,7 +1050,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
             <button
               type="button"
               onClick={() =>
-                setIsFrameSelectorOpen({onConfirm: onAssistantImageChange})
+                setIsFrameSelectorOpen({ onConfirm: onAssistantImageChange })
               }
               title="Extract Frame from Video"
               className="p-2 rounded-full hover:bg-gray-700 text-gray-400">
@@ -1058,9 +1076,8 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
               type="button"
               onClick={() => setIsCameraKitOpen((p) => !p)}
               title="Camera Kit"
-              className={`p-2 rounded-full hover:bg-gray-700 ${
-                isCameraKitOpen ? 'bg-gray-700 text-white' : 'text-gray-400'
-              }`}>
+              className={`p-2 rounded-full hover:bg-gray-700 ${isCameraKitOpen ? 'bg-gray-700 text-white' : 'text-gray-400'
+                }`}>
               <CameraIcon className="w-5 h-5" />
             </button>
             <button
@@ -1198,56 +1215,56 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
     <div className="bg-[#1f1f1f] border border-gray-700 rounded-2xl h-full flex flex-col shadow-lg">
       {/* Modals */}
       {editingImage && (
-          <AIEditorModal
-            image={editingImage.image}
-            onClose={() => setEditingImage(null)}
-            onConfirm={(newImage) => {
-              editingImage.onConfirm(newImage);
-              setEditingImage(null);
-            }}
-            dogma={activeDogma}
-          />
-        )}
-        {storyboard && (
-          <StoryboardPreviewModal
-            storyboard={storyboard}
-            onClose={() => setStoryboard(null)}
-            onConfirm={handleConfirmStoryboard}
-            onRegenerate={() => handleGenerateStoryboard(prompt)}
-            startFrame={startFrame}
-            endFrame={endFrame}
-          />
-        )}
-        {isFrameSelectorOpen && (
-          <VideoFrameSelectorModal
-            isOpen={!!isFrameSelectorOpen}
-            onClose={() => setIsFrameSelectorOpen(null)}
-            onConfirm={isFrameSelectorOpen.onConfirm}
-          />
-        )}
-        {imageGenerationTarget && (
-          <ImageGenerationModal
-            isOpen={!!imageGenerationTarget}
-            onClose={() => setImageGenerationTarget(null)}
-            onConfirm={(img) => {
-              if (imageGenerationTarget === 'start') setStartFrame(img);
-              if (imageGenerationTarget === 'end') setEndFrame(img);
-              setImageGenerationTarget(null);
-            }}
-            generateImageFn={(p) => generateImageFromText(p, activeDogma)}
-          />
-        )}
-        {isBananaOpen && (
-             <ImageGenerationModal
-                isOpen={isBananaOpen}
-                onClose={() => setIsBananaOpen(false)}
-                onConfirm={(img) => {
-                    onAssistantImageChange(img);
-                    setIsBananaOpen(false);
-                }}
-                generateImageFn={(p) => generateImageFromText(p, activeDogma)}
-            />
-        )}
+        <AIEditorModal
+          image={editingImage.image}
+          onClose={() => setEditingImage(null)}
+          onConfirm={(newImage) => {
+            editingImage.onConfirm(newImage);
+            setEditingImage(null);
+          }}
+          dogma={activeDogma}
+        />
+      )}
+      {storyboard && (
+        <StoryboardPreviewModal
+          storyboard={storyboard}
+          onClose={() => setStoryboard(null)}
+          onConfirm={handleConfirmStoryboard}
+          onRegenerate={() => handleGenerateStoryboard(prompt)}
+          startFrame={startFrame}
+          endFrame={endFrame}
+        />
+      )}
+      {isFrameSelectorOpen && (
+        <VideoFrameSelectorModal
+          isOpen={!!isFrameSelectorOpen}
+          onClose={() => setIsFrameSelectorOpen(null)}
+          onConfirm={isFrameSelectorOpen.onConfirm}
+        />
+      )}
+      {imageGenerationTarget && (
+        <ImageGenerationModal
+          isOpen={!!imageGenerationTarget}
+          onClose={() => setImageGenerationTarget(null)}
+          onConfirm={(img) => {
+            if (imageGenerationTarget === 'start') setStartFrame(img);
+            if (imageGenerationTarget === 'end') setEndFrame(img);
+            setImageGenerationTarget(null);
+          }}
+          generateImageFn={(p) => generateImageFromText(p, activeDogma)}
+        />
+      )}
+      {isBananaOpen && (
+        <ImageGenerationModal
+          isOpen={isBananaOpen}
+          onClose={() => setIsBananaOpen(false)}
+          onConfirm={(img) => {
+            onAssistantImageChange(img);
+            setIsBananaOpen(false);
+          }}
+          generateImageFn={(p) => generateImageFromText(p, activeDogma)}
+        />
+      )}
       {videoForAnalysis && (
         <VideoAnalysisModal
           videoFile={videoForAnalysis}
@@ -1259,151 +1276,147 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
       {/* New Header with Tabs */}
       <header className="flex flex-col border-b border-gray-700 flex-shrink-0">
         <div className="p-4 flex justify-between items-center">
-            <h3 className="text-lg font-semibold text-white">
+          <h3 className="text-lg font-semibold text-white">
             {extensionContext || assistantReferenceVideo
-                ? 'Extension Assistant'
-                : 'Creative Hub'}
-            </h3>
-            {(extensionContext ||
+              ? 'Extension Assistant'
+              : 'Creative Hub'}
+          </h3>
+          {(extensionContext ||
             assistantReferenceVideo ||
             initialValues) && (
-            <button
+              <button
                 onClick={onClearContext}
                 title="Clear the current context and start a new project"
                 className="text-sm text-indigo-400 hover:underline">
                 Start Over
-            </button>
+              </button>
             )}
         </div>
         <div className="flex px-4 gap-4">
-            <button
-                onClick={() => setActiveTab('assistant')}
-                className={`pb-2 text-sm font-medium transition-colors border-b-2 ${
-                    activeTab === 'assistant'
-                        ? 'text-white border-indigo-500'
-                        : 'text-gray-400 border-transparent hover:text-gray-200'
-                }`}
-            >
-                <div className="flex items-center gap-2">
-                    <MessageSquareIcon className="w-4 h-4" />
-                    Assistant
-                </div>
-            </button>
-            <button
-                onClick={() => setActiveTab('studio')}
-                className={`pb-2 text-sm font-medium transition-colors border-b-2 ${
-                    activeTab === 'studio'
-                        ? 'text-white border-indigo-500'
-                        : 'text-gray-400 border-transparent hover:text-gray-200'
-                }`}
-            >
-                <div className="flex items-center gap-2">
-                    <SlidersHorizontalIcon className="w-4 h-4" />
-                    Studio
-                </div>
-            </button>
+          <button
+            onClick={() => setActiveTab('assistant')}
+            className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'assistant'
+                ? 'text-white border-indigo-500'
+                : 'text-gray-400 border-transparent hover:text-gray-200'
+              }`}
+          >
+            <div className="flex items-center gap-2">
+              <MessageSquareIcon className="w-4 h-4" />
+              Assistant
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('studio')}
+            className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'studio'
+                ? 'text-white border-indigo-500'
+                : 'text-gray-400 border-transparent hover:text-gray-200'
+              }`}
+          >
+            <div className="flex items-center gap-2">
+              <SlidersHorizontalIcon className="w-4 h-4" />
+              Studio
+            </div>
+          </button>
         </div>
       </header>
 
       {/* Content Area based on Tab */}
       <div className="flex-grow p-4 flex flex-col gap-4 overflow-y-auto">
-        
-        {activeTab === 'assistant' ? (
-            <>
-                {referenceVideoUrl && (
-                <div className="mb-2 p-2 bg-gray-900/50 rounded-lg border border-gray-700 flex-shrink-0">
-                    <h4 className="text-xs text-center font-semibold text-gray-400 mb-2">
-                    Votre Vidéo de Référence
-                    </h4>
-                    <video
-                    src={referenceVideoUrl}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="w-full rounded-md aspect-video object-cover"
-                    />
-                </div>
-                )}
 
-                <div className="flex-grow space-y-4">
-                {messages.map((msg, index) => (
-                    <div
-                    key={index}
-                    className={`flex ${
-                        msg.role === 'user' ? 'justify-end' : 'justify-start'
+        {activeTab === 'assistant' ? (
+          <>
+            {referenceVideoUrl && (
+              <div className="mb-2 p-2 bg-gray-900/50 rounded-lg border border-gray-700 flex-shrink-0">
+                <h4 className="text-xs text-center font-semibold text-gray-400 mb-2">
+                  Votre Vidéo de Référence
+                </h4>
+                <video
+                  src={referenceVideoUrl}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full rounded-md aspect-video object-cover"
+                />
+              </div>
+            )}
+
+            <div className="flex-grow space-y-4">
+              {messages.map((msg, index) => (
+                <div
+                  key={index}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'
                     }`}>
-                    <div
-                        className={`max-w-[90%] p-3 rounded-2xl flex flex-col gap-2 ${
-                        msg.role === 'user'
-                            ? 'bg-indigo-600 text-white rounded-br-none'
-                            : 'bg-gray-700 text-gray-200 rounded-bl-none'
-                        }`}>
-                        {msg.image && (
-                        <img
-                            src={URL.createObjectURL(msg.image.file)}
-                            alt="Context"
-                            className="rounded-lg max-w-xs border-2 border-indigo-500/50"
-                        />
-                        )}
-                        {msg.content && (
-                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                        )}
-                    </div>
-                    </div>
-                ))}
-                </div>
-                {isLoading && !finalResult && (
-                <div className="flex justify-start">
-                    <div className="p-3 rounded-2xl bg-gray-700 flex items-center gap-2">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                    </div>
-                </div>
-                )}
-                {finalResult && (
-                <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-4">
-                    <div className="space-y-3">
-                    <div>
-                        <h4 className="text-xs font-semibold uppercase text-gray-400 mb-1">
-                        Creative Brief
-                        </h4>
-                        <p className="text-sm text-gray-300 bg-gray-800/50 p-2 rounded-md">
-                        {finalResult.creativePrompt}
-                        </p>
-                    </div>
-                    <div>
-                        <h4 className="text-xs font-semibold uppercase text-green-400 mb-1">
-                        VEO Optimized Prompt
-                        </h4>
-                        <p className="text-sm text-indigo-300 bg-gray-800/50 p-2 rounded-md">
-                        {finalResult.veoOptimizedPrompt}
-                        </p>
-                    </div>
-                    </div>
-                    <button
-                    onClick={handleAcceptFinalPrompt}
-                    disabled={isLoading}
-                    className="w-full flex items-center justify-center gap-2 text-center py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:bg-gray-600 disabled:cursor-wait">
-                    {isLoading && (
-                        <div className="w-5 h-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
+                  <div
+                    className={`max-w-[90%] p-3 rounded-2xl flex flex-col gap-2 ${msg.role === 'user'
+                        ? 'bg-indigo-600 text-white rounded-br-none'
+                        : 'bg-gray-700 text-gray-200 rounded-bl-none'
+                      }`}>
+                    {msg.image && (
+                      <img
+                        src={URL.createObjectURL(msg.image.file)}
+                        alt="Context"
+                        className="rounded-lg max-w-xs border-2 border-indigo-500/50"
+                      />
                     )}
-                    {isLoading
-                        ? 'Processing...'
-                        : parseInt(duration, 10) > 8
-                        ? 'Generate Sequence'
-                        : 'Continue to Configuration'}
-                    </button>
+                    {msg.content && (
+                      <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    )}
+                  </div>
                 </div>
-                )}
-                <div ref={messagesEndRef} />
-            </>
+              ))}
+            </div>
+            {isLoading && !finalResult && (
+              <div className="flex justify-start">
+                <div className="p-3 rounded-2xl bg-gray-700 flex items-center gap-2">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                </div>
+              </div>
+            )}
+            {finalResult && (
+              <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-4">
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase text-gray-400 mb-1">
+                      Creative Brief
+                    </h4>
+                    <p className="text-sm text-gray-300 bg-gray-800/50 p-2 rounded-md">
+                      {finalResult.creativePrompt}
+                    </p>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase text-green-400 mb-1">
+                      VEO Optimized Prompt
+                    </h4>
+                    <p className="text-sm text-indigo-300 bg-gray-800/50 p-2 rounded-md">
+                      {finalResult.veoOptimizedPrompt}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleAcceptFinalPrompt}
+                  disabled={isLoading}
+                  className="w-full flex items-center justify-center gap-2 text-center py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:bg-gray-600 disabled:cursor-wait">
+                  {isLoading && (
+                    <div className="w-5 h-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
+                  )}
+                  {isLoading
+                    ? 'Processing...'
+                    : parseInt(duration, 10) > 8
+                      ? 'Generate Sequence'
+                      : 'Continue to Configuration'}
+                </button>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </>
         ) : (
-             /* Studio Tab Content - Empty here as content is in the form below, or could be help text */
-             <div className="flex-grow flex items-center justify-center text-gray-500">
-                 <p>Configure your video settings below manually.</p>
-             </div>
+          /* Studio Tab Content - Empty here as content is in the form below, or could be help text */
+          <div className="flex-grow flex items-center justify-center text-gray-500">
+            <p>Configure your video settings below manually.</p>
+          </div>
         )}
 
       </div>

@@ -19,9 +19,10 @@ gcloud auth print-access-token
 ## Utilisation dans Studio Jenial
 
 1. Cliquez sur l'icône **Clé (API Key)** en haut à droite.
-2. Dans la section **"Vertex AI Configuration"**, remplissez les champs.
-3. Dans l'interface de génération vidéo ("Video Result"), sélectionnez **"Vertex AI"** dans le menu déroulant "Video Provider".
-4. Cliquez sur **Generate Video**.
+2. Ouvrez la section **"Configure Vertex AI (Optional)"**.
+3. Remplissez les champs (Project ID, Location, Access Token).
+4. Dans l'interface de génération vidéo ("Video Result"), sélectionnez **"Vertex AI (Veo)"** dans le menu déroulant "Video Engine".
+5. Cliquez sur **Generate Video**.
 
 ## Architecture Technique
 

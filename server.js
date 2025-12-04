@@ -1,8 +1,10 @@
+console.log('Server starting...');
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bodyParser from 'body-parser';
 import { GoogleGenAI } from '@google/genai';
+import { generateVideoVertex } from './providers/vertexProvider.ts';
 
 // Load env files (optional - only for local dev convenience)
 dotenv.config({ path: '.env.local' });
@@ -200,21 +202,22 @@ app.get('/api/proxy-video', async (req, res) => {
       throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    res.setHeader('Content-Length', response.headers.get('content-length'));
+    res.setHeader('Content-Type', response.headers.get('content-type'));
 
-    res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader('Content-Length', buffer.length);
-    res.send(buffer);
+    // Stream the response
+    const { pipeline } = await import('stream/promises');
+    await pipeline(response.body, res);
 
   } catch (error) {
-    console.error('Proxy Video Error:', error);
-    res.status(500).json({ error: 'Error fetching video: ' + error.message });
+    console.error('[Veo] Proxy error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to proxy video' });
+    }
   }
 });
 
-// 4. Vertex AI Video Generation (NEW)
-import { generateVideoVertex } from './providers/vertexProvider.ts';
+// 5. Vertex AI Video Generation (NEW)
 
 app.post('/api/video/vertex/generate', async (req, res) => {
   try {
@@ -225,7 +228,7 @@ app.post('/api/video/vertex/generate', async (req, res) => {
     }
 
     console.log(`[Vertex] Request received for model: ${model}`);
-    
+
     const result = await generateVideoVertex(
       { projectId, location, accessToken },
       { model, prompt, config }
