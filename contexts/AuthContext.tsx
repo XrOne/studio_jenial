@@ -8,6 +8,7 @@ interface AuthContextType {
     loading: boolean;
     isBetaTester: boolean;
     isAdmin: boolean;
+    providerToken: string | null;
     signInWithGoogle: () => Promise<void>;
     signOut: () => Promise<void>;
 }
@@ -31,6 +32,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Check active session
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
+            console.log('Auth Session Update:', {
+                hasSession: !!session,
+                hasProviderToken: !!session?.provider_token,
+                providerTokenLength: session?.provider_token?.length
+            });
             setUser(session?.user ?? null);
             if (session?.user) {
                 checkBetaStatus(session.user.email);
@@ -42,6 +48,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
+            console.log('Auth Session Update:', {
+                hasSession: !!session,
+                hasProviderToken: !!session?.provider_token,
+                providerTokenLength: session?.provider_token?.length
+            });
             setUser(session?.user ?? null);
             if (session?.user) {
                 checkBetaStatus(session.user.email);
@@ -93,7 +104,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             provider: 'google',
             options: {
                 scopes: 'https://www.googleapis.com/auth/cloud-platform',
-                redirectTo: window.location.origin
+                redirectTo: window.location.origin,
+                queryParams: {
+                    access_type: 'offline',
+                    prompt: 'consent',
+                },
             }
         });
         if (error) throw error;
@@ -107,7 +122,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     return (
-        <AuthContext.Provider value={{ user, session, loading, isBetaTester, isAdmin, signInWithGoogle, signOut }}>
+        <AuthContext.Provider value={{
+            user,
+            session,
+            loading,
+            isBetaTester,
+            isAdmin,
+            providerToken: session?.provider_token ?? null,
+            signInWithGoogle,
+            signOut
+        }}>
             {children}
         </AuthContext.Provider>
     );

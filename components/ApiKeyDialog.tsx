@@ -9,9 +9,10 @@ import { KeyIcon, Trash2Icon, ShieldCheckIcon, ExternalLinkIcon } from './icons'
 interface ApiKeyDialogProps {
   onContinue: () => void;
   hasCustomKey: boolean;
+  providerToken: string | null;
 }
 
-const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey }) => {
+const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey, providerToken }) => {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -20,6 +21,13 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey })
   const [vertexLocation, setVertexLocation] = useState(window.localStorage.getItem('vertex_location') || 'us-central1');
   const [vertexToken, setVertexToken] = useState(window.localStorage.getItem('vertex_token') || '');
   const [showVertexConfig, setShowVertexConfig] = useState(false);
+
+  // Auto-fill token if available from Google Login
+  React.useEffect(() => {
+    if (providerToken) {
+      setVertexToken(providerToken);
+    }
+  }, [providerToken]);
 
   const validateKey = (key: string): boolean => {
     // Basic validation: Gemini keys start with "AIzaSy" and are ~39 chars
@@ -41,7 +49,10 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey })
     // Save Vertex Config if provided
     if (vertexProjectId) window.localStorage.setItem('vertex_project_id', vertexProjectId.trim());
     if (vertexLocation) window.localStorage.setItem('vertex_location', vertexLocation.trim());
-    if (vertexToken) window.localStorage.setItem('vertex_token', vertexToken.trim());
+
+    // Prioritize providerToken if available, otherwise use manual input
+    const tokenToSave = providerToken || vertexToken;
+    if (tokenToSave) window.localStorage.setItem('vertex_token', tokenToSave.trim());
 
     if (trimmedKey && validateKey(trimmedKey)) {
       window.localStorage.setItem('gemini_api_key', trimmedKey);
@@ -161,13 +172,20 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey })
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Access Token</label>
-                  <input
-                    type="password"
-                    value={vertexToken}
-                    onChange={(e) => setVertexToken(e.target.value)}
-                    placeholder="OAuth Token"
-                    className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none"
-                  />
+                  {providerToken ? (
+                    <div className="w-full bg-green-900/20 border border-green-500/30 rounded p-2 text-green-400 text-xs flex items-center gap-2">
+                      <ShieldCheckIcon className="w-3 h-3" />
+                      Auto-connected via Google Login
+                    </div>
+                  ) : (
+                    <input
+                      type="password"
+                      value={vertexToken}
+                      onChange={(e) => setVertexToken(e.target.value)}
+                      placeholder="OAuth Token"
+                      className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none"
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -192,7 +210,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey })
           )}
           <button
             onClick={handleSave}
-            disabled={!apiKeyInput.trim()}
+            disabled={!apiKeyInput.trim() && !hasCustomKey} // Allow saving if custom key exists (for Vertex updates)
             className="flex-1 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all shadow-lg shadow-indigo-900/20"
           >
             {hasCustomKey ? 'Update Key' : '🚀 Start Creating'}

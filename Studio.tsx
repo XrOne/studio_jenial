@@ -33,6 +33,7 @@ import {
   getApiKey,
   hasCustomApiKey,
 } from './services/geminiService';
+import { useAuth } from './contexts/AuthContext';
 import { generateVideoVertex } from './services/vertexVideoService';
 import {
   AppState,
@@ -978,10 +979,12 @@ const Studio: React.FC = () => {
     setInitialFormValues(null);
   };
 
+  const { providerToken } = useAuth(); // Get provider token
+
   return (
     <ErrorBoundary>
       <div className="w-screen h-screen bg-gray-900 font-sans flex flex-col">
-        {showApiKeyDialog && <ApiKeyDialog onContinue={handleApiKeyContinue} hasCustomKey={hasCustomKey} />}
+        {showApiKeyDialog && <ApiKeyDialog onContinue={handleApiKeyContinue} hasCustomKey={hasCustomKey} providerToken={providerToken} />}
         {isShotLibraryOpen && (
           <ShotLibrary
             isOpen={isShotLibraryOpen}
