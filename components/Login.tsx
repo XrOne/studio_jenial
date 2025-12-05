@@ -12,6 +12,12 @@ export const Login: React.FC = () => {
         e.preventDefault();
         if (!requestEmail) return;
 
+        if (!supabase) {
+            alert('System not configured correctly. Please contact support.');
+            console.error('Supabase client is null. Missing env vars?');
+            return;
+        }
+
         setRequestStatus('submitting');
         try {
             const { error } = await supabase
