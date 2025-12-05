@@ -28,8 +28,19 @@ const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
 const supabaseKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
 console.log('--- SUPABASE DEBUG ---');
-console.log('VITE_SUPABASE_URL exists:', !!supabaseUrl);
-console.log('VITE_SUPABASE_ANON_KEY exists:', !!supabaseKey);
+const rawUrl = import.meta.env.VITE_SUPABASE_URL;
+const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+console.log('VITE_SUPABASE_URL:', {
+  type: typeof rawUrl,
+  length: rawUrl?.length,
+  value: rawUrl ? `${rawUrl.substring(0, 10)}...` : 'N/A'
+});
+console.log('VITE_SUPABASE_ANON_KEY:', {
+  type: typeof rawKey,
+  length: rawKey?.length,
+  value: rawKey ? `${rawKey.substring(0, 5)}...` : 'N/A'
+});
 console.log('import.meta.env keys:', JSON.stringify(Object.keys(import.meta.env)));
 console.log('----------------------');
 
