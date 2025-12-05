@@ -30,7 +30,7 @@ const supabaseKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 console.log('--- SUPABASE DEBUG ---');
 console.log('VITE_SUPABASE_URL exists:', !!supabaseUrl);
 console.log('VITE_SUPABASE_ANON_KEY exists:', !!supabaseKey);
-console.log('import.meta.env keys:', Object.keys(import.meta.env));
+console.log('import.meta.env keys:', JSON.stringify(Object.keys(import.meta.env)));
 console.log('----------------------');
 
 // Only create the client if keys are present
