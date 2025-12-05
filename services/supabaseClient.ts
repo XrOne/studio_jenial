@@ -24,25 +24,14 @@ const getEnvVar = (key: string) => {
   return undefined;
 };
 
-const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
-const supabaseKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
+// Direct access is required for Vite production builds (static replacement)
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-console.log('--- SUPABASE DEBUG ---');
-const rawUrl = import.meta.env.VITE_SUPABASE_URL;
-const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-console.log('VITE_SUPABASE_URL:', {
-  type: typeof rawUrl,
-  length: rawUrl?.length,
-  value: rawUrl ? `${rawUrl.substring(0, 10)}...` : 'N/A'
-});
-console.log('VITE_SUPABASE_ANON_KEY:', {
-  type: typeof rawKey,
-  length: rawKey?.length,
-  value: rawKey ? `${rawKey.substring(0, 5)}...` : 'N/A'
-});
-console.log('import.meta.env keys:', JSON.stringify(Object.keys(import.meta.env)));
-console.log('----------------------');
+console.log('--- SUPABASE CONFIG ---');
+console.log('URL configured:', !!supabaseUrl);
+console.log('Key configured:', !!supabaseKey);
+console.log('-----------------------');
 
 // Only create the client if keys are present
 export const supabase = (supabaseUrl && supabaseKey)
