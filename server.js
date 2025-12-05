@@ -4,7 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import bodyParser from 'body-parser';
 import { GoogleGenAI } from '@google/genai';
-import { generateVideoVertex } from './providers/vertexProvider.ts';
+import { generateVideoVertex } from './providers/vertexProvider.js';
 
 // Load env files (optional - only for local dev convenience)
 dotenv.config({ path: '.env.local' });

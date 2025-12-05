@@ -148,46 +148,73 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey, p
           </button>
 
           {showVertexConfig && (
-            <div className="space-y-3 bg-gray-800/30 p-3 rounded-lg border border-gray-700/50">
+            <div className="space-y-4 bg-gray-800/30 p-4 rounded-lg border border-gray-700/50">
+              {/* Project ID Section */}
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Project ID</label>
+                <div className="flex justify-between items-baseline mb-1">
+                  <label className="text-xs font-semibold text-gray-300">Google Cloud Project ID</label>
+                  <a
+                    href="https://console.cloud.google.com/welcome"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 hover:underline"
+                  >
+                    Find in Console <ExternalLinkIcon className="w-3 h-3" />
+                  </a>
+                </div>
                 <input
                   type="text"
                   value={vertexProjectId}
                   onChange={(e) => setVertexProjectId(e.target.value)}
-                  placeholder="my-gcp-project"
-                  className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none"
+                  placeholder="e.g. jenial-studio-123456"
+                  className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none placeholder-gray-600"
                 />
+                <p className="text-[10px] text-gray-500 mt-1">
+                  ⚠️ Copy the <strong>ID</strong> (often has numbers), not the Name.
+                </p>
               </div>
+
+              {/* Location & Token Section */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-500 block mb-1">Location</label>
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">Location</label>
                   <input
                     type="text"
                     value={vertexLocation}
                     onChange={(e) => setVertexLocation(e.target.value)}
                     placeholder="us-central1"
-                    className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none"
+                    className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none placeholder-gray-600"
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 block mb-1">Access Token</label>
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">
+                    Access Token
+                    {!providerToken && (
+                      <span className="text-[10px] font-normal text-gray-500 ml-1">(Optional for manual)</span>
+                    )}
+                  </label>
                   {providerToken ? (
-                    <div className="w-full bg-green-900/20 border border-green-500/30 rounded p-2 text-green-400 text-xs flex items-center gap-2">
-                      <ShieldCheckIcon className="w-3 h-3" />
-                      Auto-connected via Google Login
+                    <div className="w-full bg-green-900/20 border border-green-500/30 rounded p-2 text-green-400 text-xs flex items-center gap-2 h-[34px]">
+                      <ShieldCheckIcon className="w-3 h-3 flex-shrink-0" />
+                      <span className="truncate">Auto-connected</span>
                     </div>
                   ) : (
                     <input
                       type="password"
                       value={vertexToken}
                       onChange={(e) => setVertexToken(e.target.value)}
-                      placeholder="OAuth Token"
-                      className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none"
+                      placeholder="OAuth 2.0 Token"
+                      className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none placeholder-gray-600"
                     />
                   )}
                 </div>
               </div>
+
+              {!providerToken && (
+                <div className="text-[10px] text-gray-500 bg-gray-800/50 p-2 rounded border border-gray-700">
+                  <span className="font-semibold text-indigo-400">Beta Testers:</span> If you don't have a token, you can leave it blank if using API Key only, or sign in again to auto-connect.
+                </div>
+              )}
             </div>
           )}
         </div>
