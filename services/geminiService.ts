@@ -69,6 +69,7 @@ export const hasCustomApiKey = (): boolean => {
 // ===========================================
 
 const API_BASE = '/api';
+const GOOGLE_FILES_API = 'https://generativelanguage.googleapis.com/upload/v1beta/files';
 
 const apiCall = async (endpoint: string, body: any) => {
   const apiKey = getApiKey();
@@ -106,6 +107,162 @@ const extractText = (response: any): string => {
 };
 
 // ===========================================
+// GOOGLE FILES API - Upload large files directly to Google
+// Bypasses Vercel 4.5MB limit - supports up to 2GB per file
+// ===========================================
+
+interface GoogleFileUploadResult {
+  fileUri: string;
+  mimeType: string;
+  displayName: string;
+}
+
+/**
+ * Upload a file directly to Google Files API (client-side, no Vercel limit)
+ * This uses a resumable upload protocol for reliability with large files
+ * @param file - File or Blob to upload
+ * @param displayName - Optional display name for the file
+ * @returns fileUri that can be used with Gemini/Veo APIs
+ */
+export const uploadToGoogleFiles = async (
+  file: File | Blob,
+  displayName?: string
+): Promise<GoogleFileUploadResult> => {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
+  }
+
+  const mimeType = file instanceof File ? file.type : 'application/octet-stream';
+  const fileName = displayName || (file instanceof File ? file.name : `upload-${Date.now()}`);
+  const numBytes = file.size;
+
+  console.log(`[GoogleFiles] Starting upload: ${fileName} (${(numBytes / 1024 / 1024).toFixed(2)} MB)`);
+
+  // Step 1: Initialize resumable upload
+  const initResponse = await fetch(`${GOOGLE_FILES_API}?key=${apiKey}`, {
+    method: 'POST',
+    headers: {
+      'X-Goog-Upload-Protocol': 'resumable',
+      'X-Goog-Upload-Command': 'start',
+      'X-Goog-Upload-Header-Content-Length': numBytes.toString(),
+      'X-Goog-Upload-Header-Content-Type': mimeType,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      file: { displayName: fileName }
+    }),
+  });
+
+  if (!initResponse.ok) {
+    const errorText = await initResponse.text();
+    throw new Error(`Failed to initialize upload: ${initResponse.status} - ${errorText}`);
+  }
+
+  // Get the upload URL from the response header
+  const uploadUrl = initResponse.headers.get('X-Goog-Upload-URL');
+  if (!uploadUrl) {
+    throw new Error('No upload URL received from Google Files API');
+  }
+
+  console.log('[GoogleFiles] Upload URL received, uploading file...');
+
+  // Step 2: Upload the actual file
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Length': numBytes.toString(),
+      'X-Goog-Upload-Offset': '0',
+      'X-Goog-Upload-Command': 'upload, finalize',
+    },
+    body: file,
+  });
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(`Failed to upload file: ${uploadResponse.status} - ${errorText}`);
+  }
+
+  const result = await uploadResponse.json();
+
+  if (!result.file || !result.file.uri) {
+    throw new Error('No file URI in upload response');
+  }
+
+  console.log(`[GoogleFiles] Upload complete: ${result.file.uri}`);
+
+  return {
+    fileUri: result.file.uri,
+    mimeType: mimeType,
+    displayName: fileName,
+  };
+};
+
+/**
+ * Convert an ImageFile (with base64) to a Google Files URI
+ * Use this for large images that would exceed Vercel's limit
+ */
+export const uploadImageFileToGoogle = async (
+  imageFile: ImageFile
+): Promise<GoogleFileUploadResult> => {
+  // Convert base64 to Blob
+  const response = await fetch(`data:${imageFile.file.type};base64,${imageFile.base64}`);
+  const blob = await response.blob();
+
+  return uploadToGoogleFiles(blob, imageFile.file.name);
+};
+
+/**
+ * Helper to create a fileData part for API calls (instead of inlineData)
+ */
+export const createFileDataPart = (fileUri: string, mimeType: string) => ({
+  fileData: {
+    fileUri,
+    mimeType,
+  }
+});
+
+// Threshold for using Google Files API instead of inline base64
+// Vercel has 4.5MB limit, we use 3MB threshold for safety margin
+const LARGE_FILE_THRESHOLD = 3 * 1024 * 1024; // 3MB
+
+/**
+ * Smart image part creator - uses fileUri for large images, inlineData for small ones
+ * This automatically handles the Vercel 4.5MB limit
+ */
+const createImagePart = async (imageFile: ImageFile): Promise<any> => {
+  // Estimate base64 size (roughly 1.37x the binary size)
+  const estimatedSize = imageFile.base64.length * 0.75;
+
+  if (estimatedSize > LARGE_FILE_THRESHOLD) {
+    // Large file: Upload to Google Files API first
+    console.log(`[SmartUpload] Image ${imageFile.file.name} is large (${(estimatedSize / 1024 / 1024).toFixed(2)}MB), using Google Files API`);
+    const uploadResult = await uploadImageFileToGoogle(imageFile);
+    return {
+      fileData: {
+        fileUri: uploadResult.fileUri,
+        mimeType: uploadResult.mimeType,
+      }
+    };
+  } else {
+    // Small file: Use inline base64
+    return {
+      inlineData: {
+        data: imageFile.base64,
+        mimeType: imageFile.file.type || 'image/jpeg'
+      }
+    };
+  }
+};
+
+/**
+ * Process multiple images, uploading large ones to Google Files API
+ */
+const createImageParts = async (images: ImageFile[]): Promise<any[]> => {
+  return Promise.all(images.map(img => createImagePart(img)));
+};
+
+// ===========================================
 // VIDEO GENERATION (VEO)
 // ===========================================
 
@@ -138,13 +295,18 @@ export const generateVideo = async (
 
     let finalPrompt = params.prompt;
 
-    // Build payload based on mode
+    // Build payload based on mode - NOW USING GOOGLE FILES API FOR LARGE UPLOADS
     if (params.mode === GenerationMode.FRAMES_TO_VIDEO) {
       if (params.startFrame) {
+        // Upload to Google Files API first (bypasses Vercel 4.5MB limit)
+        console.log('[Veo] Uploading start frame to Google Files API...');
+        const uploadResult = await uploadImageFileToGoogle(params.startFrame);
+
         payload.image = {
-          imageBytes: params.startFrame.base64,
-          mimeType: params.startFrame.file.type || 'image/jpeg',
+          fileUri: uploadResult.fileUri,
+          mimeType: uploadResult.mimeType,
         };
+
         const instruction =
           'CRITICAL INSTRUCTION: You are to animate the provided image, NOT reinterpret it. The very first frame of the video MUST be pixel-perfect identical to the provided start image. DO NOT add, remove, or change any characters, objects, or environmental elements present in the image. The composition is fixed. Your only task is to create motion, animating ONLY what is already there.\n\n';
         finalPrompt = instruction + finalPrompt;
@@ -152,33 +314,45 @@ export const generateVideo = async (
 
       const finalEndFrame = params.isLooping ? params.startFrame : params.endFrame;
       if (finalEndFrame) {
+        // Upload end frame to Google Files API
+        console.log('[Veo] Uploading end frame to Google Files API...');
+        const endFrameUpload = await uploadImageFileToGoogle(finalEndFrame);
+
         payload.config.lastFrame = {
-          imageBytes: finalEndFrame.base64,
-          mimeType: finalEndFrame.file.type || 'image/jpeg',
+          fileUri: endFrameUpload.fileUri,
+          mimeType: endFrameUpload.mimeType,
         };
       }
     } else if (params.mode === GenerationMode.REFERENCES_TO_VIDEO) {
       const referenceImagesPayload: any[] = [];
+
+      // Upload all reference images to Google Files API
       if (params.referenceImages) {
+        console.log(`[Veo] Uploading ${params.referenceImages.length} reference images to Google Files API...`);
         for (const img of params.referenceImages) {
+          const uploadResult = await uploadImageFileToGoogle(img);
           referenceImagesPayload.push({
             image: {
-              imageBytes: img.base64,
-              mimeType: img.file.type || 'image/jpeg',
+              fileUri: uploadResult.fileUri,
+              mimeType: uploadResult.mimeType,
             },
             referenceType: 'ASSET',
           });
         }
       }
+
       if (params.styleImage) {
+        console.log('[Veo] Uploading style image to Google Files API...');
+        const styleUpload = await uploadImageFileToGoogle(params.styleImage);
         referenceImagesPayload.push({
           image: {
-            imageBytes: params.styleImage.base64,
-            mimeType: params.styleImage.file.type || 'image/jpeg',
+            fileUri: styleUpload.fileUri,
+            mimeType: styleUpload.mimeType,
           },
           referenceType: 'STYLE',
         });
       }
+
       if (referenceImagesPayload.length > 0) {
         payload.config.referenceImages = referenceImagesPayload;
       }
@@ -265,11 +439,14 @@ export const generateVideo = async (
 // ===========================================
 
 export const generatePromptFromImage = async (image: ImageFile): Promise<string> => {
+  // Use smart upload for large images
+  const imagePart = await createImagePart(image);
+
   const response = await apiCall('/generate-content', {
     model: MODELS.PRO,
     contents: {
       parts: [
-        { inlineData: { data: image.base64, mimeType: image.file.type || 'image/jpeg' } },
+        imagePart,
         { text: 'Describe this image in a creative and detailed way to be used as a prompt for a video generation model. Focus on action, mood, and visual details. The description should be a single, cohesive paragraph.' }
       ]
     }
@@ -391,9 +568,8 @@ export const editImage = async (
   dogma: Dogma | null,
   modelName: string = MODELS.IMAGE_FLASH
 ): Promise<ImageFile> => {
-  const imageParts = images.map(img => ({
-    inlineData: { data: img.base64, mimeType: img.file.type || 'image/jpeg' }
-  }));
+  // Use smart upload for large images
+  const imageParts = await createImageParts(images);
 
   const dogmaInstruction = dogma?.text ? `\nDogma: ${dogma.text}` : '';
   const finalPrompt = `Task: Edit image based on prompt. @image1 is target. Prompt: ${prompt}${dogmaInstruction}`;
@@ -468,14 +644,20 @@ export const generateCharacterImage = async (
   styleImage: ImageFile | null
 ): Promise<ImageFile> => {
   const parts: any[] = [];
-  contextImages.forEach(img => parts.push({
-    inlineData: { data: img.base64, mimeType: img.file.type }
-  }));
-  if (styleImage) {
-    parts.push({
-      inlineData: { data: styleImage.base64, mimeType: styleImage.file.type }
-    });
+
+  // Use smart upload for large context images
+  for (const img of contextImages) {
+    const imageFile: ImageFile = { file: img.file, base64: img.base64 };
+    const imagePart = await createImagePart(imageFile);
+    parts.push(imagePart);
   }
+
+  // Use smart upload for style image if provided
+  if (styleImage) {
+    const stylePart = await createImagePart(styleImage);
+    parts.push(stylePart);
+  }
+
   parts.push({ text: prompt });
 
   const response = await apiCall('/generate-content', {
@@ -539,9 +721,22 @@ export const generateStoryboard = async (
   endFrame: ImageFile | null
 ): Promise<Storyboard> => {
   const parts: any[] = [];
-  if (startFrame) parts.push({ inlineData: { data: startFrame.base64, mimeType: startFrame.file.type }, text: "Start Frame" });
-  if (endFrame) parts.push({ inlineData: { data: endFrame.base64, mimeType: endFrame.file.type }, text: "End Frame" });
-  referenceImages.forEach(img => parts.push({ inlineData: { data: img.base64, mimeType: img.file.type } }));
+
+  // Use smart upload for large images
+  if (startFrame) {
+    const startPart = await createImagePart(startFrame);
+    parts.push(startPart);
+    parts.push({ text: "Start Frame" });
+  }
+  if (endFrame) {
+    const endPart = await createImagePart(endFrame);
+    parts.push(endPart);
+    parts.push({ text: "End Frame" });
+  }
+  for (const img of referenceImages) {
+    const refPart = await createImagePart(img);
+    parts.push(refPart);
+  }
 
   const systemPrompt = `Create 5-keyframe storyboard JSON for: "${prompt}". Dogma: ${dogma?.text}. Return JSON { "prompt": "", "keyframes": [{ "timestamp": "", "description": "", "imageBase64": "PLACEHOLDER" }] }`;
   parts.push({ text: systemPrompt });
@@ -659,15 +854,19 @@ export const generateDogmaFromMedia = async (
   1. Visual Rules (Lighting, Color Palette, Texture, Composition).
   2. Camera Movement style.
   3. Negative Prompts (what to avoid to maintain this style).
-  
+
   Output JSON ONLY: { "title": "Name of Style", "text": "Detailed markdown instructions...", "referenceImages": [] }
   For the text field, use the structure: ### RULES, ### LIGHTING, ### CAMERA, ### NEGATIVE PROMPT.`;
+
+  // Use smart upload for large media files
+  const imageFile: ImageFile = { file: mediaFile, base64: mediaBase64 };
+  const mediaPart = await createImagePart(imageFile);
 
   const response = await apiCall('/generate-content', {
     model: MODELS.PRO,
     contents: {
       parts: [
-        { inlineData: { data: mediaBase64, mimeType: mediaFile.type } },
+        mediaPart,
         { text: "Extract DNA." }
       ]
     },
@@ -695,15 +894,38 @@ export const analyzeVideoCompliance = async (
   const systemPrompt = `You are the "Critic Agent". Your job is to compare the generated video frame against the User Prompt and the active Dogma.
     Dogma: ${dogmaText}
     Prompt: ${prompt}
-    
+
     Analyze the image. Does it respect the lighting, style, and content requested?
     Output JSON: { "score": number (0-100), "critique": "Short constructive critique (max 2 sentences).", "revisedPrompt": "An improved version of the prompt to fix the issues (optional)." }`;
+
+  // Create a dummy ImageFile for smart upload handling
+  const estimatedSize = frameBase64.length * 0.75;
+  let imagePart: any;
+
+  if (estimatedSize > LARGE_FILE_THRESHOLD) {
+    // Large frame: Upload to Google Files API first
+    console.log(`[SmartUpload] Frame is large (${(estimatedSize / 1024 / 1024).toFixed(2)}MB), using Google Files API`);
+    const response = await fetch(`data:image/jpeg;base64,${frameBase64}`);
+    const blob = await response.blob();
+    const uploadResult = await uploadToGoogleFiles(blob, `frame-${Date.now()}.jpg`);
+    imagePart = {
+      fileData: {
+        fileUri: uploadResult.fileUri,
+        mimeType: 'image/jpeg',
+      }
+    };
+  } else {
+    // Small frame: Use inline base64
+    imagePart = {
+      inlineData: { data: frameBase64, mimeType: 'image/jpeg' }
+    };
+  }
 
   const response = await apiCall('/generate-content', {
     model: MODELS.PRO,
     contents: {
       parts: [
-        { inlineData: { data: frameBase64, mimeType: 'image/jpeg' } },
+        imagePart,
         { text: "Critique this." }
       ]
     },

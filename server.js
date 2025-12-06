@@ -91,6 +91,7 @@ app.post('/api/generate-content', async (req, res) => {
 });
 
 // 2. Video Generation (Veo) - Using Official API
+// Now supports both inlineData (base64) and fileUri (Google Files API)
 app.post('/api/generate-videos', async (req, res) => {
   try {
     const ai = getClient(req);
@@ -105,13 +106,26 @@ app.post('/api/generate-videos', async (req, res) => {
     }
 
     // Add image if provided (for image-to-video)
+    // Supports both fileUri (new) and imageBytes (legacy)
     if (payload.image) {
-      parts.push({
-        inlineData: {
-          data: payload.image.imageBytes,
-          mimeType: payload.image.mimeType || 'image/jpeg'
-        }
-      });
+      if (payload.image.fileUri) {
+        // New: Using Google Files API URI (no size limit)
+        console.log('[Veo] Using fileUri for start frame:', payload.image.fileUri);
+        parts.push({
+          fileData: {
+            fileUri: payload.image.fileUri,
+            mimeType: payload.image.mimeType || 'image/jpeg'
+          }
+        });
+      } else if (payload.image.imageBytes) {
+        // Legacy: Using base64 inline data
+        parts.push({
+          inlineData: {
+            data: payload.image.imageBytes,
+            mimeType: payload.image.mimeType || 'image/jpeg'
+          }
+        });
+      }
     }
 
     // Build generation config
@@ -120,23 +134,50 @@ app.post('/api/generate-videos', async (req, res) => {
     };
 
     // Add reference images if provided
+    // Supports both fileUri (new) and imageBytes (legacy)
     if (payload.config?.referenceImages) {
-      generationConfig.referenceImages = payload.config.referenceImages.map(ref => ({
-        inlineData: {
-          data: ref.image.imageBytes,
-          mimeType: ref.image.mimeType || 'image/jpeg'
+      generationConfig.referenceImages = payload.config.referenceImages.map(ref => {
+        if (ref.image.fileUri) {
+          // New: Using Google Files API URI
+          return {
+            fileData: {
+              fileUri: ref.image.fileUri,
+              mimeType: ref.image.mimeType || 'image/jpeg'
+            }
+          };
+        } else {
+          // Legacy: Using base64 inline data
+          return {
+            inlineData: {
+              data: ref.image.imageBytes,
+              mimeType: ref.image.mimeType || 'image/jpeg'
+            }
+          };
         }
-      }));
+      });
     }
 
     // Add last frame if provided
+    // Supports both fileUri (new) and imageBytes (legacy)
     if (payload.config?.lastFrame) {
-      generationConfig.lastFrame = {
-        inlineData: {
-          data: payload.config.lastFrame.imageBytes,
-          mimeType: payload.config.lastFrame.mimeType || 'image/jpeg'
-        }
-      };
+      if (payload.config.lastFrame.fileUri) {
+        // New: Using Google Files API URI
+        console.log('[Veo] Using fileUri for last frame:', payload.config.lastFrame.fileUri);
+        generationConfig.lastFrame = {
+          fileData: {
+            fileUri: payload.config.lastFrame.fileUri,
+            mimeType: payload.config.lastFrame.mimeType || 'image/jpeg'
+          }
+        };
+      } else if (payload.config.lastFrame.imageBytes) {
+        // Legacy: Using base64 inline data
+        generationConfig.lastFrame = {
+          inlineData: {
+            data: payload.config.lastFrame.imageBytes,
+            mimeType: payload.config.lastFrame.mimeType || 'image/jpeg'
+          }
+        };
+      }
     }
 
     console.log('[Veo] Calling generate_content...');

@@ -73,7 +73,7 @@ export const Login: React.FC = () => {
                         ) : (
                             <button
                                 onClick={() => setRequestEmail(user.email || '')}
-                                disabled={requestStatus === 'submitting' || requestStatus === 'success'}
+                                disabled={requestStatus === 'submitting'}
                                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
                             >
                                 {requestStatus === 'submitting' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Request Access for this Email'}
