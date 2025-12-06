@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(del \"C:\\Users\\User\\.claude-worktrees\\studio_jenial\\serene-chebyshev\\services\\veoService.ts\")",
+      "Bash(npm run build:*)",
+      "Bash(npm install)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix(veo): use predictLongRunning API with instances format for BYOK\n\n- Server: Add /api/veo/start and /api/veo/status endpoints using\n  predictLongRunning with { instances: [{ prompt }] } format\n- Server: Fix auth to use x-goog-api-key header (not query param)\n- Server: Secure /api/proxy-video to only allow Google Files API URLs\n  and block private/local IPs (SSRF protection)\n- Client: Update generateVideo to poll new endpoints correctly\n- Add scripts/test-veo-smoke.mjs for end-to-end testing with BYOK\n\nBreaking: Veo generation now uses async polling instead of sync response.\nThe new flow: start -> poll status -> download via proxy\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(del \"C:\\Users\\User\\.claude-worktrees\\studio_jenial\\serene-chebyshev\\providers\\vertexProvider.js\" \"C:\\Users\\User\\.claude-worktrees\\studio_jenial\\serene-chebyshev\\providers\\vertexProvider.ts\" \"C:\\Users\\User\\.claude-worktrees\\studio_jenial\\serene-chebyshev\\services\\vertexVideoService.ts\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
