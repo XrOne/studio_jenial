@@ -119,7 +119,8 @@ app.post('/api/generate-content', async (req, res) => {
 
 // 2. Video Generation (Veo) - Start generation using predictLongRunning
 // Uses instances format required by Veo 3.1 models
-app.post('/api/veo/start', async (req, res) => {
+// Spec endpoint: POST /api/video/generate -> { operationName }
+app.post('/api/video/generate', async (req, res) => {
   try {
     const apiKey = getApiKey(req);
     const { model, prompt, parameters } = req.body;
@@ -183,13 +184,15 @@ app.post('/api/veo/start', async (req, res) => {
 });
 
 // 3. Poll Video Operation Status
-app.get('/api/veo/status', async (req, res) => {
+// Spec endpoint: GET /api/video/status?name=... -> { done, videoUri? }
+app.get('/api/video/status', async (req, res) => {
   try {
     const apiKey = getApiKey(req);
-    const operationName = req.query.operationName;
+    // Support both 'name' (spec) and 'operationName' (legacy) query params
+    const operationName = req.query.name || req.query.operationName;
 
     if (!operationName) {
-      return res.status(400).json({ error: 'operationName query parameter is required' });
+      return res.status(400).json({ error: 'name query parameter is required' });
     }
 
     console.log('[Veo] Polling operation:', operationName);

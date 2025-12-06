@@ -9,21 +9,26 @@ if (!apiKey) {
     process.exit(1);
 }
 
-const MODEL = 'veo-3.1-generate-preview';
+const MODEL = 'veo-3.1-fast-generate-preview';
 const PROMPT = 'A bird flying';
+const VEO_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-async function testEndpoint(version, method) {
-    const url = `https://generativelanguage.googleapis.com/${version}/models/${MODEL}:${method}?key=${apiKey}`;
+async function testPredictLongRunning() {
+    console.log('\n🧪 Test predictLongRunning avec format instances...');
+    console.log(`Model: ${MODEL}`);
+    console.log(`Prompt: "${PROMPT}"`);
 
-    console.log(`\n🧪 Test ${version} / ${method}...`);
-    console.log(`URL: https://generativelanguage.googleapis.com/${version}/models/${MODEL}:${method}`);
+    const url = `${VEO_API_BASE}/models/${MODEL}:predictLongRunning`;
 
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey  // Header auth, not query param
+            },
             body: JSON.stringify({
-                contents: [{ parts: [{ text: PROMPT }] }]
+                instances: [{ prompt: PROMPT }]  // MUST use instances format
             })
         });
 
@@ -31,52 +36,71 @@ async function testEndpoint(version, method) {
 
         if (response.ok) {
             console.log('✅ SUCCÈS !');
-            console.log('Structure réponse:', Object.keys(data));
-            return true;
+            console.log('Operation name:', data.name);
+            return data.name;
         } else {
             console.log('❌ ÉCHEC');
             console.log('Status:', response.status);
-            console.log('Erreur:', data.error?.message || data);
-            return false;
+            console.log('Erreur:', data.error?.message || JSON.stringify(data));
+            return null;
         }
     } catch (error) {
         console.log('❌ ERREUR RÉSEAU:', error.message);
-        return false;
+        return null;
     }
 }
 
-async function runTests() {
-    console.log('🔍 DÉBUT DU DIAGNOSTIC VEO 3.1');
-    console.log('--------------------------------');
+async function pollOperation(operationName) {
+    console.log('\n🔄 Polling operation...');
 
-    // Test 1: v1beta generateContent (Ce qu'on utilise actuellement)
-    await testEndpoint('v1beta', 'generateContent');
+    const pollUrl = `${VEO_API_BASE}/${operationName}`;
 
-    // Test 2: v1alpha generateContent
-    await testEndpoint('v1alpha', 'generateContent');
-
-    // Test 3: v1alpha generateVideos (Ancienne méthode)
-    // Note: generateVideos a une structure de body différente, on teste juste si l'endpoint existe
-    const urlVideo = `https://generativelanguage.googleapis.com/v1alpha/models/${MODEL}:generateVideos?key=${apiKey}`;
-    console.log(`\n🧪 Test v1alpha / generateVideos...`);
-    try {
-        const response = await fetch(urlVideo, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt: PROMPT // Structure différente pour generateVideos
-            })
-        });
-        const data = await response.json();
-        if (response.ok) {
-            console.log('✅ SUCCÈS (generateVideos) !');
-        } else {
-            console.log('❌ ÉCHEC (generateVideos)');
-            console.log('Erreur:', data.error?.message);
+    const response = await fetch(pollUrl, {
+        headers: {
+            'x-goog-api-key': apiKey
         }
-    } catch (e) { console.log(e.message); }
+    });
 
-    console.log('\n--------------------------------');
+    const data = await response.json();
+
+    if (!response.ok) {
+        console.log('❌ Poll error:', data.error?.message);
+        return null;
+    }
+
+    console.log('Done:', data.done);
+    if (data.done) {
+        const videoUri = data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+        console.log('Video URI:', videoUri);
+        return { done: true, videoUri };
+    }
+
+    return { done: false };
+}
+
+async function runTests() {
+    console.log('🔍 DÉBUT DU DIAGNOSTIC VEO');
+    console.log('================================');
+    console.log('Format: predictLongRunning + instances');
+    console.log('Auth: x-goog-api-key header');
+    console.log('================================');
+
+    // Test: Start generation
+    const operationName = await testPredictLongRunning();
+
+    if (operationName) {
+        // Wait a bit and poll once
+        console.log('\n⏳ Attente 5s avant poll...');
+        await new Promise(r => setTimeout(r, 5000));
+
+        const status = await pollOperation(operationName);
+        if (status && !status.done) {
+            console.log('\n💡 La génération est en cours.');
+            console.log('   Utilisez scripts/test-veo-smoke.mjs pour un test complet.');
+        }
+    }
+
+    console.log('\n================================');
     console.log('🏁 DIAGNOSTIC TERMINÉ');
 }
 

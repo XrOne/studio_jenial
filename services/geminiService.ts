@@ -322,11 +322,11 @@ export const generateVideo = async (
       }
     }
 
-    // 1. Start Generation using new /api/veo/start endpoint
+    // 1. Start Generation using /api/video/generate endpoint
     onProgress?.('Starting video generation...');
-    console.log('[Veo] Calling /api/veo/start...');
+    console.log('[Veo] Calling /api/video/generate...');
 
-    const startResponse = await fetch(`${API_BASE}/veo/start`, {
+    const startResponse = await fetch(`${API_BASE}/video/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -368,7 +368,7 @@ export const generateVideo = async (
       console.log(`[Veo] Polling... (${pollCount * 5}s elapsed)`);
 
       const statusResponse = await fetch(
-        `${API_BASE}/veo/status?operationName=${encodeURIComponent(operationName)}`,
+        `${API_BASE}/video/status?name=${encodeURIComponent(operationName)}`,
         {
           method: 'GET',
           headers: {

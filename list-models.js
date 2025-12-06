@@ -10,11 +10,15 @@ if (!apiKey) {
 async function listModels() {
     console.log('🔍 Recherche des modèles disponibles...');
 
-    // Essayer v1beta
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    // Essayer v1beta avec header auth (not query param)
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models';
 
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            headers: {
+                'x-goog-api-key': apiKey
+            }
+        });
         const data = await response.json();
 
         if (!response.ok) {
