@@ -139,8 +139,8 @@ export const uploadToGoogleFiles = async (
 
   console.log(`[GoogleFiles] Starting upload: ${fileName} (${(numBytes / 1024 / 1024).toFixed(2)} MB)`);
 
-  // Step 1: Initialize resumable upload
-  const initResponse = await fetch(`${GOOGLE_FILES_API}?key=${apiKey}`, {
+  // Step 1: Initialize resumable upload (use header auth, not query param)
+  const initResponse = await fetch(GOOGLE_FILES_API, {
     method: 'POST',
     headers: {
       'X-Goog-Upload-Protocol': 'resumable',
@@ -148,6 +148,7 @@ export const uploadToGoogleFiles = async (
       'X-Goog-Upload-Header-Content-Length': numBytes.toString(),
       'X-Goog-Upload-Header-Content-Type': mimeType,
       'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
     },
     body: JSON.stringify({
       file: { displayName: fileName }
