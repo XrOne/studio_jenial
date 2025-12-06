@@ -263,173 +263,191 @@ const createImageParts = async (images: ImageFile[]): Promise<any[]> => {
 };
 
 // ===========================================
-// VIDEO GENERATION (VEO)
+// VIDEO GENERATION (VEO) - Using predictLongRunning API
 // ===========================================
+
+interface VeoStartResponse {
+  operationName: string;
+}
+
+interface VeoStatusResponse {
+  done: boolean;
+  videoUri?: string;
+  error?: string;
+}
 
 export const generateVideo = async (
   params: GenerateVideoParams,
   signal: AbortSignal,
+  onProgress?: (status: string) => void,
 ): Promise<{ objectUrl: string; blob: Blob; uri: string; video: any; supabaseUrl?: string }> => {
-  console.log('Starting video generation...', params);
+  console.log('[Veo] Starting video generation...', params);
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
+  }
 
   try {
-    const config: any = {
-      numberOfVideos: 1,
-    };
+    // Build parameters for the API
+    const parameters: Record<string, any> = {};
 
     if (params.mode !== GenerationMode.REFERENCES_TO_VIDEO) {
-      config.resolution = params.resolution;
+      if (params.resolution) {
+        parameters.resolution = params.resolution;
+      }
     }
 
-    if (
-      params.mode !== GenerationMode.EXTEND_VIDEO &&
-      params.mode !== GenerationMode.REFERENCES_TO_VIDEO
-    ) {
-      config.aspectRatio = params.aspectRatio;
+    if (params.mode !== GenerationMode.EXTEND_VIDEO &&
+        params.mode !== GenerationMode.REFERENCES_TO_VIDEO) {
+      if (params.aspectRatio) {
+        parameters.aspectRatio = params.aspectRatio;
+      }
     }
 
-    const payload: any = {
-      model: params.model,
-      config: config,
-    };
-
+    // Build prompt with any necessary instructions
     let finalPrompt = params.prompt;
 
-    // Build payload based on mode - NOW USING GOOGLE FILES API FOR LARGE UPLOADS
-    if (params.mode === GenerationMode.FRAMES_TO_VIDEO) {
-      if (params.startFrame) {
-        // Upload to Google Files API first (bypasses Vercel 4.5MB limit)
-        console.log('[Veo] Uploading start frame to Google Files API...');
-        const uploadResult = await uploadImageFileToGoogle(params.startFrame);
+    if (params.mode === GenerationMode.FRAMES_TO_VIDEO && params.startFrame) {
+      const instruction =
+        'CRITICAL INSTRUCTION: You are to animate the provided image, NOT reinterpret it. The very first frame of the video MUST be pixel-perfect identical to the provided start image. DO NOT add, remove, or change any characters, objects, or environmental elements present in the image. The composition is fixed. Your only task is to create motion, animating ONLY what is already there.\n\n';
+      finalPrompt = instruction + finalPrompt;
+    }
 
-        payload.image = {
-          fileUri: uploadResult.fileUri,
-          mimeType: uploadResult.mimeType,
-        };
-
-        const instruction =
-          'CRITICAL INSTRUCTION: You are to animate the provided image, NOT reinterpret it. The very first frame of the video MUST be pixel-perfect identical to the provided start image. DO NOT add, remove, or change any characters, objects, or environmental elements present in the image. The composition is fixed. Your only task is to create motion, animating ONLY what is already there.\n\n';
-        finalPrompt = instruction + finalPrompt;
-      }
-
-      const finalEndFrame = params.isLooping ? params.startFrame : params.endFrame;
-      if (finalEndFrame) {
-        // Upload end frame to Google Files API
-        console.log('[Veo] Uploading end frame to Google Files API...');
-        const endFrameUpload = await uploadImageFileToGoogle(finalEndFrame);
-
-        payload.config.lastFrame = {
-          fileUri: endFrameUpload.fileUri,
-          mimeType: endFrameUpload.mimeType,
-        };
-      }
-    } else if (params.mode === GenerationMode.REFERENCES_TO_VIDEO) {
-      const referenceImagesPayload: any[] = [];
-
-      // Upload all reference images to Google Files API
-      if (params.referenceImages) {
-        console.log(`[Veo] Uploading ${params.referenceImages.length} reference images to Google Files API...`);
-        for (const img of params.referenceImages) {
-          const uploadResult = await uploadImageFileToGoogle(img);
-          referenceImagesPayload.push({
-            image: {
-              fileUri: uploadResult.fileUri,
-              mimeType: uploadResult.mimeType,
-            },
-            referenceType: 'ASSET',
-          });
-        }
-      }
-
-      if (params.styleImage) {
-        console.log('[Veo] Uploading style image to Google Files API...');
-        const styleUpload = await uploadImageFileToGoogle(params.styleImage);
-        referenceImagesPayload.push({
-          image: {
-            fileUri: styleUpload.fileUri,
-            mimeType: styleUpload.mimeType,
-          },
-          referenceType: 'STYLE',
-        });
-      }
-
-      if (referenceImagesPayload.length > 0) {
-        payload.config.referenceImages = referenceImagesPayload;
-      }
-    } else if (params.mode === GenerationMode.EXTEND_VIDEO) {
-      if (params.inputVideoObject) {
-        payload.video = params.inputVideoObject;
+    if (!finalPrompt.trim()) {
+      if (params.mode === GenerationMode.EXTEND_VIDEO) {
+        finalPrompt = 'Continue the scene.';
       } else {
-        throw new Error('An input video object is required to extend a video.');
+        throw new Error('A prompt description is required.');
       }
     }
 
-    if (finalPrompt.trim()) {
-      payload.prompt = finalPrompt.trim();
-    } else if (params.mode === GenerationMode.EXTEND_VIDEO) {
-      payload.prompt = 'Continue the scene.';
-    } else {
-      throw new Error('A prompt description is required.');
+    // 1. Start Generation using new /api/veo/start endpoint
+    onProgress?.('Starting video generation...');
+    console.log('[Veo] Calling /api/veo/start...');
+
+    const startResponse = await fetch(`${API_BASE}/veo/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        model: params.model,
+        prompt: finalPrompt.trim(),
+        parameters: Object.keys(parameters).length > 0 ? parameters : undefined,
+      }),
+      signal,
+    });
+
+    if (!startResponse.ok) {
+      const errorData = await startResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || `Failed to start video generation: ${startResponse.statusText}`);
     }
 
-    // 1. Start Generation using new API structure
-    const response = await apiCall('/generate-videos', payload);
-    console.log('✅ [Veo] API Response:', JSON.stringify(response, null, 2));
+    const startData: VeoStartResponse = await startResponse.json();
+    const operationName = startData.operationName;
+    console.log('[Veo] Operation started:', operationName);
 
-    // 2. Extract video from response (new structure from generate_content)
-    if (!response.candidates || response.candidates.length === 0) {
-      throw new Error('No video generated - API returned empty candidates');
+    // 2. Poll until done
+    let status: VeoStatusResponse = { done: false };
+    let pollCount = 0;
+    const maxPolls = 120; // 10 minutes max (5s * 120)
+
+    while (!status.done && pollCount < maxPolls) {
+      // Check if aborted
+      if (signal.aborted) {
+        throw new DOMException('Video generation cancelled', 'AbortError');
+      }
+
+      // Wait 5 seconds between polls
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      pollCount++;
+      onProgress?.(`Generating video... (${pollCount * 5}s elapsed)`);
+      console.log(`[Veo] Polling... (${pollCount * 5}s elapsed)`);
+
+      const statusResponse = await fetch(
+        `${API_BASE}/veo/status?operationName=${encodeURIComponent(operationName)}`,
+        {
+          method: 'GET',
+          headers: {
+            'x-api-key': apiKey,
+          },
+          signal,
+        }
+      );
+
+      if (!statusResponse.ok) {
+        const errorData = await statusResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to poll video status: ${statusResponse.statusText}`);
+      }
+
+      status = await statusResponse.json();
+
+      if (status.error) {
+        throw new Error(status.error);
+      }
     }
 
-    const candidate = response.candidates[0];
-    if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
-      throw new Error('No content in API response');
+    if (!status.done) {
+      throw new Error('Video generation timed out after 10 minutes');
     }
 
-    const videoPart = candidate.content.parts.find((part: any) => part.video);
-    if (!videoPart || !videoPart.video || !videoPart.video.uri) {
+    if (!status.videoUri) {
       throw new Error('No video URI in response');
     }
 
-    const videoUri = videoPart.video.uri;
-    console.log('✅ [Veo] Video URI:', videoUri);
+    console.log('[Veo] Video ready:', status.videoUri);
 
-    // 3. Fetch Video via Proxy
-    const apiKey = getApiKey();
-    const res = await fetch(`${API_BASE}/proxy-video?uri=${encodeURIComponent(videoUri)}`, {
-      signal,
-      headers: { 'x-api-key': apiKey }
-    });
+    // 3. Download video via proxy
+    onProgress?.('Downloading video...');
+    console.log('[Veo] Downloading video via proxy...');
 
-    if (!res.ok) throw new Error(`Failed to download video: ${res.statusText}`);
+    const downloadResponse = await fetch(
+      `${API_BASE}/proxy-video?uri=${encodeURIComponent(status.videoUri)}`,
+      {
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey,
+        },
+        signal,
+      }
+    );
 
-    const videoBlob = await res.blob();
+    if (!downloadResponse.ok) {
+      throw new Error(`Failed to download video: ${downloadResponse.statusText}`);
+    }
+
+    const videoBlob = await downloadResponse.blob();
     const objectUrl = URL.createObjectURL(videoBlob);
 
-    // Optional: Upload to Supabase if configured
-    let supabaseUrl: string | null = null;
+    console.log('[Veo] Video downloaded:', videoBlob.size, 'bytes');
+
+    // 4. Optional: Upload to Supabase if configured
+    let supabaseUrl: string | undefined;
     if (isSupabaseConfigured()) {
       try {
-        console.log('Uploading video to Supabase...');
-        supabaseUrl = await uploadVideoToSupabase(videoBlob, `veo-${params.model}-${Date.now()}.mp4`);
-        console.log('Video uploaded to Supabase:', supabaseUrl);
+        onProgress?.('Uploading to storage...');
+        console.log('[Veo] Uploading to Supabase...');
+        supabaseUrl = await uploadVideoToSupabase(videoBlob, `veo-${params.model}-${Date.now()}.mp4`) || undefined;
+        console.log('[Veo] Video uploaded to Supabase:', supabaseUrl);
       } catch (uploadError) {
-        console.warn('Failed to upload to Supabase (continuing anyway):', uploadError);
-        // Don't fail the whole operation if Supabase upload fails
+        console.warn('[Veo] Failed to upload to Supabase:', uploadError);
       }
     }
 
     return {
       objectUrl,
       blob: videoBlob,
-      uri: videoUri,
-      video: videoPart.video,
-      supabaseUrl
+      uri: status.videoUri,
+      video: { uri: status.videoUri },
+      supabaseUrl,
     };
 
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    console.error('Video Generation Error:', error);
+    console.error('[Veo] Video Generation Error:', error);
     throw error;
   }
 };

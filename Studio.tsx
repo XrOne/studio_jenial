@@ -34,7 +34,6 @@ import {
   hasCustomApiKey,
 } from './services/geminiService';
 import { useAuth } from './contexts/AuthContext';
-import { generateVideoVertex } from './services/vertexVideoService';
 import {
   AppState,
   AppStage,
@@ -509,74 +508,12 @@ const Studio: React.FC = () => {
       }
 
       try {
-        let objectUrl, blob, video;
-
-        if (params.provider === VideoProvider.VERTEX && params.vertexConfig) {
-          // VERTEX AI FLOW
-          console.log('[App] Using Vertex AI Provider');
-          const result = await generateVideoVertex(params.vertexConfig, {
-            model: params.model,
-            prompt: params.prompt,
-            aspectRatio: params.aspectRatio,
-            resolution: params.resolution
-          });
-
-          // Adapt Vertex result to App format
-          // Assuming result contains a video URI or base64. 
-          // For now, we'll try to handle common Vertex response formats.
-          // If it's a raw GCS URI, we might need a proxy, but let's assume we get a usable URL or base64.
-
-          // Mocking the structure for now to prevent crash if format is unknown
-          // In a real scenario, we would parse 'result' to find the video.
-          // Example: result.candidates[0].content.parts[0].video.uri
-
-          // For this implementation, we will alert if we can't find the video, 
-          // but we proceed to show the "Success" state so the user sees the flow worked.
-
-          console.log('[App] Vertex Result:', result);
-
-          // Try to find a video URI
-          let videoUri = null;
-          // Deep search for 'gs://' or 'https://'
-          const findUri = (obj: any): string | null => {
-            if (!obj) return null;
-            if (typeof obj === 'string' && (obj.startsWith('gs://') || obj.startsWith('https://'))) return obj;
-            if (typeof obj === 'object') {
-              for (const key in obj) {
-                const found = findUri(obj[key]);
-                if (found) return found;
-              }
-            }
-            return null;
-          };
-
-          videoUri = findUri(result);
-
-          if (videoUri) {
-            // If it's a GCS URI, we might need to proxy it. 
-            // But for now, let's use a placeholder blob to satisfy the type checker
-            // and show the URI in the console/alert.
-            blob = new Blob(['Placeholder for Vertex Video'], { type: 'text/plain' });
-            objectUrl = videoUri; // This might not render in <video> if it's gs://
-            video = { uri: videoUri };
-          } else {
-            // Fallback
-            blob = new Blob([], { type: 'video/mp4' });
-            objectUrl = '';
-            video = {};
-            alert('Vertex generation finished, but could not parse video URI from response. Check console.');
-          }
-
-        } else {
-          // GEMINI API FLOW (Existing)
-          const res = await generateVideo(
-            params,
-            abortControllerRef.current.signal,
-          );
-          objectUrl = res.objectUrl;
-          blob = res.blob;
-          video = res.video;
-        }
+        // Use Gemini API for video generation
+        const res = await generateVideo(
+          params,
+          abortControllerRef.current.signal,
+        );
+        const { objectUrl, blob, video } = res;
 
         if (promptSequence && currentPromptIndex !== -1) {
           try {
