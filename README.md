@@ -49,7 +49,9 @@ Studio Jenial supports **two modes** for API key management:
 | **Server-Managed** | Deploy with `GEMINI_API_KEY` env var — users never see a key dialog |
 | **BYOK** (default) | Each user provides their own Gemini API key |
 
-📖 **[Veo Setup Guide →](./docs/veo-setup.md)** — Configuration, troubleshooting, Vercel deployment
+📖 **[Veo Setup Guide →](./docs/veo-setup.md)** — Configuration, troubleshooting, Vercel deployment  
+📖 **[Veo Developer Guide →](./README-VEO.md)** — Complete technical documentation for developers  
+📖 **[QA Summary →](./docs/qa-summary.md)** — Test results and validation status
 
 ### Google Drive Export (Optional)
 
