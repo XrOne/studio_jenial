@@ -112,19 +112,6 @@ const getApiKey = (req) => {
 ---
 
 ## Error Handling
-
-### Backend Error Codes
-
-| Error Code | HTTP Status | Cause | Backend Action |
-|------------|-------------|-------|----------------|
-| `API_KEY_MISSING` | 401 | No key available in BYOK mode | Return error JSON |
-| `API_KEY_INVALID` | 401 | Key rejected by Google API | Return error JSON |
-| `BAD_REQUEST` | 400 | Invalid request parameters | Return error with details |
-| `INTERNAL_ERROR` | 500 | Server-side failure | Log and return generic error |
-
-### Frontend UI Behavior
-
-| Error | UI Response |
 |-------|-------------|
 | `API_KEY_MISSING` | Shows API key dialog with message: "Please enter your API key" |
 | `API_KEY_INVALID` | Shows dialog with error: "Invalid API key. Please check and try again" |

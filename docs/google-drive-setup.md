@@ -73,6 +73,11 @@ Add these variables to your environment:
 GOOGLE_CLIENT_ID=123456789-abc.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-your-secret-here
 GOOGLE_REDIRECT_URI=http://localhost:3001/api/google/drive/callback
+
+# Supabase Backend (Preferred for security)
+SUPABASE_URL=YOUR_SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
+
 ```
 
 ### Vercel Deployment
@@ -85,6 +90,8 @@ GOOGLE_REDIRECT_URI=http://localhost:3001/api/google/drive/callback
 | `GOOGLE_CLIENT_ID` | Your OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Your OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | `https://your-app.vercel.app/api/google/drive/callback` |
+| `SUPABASE_URL` | Your Supabase Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase Service Role Key (starts with `ey...`) |
 
 3. Redeploy for changes to take effect
 

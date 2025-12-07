@@ -200,10 +200,29 @@ app.post('/api/video/generate', async (req, res) => {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       const errorMessage = errorData.error?.message || response.statusText;
-      console.error('[Veo] API Error:', errorMessage);
+      const errorCode = errorData.error?.code || 'VEO_ERROR';
+      console.error('[Veo] API Error:', response.status, errorCode);
+
+      // Distinguish model errors from key errors
+      if (response.status === 404 ||
+        errorMessage.toLowerCase().includes('not found') ||
+        errorMessage.toLowerCase().includes('does not exist')) {
+        return res.status(404).json({
+          error: 'MODEL_NOT_FOUND',
+          details: `Model "${model}" is not available or not accessible with your API key.`
+        });
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        return res.status(401).json({
+          error: 'API_KEY_INVALID',
+          details: errorMessage
+        });
+      }
+
       return res.status(response.status).json({
         error: `Veo API Error: ${errorMessage}`,
-        code: errorData.error?.code || 'VEO_ERROR'
+        code: errorCode
       });
     }
 
@@ -397,7 +416,26 @@ app.post('/api/generate-videos', async (req, res) => {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error?.message || response.statusText);
+      const errorMessage = errorData.error?.message || response.statusText;
+
+      // Distinguish model errors from key errors (same as main endpoint)
+      if (response.status === 404 ||
+        errorMessage.toLowerCase().includes('not found') ||
+        errorMessage.toLowerCase().includes('does not exist')) {
+        return res.status(404).json({
+          error: 'MODEL_NOT_FOUND',
+          details: `Model "${model}" is not available or not accessible with your API key.`
+        });
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        return res.status(401).json({
+          error: 'API_KEY_INVALID',
+          details: errorMessage
+        });
+      }
+
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();
@@ -485,10 +523,13 @@ app.get('/api/google/drive/status', async (req, res) => {
     }
 
     const token = authHeader.split(' ')[1];
-    const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    );
+
+    // Use shared backend client
+    const supabase = driveService.supabase;
+    if (!supabase) {
+      console.error('Supabase client not initialized (missing env vars)');
+      return res.status(500).json({ error: 'SERVER_CONFIG_ERROR' });
+    }
 
     const { data: { user }, error } = await supabase.auth.getUser(token);
     if (error || !user) {
@@ -563,10 +604,13 @@ app.post('/api/google/drive/upload-from-url', async (req, res) => {
     }
 
     const token = authHeader.split(' ')[1];
-    const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    );
+
+    // Use shared backend client
+    const supabase = driveService.supabase;
+    if (!supabase) {
+      console.error('Supabase client not initialized (missing env vars)');
+      return res.status(500).json({ error: 'SERVER_CONFIG_ERROR' });
+    }
 
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {

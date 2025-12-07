@@ -599,6 +599,10 @@ const Studio: React.FC = () => {
             setShowApiKeyDialog(true);
             setAppState(AppState.IDLE);
             return;
+          } else if (apiError.status === 404 && apiError.error === 'MODEL_NOT_FOUND') {
+            // Model errors: show in UI, DON'T open API key dialog
+            showStatusError(`Le modèle Veo n'est pas disponible: ${apiError.data?.details || 'Vérifiez que votre clé API dispose de l\'accès aux modèles Veo 3.1.'}`);
+            return;
           } else if (apiError.status === 400) {
             showStatusError(`Requête invalide: ${apiError.data?.details || 'Vérifiez vos paramètres.'}`);
             return;
@@ -617,10 +621,11 @@ const Studio: React.FC = () => {
         let dialogErrorMsg: string | null = null;
 
         if (typeof errorMessage === 'string') {
-          if (errorMessage.includes('Requested entity was not found.') || errorMessage.includes('404')) {
-            userFriendlyMessage = 'Model or Key issue. Please check if your API Key is valid and has access to Veo.';
-            dialogErrorMsg = 'Clé API non valide pour Veo.';
-            shouldOpenDialog = true;
+          // Model errors: show in UI, DON'T open API key dialog
+          if (errorMessage.includes('MODEL_NOT_FOUND') ||
+            (errorMessage.toLowerCase().includes('model') && errorMessage.toLowerCase().includes('not found'))) {
+            userFriendlyMessage = 'Le modèle Veo sélectionné n\'est pas disponible. Vérifiez que votre clé API dispose de l\'accès aux modèles Veo 3.1.';
+            // Don't set shouldOpenDialog - model errors should NOT trigger key dialog
           } else if (
             errorMessage.includes('API_KEY_INVALID') ||
             errorMessage.includes('API key not valid') ||
@@ -628,7 +633,7 @@ const Studio: React.FC = () => {
             errorMessage.includes('API_KEY_MISSING') ||
             errorMessage.includes('403')
           ) {
-            userFriendlyMessage = 'Your API key is invalid, missing, or does not have the required permissions.';
+            userFriendlyMessage = 'Votre clé API est invalide, manquante ou ne dispose pas des permissions requises.';
             dialogErrorMsg = 'Clé API invalide ou manquante.';
             shouldOpenDialog = true;
           }
