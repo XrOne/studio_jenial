@@ -38,6 +38,33 @@ This project operates in **BYOK mode**. Each user provides their own Gemini API 
 
 ---
 
+## 🔐 AI Video & Storage Features
+
+### Veo/Gemini Integration
+
+Studio Jenial supports **two modes** for API key management:
+
+| Mode | Description |
+|------|-------------|
+| **Server-Managed** | Deploy with `GEMINI_API_KEY` env var — users never see a key dialog |
+| **BYOK** (default) | Each user provides their own Gemini API key |
+
+📖 **[Veo Setup Guide →](./docs/veo-setup.md)** — Configuration, troubleshooting, Vercel deployment
+
+### Google Drive Export (Optional)
+
+Save generated videos directly to users' Google Drive:
+
+- No files stored on our servers
+- Minimal `drive.file` scope (only files created by this app)
+- OAuth2 with refresh token support
+
+📖 **[Google Drive Setup →](./docs/google-drive-setup.md)** — OAuth configuration, privacy details
+
+📖 **[Architecture Walkthrough →](./docs/veo-drive-walkthrough.md)** — Implementation overview
+
+---
+
 ## 🚀 Quick Start
 
 ### Prerequisites
