@@ -3,16 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { KeyIcon, Trash2Icon, ShieldCheckIcon, ExternalLinkIcon } from './icons';
+import { setLocalApiKey, clearLocalApiKey } from '../services/geminiService';
 
 interface ApiKeyDialogProps {
   onContinue: () => void;
   hasCustomKey: boolean;
-  providerToken: string | null;
+  providerToken?: string | null;
+  errorMessage?: string; // Error message from parent (e.g., "Invalid key", "Key missing")
 }
 
-const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey, providerToken }) => {
+const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
+  onContinue,
+  hasCustomKey,
+  providerToken,
+  errorMessage
+}) => {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -22,8 +29,15 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey, p
   const [vertexToken, setVertexToken] = useState(window.localStorage.getItem('vertex_token') || '');
   const [showVertexConfig, setShowVertexConfig] = useState(false);
 
+  // Show parent error message if provided
+  useEffect(() => {
+    if (errorMessage) {
+      setError(errorMessage);
+    }
+  }, [errorMessage]);
+
   // Auto-fill token if available from Google Login
-  React.useEffect(() => {
+  useEffect(() => {
     if (providerToken) {
       setVertexToken(providerToken);
     }
@@ -55,7 +69,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey, p
     if (tokenToSave) window.localStorage.setItem('vertex_token', tokenToSave.trim());
 
     if (trimmedKey && validateKey(trimmedKey)) {
-      window.localStorage.setItem('gemini_api_key', trimmedKey);
+      setLocalApiKey(trimmedKey); // Use service function instead of direct localStorage
       onContinue();
     } else if (hasCustomKey && !trimmedKey) {
       // Allow saving just Vertex config if Gemini key is already there
@@ -64,7 +78,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({ onContinue, hasCustomKey, p
   };
 
   const handleRemove = () => {
-    window.localStorage.removeItem('gemini_api_key');
+    clearLocalApiKey(); // Use service function
     window.localStorage.removeItem('vertex_project_id');
     window.localStorage.removeItem('vertex_location');
     window.localStorage.removeItem('vertex_token');

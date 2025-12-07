@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import * as React from 'react';
-import {useCallback, useEffect, useRef, useState} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 // FIX: Import 'GenerateVideoParams' type to resolve TypeScript error.
 import {
   ComplianceResult,
@@ -26,6 +26,7 @@ import {
 } from './icons';
 import KeyframeRefinementAssistant from './KeyframeRefinementAssistant';
 import { analyzeVideoCompliance } from '../services/geminiService';
+import { isDriveEnabled, isDriveConnected, connectDrive, uploadToDrive } from '../services/googleDriveClient';
 
 interface VideoResultProps {
   videoUrl: string;
@@ -85,11 +86,30 @@ const VideoResult: React.FC<VideoResultProps> = ({
   const [combinedVideoForDownload, setCombinedVideoForDownload] =
     useState<Blob | null>(null);
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
-  
+
   // Critic Agent State
   const [complianceResult, setComplianceResult] = useState<ComplianceResult | null>(null);
   const [isAnalyzingCompliance, setIsAnalyzingCompliance] = useState(false);
   const [showComplianceDetails, setShowComplianceDetails] = useState(false);
+
+  // Google Drive State
+  const [driveEnabled, setDriveEnabled] = useState(false);
+  const [driveConnected, setDriveConnected] = useState(false);
+  const [isUploadingToDrive, setIsUploadingToDrive] = useState(false);
+  const [driveUploadSuccess, setDriveUploadSuccess] = useState(false);
+
+  // Check Drive status on mount
+  useEffect(() => {
+    const checkDrive = async () => {
+      const enabled = await isDriveEnabled();
+      setDriveEnabled(enabled);
+      if (enabled) {
+        const connected = await isDriveConnected();
+        setDriveConnected(connected);
+      }
+    };
+    checkDrive();
+  }, []);
 
   const captureFrameAtTime = useCallback(
     (video: HTMLVideoElement, time: number): Promise<ImageFile> => {
@@ -110,7 +130,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
                 type: 'image/png',
               });
               const base64 = await fileToBase64(file);
-              resolve({file, base64});
+              resolve({ file, base64 });
             } else {
               reject('Canvas toBlob failed');
             }
@@ -121,16 +141,15 @@ const VideoResult: React.FC<VideoResultProps> = ({
           video.removeEventListener('error', onError);
           reject(
             new Error(
-              `Video seeking error: ${
-                e instanceof Event
-                  ? (e.target as HTMLVideoElement).error?.message
-                  : e
+              `Video seeking error: ${e instanceof Event
+                ? (e.target as HTMLVideoElement).error?.message
+                : e
               }`,
             ),
           );
         };
-        video.addEventListener('seeked', onSeeked, {once: true});
-        video.addEventListener('error', onError, {once: true});
+        video.addEventListener('seeked', onSeeked, { once: true });
+        video.addEventListener('error', onError, { once: true });
         video.currentTime = time;
       });
     },
@@ -139,26 +158,26 @@ const VideoResult: React.FC<VideoResultProps> = ({
 
   // Run Critic Agent when keyframes are ready
   useEffect(() => {
-      if (keyframes.length > 0 && !complianceResult && !isAnalyzingCompliance && lastConfig) {
-          const runCritic = async () => {
-              setIsAnalyzingCompliance(true);
-              try {
-                  // Use the middle frame for critique
-                  const frameToAnalyze = keyframes[Math.floor(keyframes.length / 2)];
-                  const result = await analyzeVideoCompliance(
-                      frameToAnalyze.base64,
-                      lastConfig.prompt,
-                      activeDogma
-                  );
-                  setComplianceResult(result);
-              } catch (e) {
-                  console.error("Critic Agent failed:", e);
-              } finally {
-                  setIsAnalyzingCompliance(false);
-              }
-          };
-          runCritic();
-      }
+    if (keyframes.length > 0 && !complianceResult && !isAnalyzingCompliance && lastConfig) {
+      const runCritic = async () => {
+        setIsAnalyzingCompliance(true);
+        try {
+          // Use the middle frame for critique
+          const frameToAnalyze = keyframes[Math.floor(keyframes.length / 2)];
+          const result = await analyzeVideoCompliance(
+            frameToAnalyze.base64,
+            lastConfig.prompt,
+            activeDogma
+          );
+          setComplianceResult(result);
+        } catch (e) {
+          console.error("Critic Agent failed:", e);
+        } finally {
+          setIsAnalyzingCompliance(false);
+        }
+      };
+      runCritic();
+    }
   }, [keyframes, complianceResult, isAnalyzingCompliance, lastConfig, activeDogma]);
 
 
@@ -196,7 +215,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
         const extensionBlob = await fetch(videoUrl).then((r) => r.blob());
 
         setCombinedVideoForDownload(
-          new Blob([originalBlob, extensionBlob], {type: originalBlob.type}),
+          new Blob([originalBlob, extensionBlob], { type: originalBlob.type }),
         );
 
         const originalDuration = await getDuration(originalBlob);
@@ -260,7 +279,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
               }
             }
           },
-          {once: true},
+          { once: true },
         );
 
         mediaSource.addEventListener('sourceended', () =>
@@ -398,7 +417,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
           );
         };
 
-        video.addEventListener('seeked', onSeeked, {once: true});
+        video.addEventListener('seeked', onSeeked, { once: true });
         if (video.readyState >= 2) {
           // HAVE_CURRENT_DATA
           onSeeked();
@@ -458,10 +477,10 @@ const VideoResult: React.FC<VideoResultProps> = ({
   };
 
   const applyCriticFix = () => {
-      if (complianceResult?.revisedPrompt) {
-          onPromptRevised(complianceResult.revisedPrompt);
-          setShowComplianceDetails(false);
-      }
+    if (complianceResult?.revisedPrompt) {
+      onPromptRevised(complianceResult.revisedPrompt);
+      setShowComplianceDetails(false);
+    }
   }
 
   const isSequenceInProgress =
@@ -502,55 +521,54 @@ const VideoResult: React.FC<VideoResultProps> = ({
               className="w-full h-full object-contain"
             />
           )}
-          
+
           {/* Critic Agent Badge */}
           {!isPreparingVideo && (
-              <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2">
-                 {isAnalyzingCompliance && (
-                     <div className="bg-black/70 text-indigo-300 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2 backdrop-blur-sm border border-indigo-500/30">
-                         <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
-                         AI Critic Analyzing...
-                     </div>
-                 )}
-                 {complianceResult && !isAnalyzingCompliance && (
-                     <div className="relative">
-                        <button 
-                            onClick={() => setShowComplianceDetails(!showComplianceDetails)}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-md border transition-all shadow-lg ${
-                                complianceResult.score >= 80 
-                                ? 'bg-green-900/80 border-green-500 text-green-300' 
-                                : complianceResult.score >= 50 
-                                    ? 'bg-yellow-900/80 border-yellow-500 text-yellow-300'
-                                    : 'bg-red-900/80 border-red-500 text-red-300'
-                            }`}
-                        >
-                            <ShieldCheckIcon className="w-4 h-4" />
-                            <span className="font-bold">{complianceResult.score}% Match</span>
-                        </button>
+            <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2">
+              {isAnalyzingCompliance && (
+                <div className="bg-black/70 text-indigo-300 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2 backdrop-blur-sm border border-indigo-500/30">
+                  <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
+                  AI Critic Analyzing...
+                </div>
+              )}
+              {complianceResult && !isAnalyzingCompliance && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowComplianceDetails(!showComplianceDetails)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-md border transition-all shadow-lg ${complianceResult.score >= 80
+                        ? 'bg-green-900/80 border-green-500 text-green-300'
+                        : complianceResult.score >= 50
+                          ? 'bg-yellow-900/80 border-yellow-500 text-yellow-300'
+                          : 'bg-red-900/80 border-red-500 text-red-300'
+                      }`}
+                  >
+                    <ShieldCheckIcon className="w-4 h-4" />
+                    <span className="font-bold">{complianceResult.score}% Match</span>
+                  </button>
 
-                        {showComplianceDetails && (
-                            <div className="absolute bottom-full right-0 mb-2 w-72 bg-gray-900 border border-gray-600 rounded-xl p-4 shadow-2xl z-20 animate-in fade-in slide-in-from-bottom-2">
-                                <h4 className="text-sm font-bold text-white mb-2 flex justify-between items-center">
-                                    Critic Report
-                                    <span className="text-xs font-normal text-gray-400">Gemini 3.0 Vision</span>
-                                </h4>
-                                <p className="text-xs text-gray-300 leading-relaxed mb-3">
-                                    "{complianceResult.critique}"
-                                </p>
-                                {complianceResult.revisedPrompt && (
-                                    <button 
-                                        onClick={applyCriticFix}
-                                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
-                                    >
-                                        <SparklesIcon className="w-3 h-3" />
-                                        Apply Fix & Retry
-                                    </button>
-                                )}
-                            </div>
-                        )}
-                     </div>
-                 )}
-              </div>
+                  {showComplianceDetails && (
+                    <div className="absolute bottom-full right-0 mb-2 w-72 bg-gray-900 border border-gray-600 rounded-xl p-4 shadow-2xl z-20 animate-in fade-in slide-in-from-bottom-2">
+                      <h4 className="text-sm font-bold text-white mb-2 flex justify-between items-center">
+                        Critic Report
+                        <span className="text-xs font-normal text-gray-400">Gemini 3.0 Vision</span>
+                      </h4>
+                      <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                        "{complianceResult.critique}"
+                      </p>
+                      {complianceResult.revisedPrompt && (
+                        <button
+                          onClick={applyCriticFix}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                          <SparklesIcon className="w-3 h-3" />
+                          Apply Fix & Retry
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -585,6 +603,51 @@ const VideoResult: React.FC<VideoResultProps> = ({
               ? 'Download Combined Clip'
               : 'Download Video'}
           </button>
+          {/* Google Drive Save Button */}
+          {driveEnabled && (
+            driveConnected ? (
+              <button
+                onClick={async () => {
+                  setIsUploadingToDrive(true);
+                  setDriveUploadSuccess(false);
+                  try {
+                    const fileName = `veo_studio_video_${Date.now()}.mp4`;
+                    const result = await uploadToDrive(videoUrl, fileName, 'video/mp4');
+                    if (result.success) {
+                      setDriveUploadSuccess(true);
+                      setTimeout(() => setDriveUploadSuccess(false), 3000);
+                    } else {
+                      alert(`Drive upload failed: ${result.error}`);
+                    }
+                  } catch (e) {
+                    alert('Failed to upload to Google Drive');
+                  } finally {
+                    setIsUploadingToDrive(false);
+                  }
+                }}
+                disabled={isUploadingToDrive || driveUploadSuccess}
+                className={`flex items-center gap-2 px-5 py-2.5 font-semibold rounded-lg transition-colors ${driveUploadSuccess
+                    ? 'bg-green-600 text-white'
+                    : isUploadingToDrive
+                      ? 'bg-blue-800 text-blue-200 cursor-wait'
+                      : 'bg-blue-600 hover:bg-blue-500 text-white'
+                  }`}>
+                {driveUploadSuccess ? (
+                  <><CheckIcon className="w-5 h-5" /> Saved to Drive!</>
+                ) : isUploadingToDrive ? (
+                  <>Uploading...</>
+                ) : (
+                  <>Save to Google Drive</>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={() => connectDrive()}
+                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-colors">
+                Connect Google Drive
+              </button>
+            )
+          )}
           <button
             onClick={onStartNewProject}
             className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg transition-colors">

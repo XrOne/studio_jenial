@@ -49,39 +49,144 @@ const MODELS = {
 };
 
 // ===========================================
-// API KEY MANAGEMENT (BYOK)
+// API KEY MANAGEMENT (Dual Mode: Server-Managed + BYOK)
 // ===========================================
 
+// Cached config to avoid repeated /api/config calls
+let cachedConfig: { hasServerKey: boolean; requiresUserKey: boolean } | null = null;
+
+/**
+ * Fetch server configuration to determine API key mode
+ * - hasServerKey: true if server has GEMINI_API_KEY env configured
+ * - requiresUserKey: true if user must provide their own key (BYOK mode)
+ */
+export const fetchGeminiConfig = async (): Promise<{ hasServerKey: boolean; requiresUserKey: boolean }> => {
+  if (cachedConfig) return cachedConfig;
+
+  try {
+    const res = await fetch('/api/config');
+    if (!res.ok) {
+      // Fallback to BYOK mode if config endpoint fails
+      cachedConfig = { hasServerKey: false, requiresUserKey: true };
+      return cachedConfig;
+    }
+    cachedConfig = await res.json();
+    return cachedConfig;
+  } catch {
+    // Network error - fallback to BYOK mode
+    cachedConfig = { hasServerKey: false, requiresUserKey: true };
+    return cachedConfig;
+  }
+};
+
+/**
+ * Reset cached config (useful for testing or after configuration changes)
+ */
+export const resetConfigCache = () => {
+  cachedConfig = null;
+};
+
+/**
+ * Get API key from localStorage (BYOK mode)
+ * Returns null if not set or invalid
+ */
+export const getLocalApiKey = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  const key = window.localStorage.getItem('gemini_api_key');
+  return key && key.trim().length >= 20 ? key.trim() : null;
+};
+
+/**
+ * Save API key to localStorage (BYOK mode)
+ */
+export const setLocalApiKey = (key: string): void => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem('gemini_api_key', key.trim());
+};
+
+/**
+ * Remove API key from localStorage
+ */
+export const clearLocalApiKey = (): void => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem('gemini_api_key');
+};
+
+// Legacy exports for backward compatibility
 export const getApiKey = (): string => {
-  if (typeof window === 'undefined') return '';
-  const storedKey = window.localStorage.getItem('gemini_api_key');
-  return storedKey || '';
+  return getLocalApiKey() || '';
 };
 
 export const hasCustomApiKey = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  const storedKey = window.localStorage.getItem('gemini_api_key');
-  return !!(storedKey && storedKey.trim() !== '' && storedKey.startsWith('AIza'));
+  const key = getLocalApiKey();
+  return !!(key && key.startsWith('AIza'));
 };
 
 // ===========================================
-// API CALL HELPER
+// API CALL HELPERS
 // ===========================================
 
 const API_BASE = '/api';
 const GOOGLE_FILES_API = 'https://generativelanguage.googleapis.com/upload/v1beta/files';
 
-const apiCall = async (endpoint: string, body: any) => {
-  const apiKey = getApiKey();
+/**
+ * Custom error type for API calls
+ */
+export interface ApiError {
+  status: number;
+  error: string;
+  data?: any;
+}
 
-  if (!apiKey) {
-    throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
+/**
+ * Call backend endpoint with proper API key handling
+ * - If server has key configured, no header needed
+ * - If BYOK mode, adds x-api-key header from localStorage
+ */
+export const callVeoBackend = async (path: string, body: any): Promise<any> => {
+  const config = await fetchGeminiConfig();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  // Only add user key header if server doesn't have a key configured
+  if (!config.hasServerKey) {
+    const key = getLocalApiKey();
+    if (key) {
+      headers['x-api-key'] = key;
+    }
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-  };
+  const res = await fetch(path, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const apiError: ApiError = {
+      status: res.status,
+      error: data.error || 'UNKNOWN_ERROR',
+      data
+    };
+    throw apiError;
+  }
+
+  return data;
+};
+
+// Legacy apiCall function for backward compatibility
+const apiCall = async (endpoint: string, body: any) => {
+  const config = await fetchGeminiConfig();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  if (!config.hasServerKey) {
+    const apiKey = getLocalApiKey();
+    if (!apiKey) {
+      throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
+    }
+    headers['x-api-key'] = apiKey;
+  }
 
   const res = await fetch(`${API_BASE}${endpoint}`, {
     method: 'POST',
@@ -300,7 +405,7 @@ export const generateVideo = async (
     }
 
     if (params.mode !== GenerationMode.EXTEND_VIDEO &&
-        params.mode !== GenerationMode.REFERENCES_TO_VIDEO) {
+      params.mode !== GenerationMode.REFERENCES_TO_VIDEO) {
       if (params.aspectRatio) {
         parameters.aspectRatio = params.aspectRatio;
       }

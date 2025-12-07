@@ -4,6 +4,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import bodyParser from 'body-parser';
 import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
+import * as driveService from './services/googleDriveService.js';
 
 // Load env files (optional - only for local dev convenience)
 dotenv.config({ path: '.env.local' });
@@ -40,28 +42,30 @@ const isPrivateIP = (hostname) => {
 };
 
 /**
- * BYOK (Bring Your Own Key) Mode
+ * Dual Mode API Key Management
  *
- * This server operates in BYOK mode by default.
- * Each request MUST include the user's API key in the 'x-api-key' header.
- * No server-side API key is used - users pay for their own usage.
+ * Priority 1: Server-managed key from GEMINI_API_KEY env var
+ * Priority 2: User-provided key via 'x-api-key' header (BYOK mode)
+ * 
+ * In production with env key set, users don't need to provide a key.
+ * In BYOK mode (beta), each user must provide their own key.
  */
 const getApiKey = (req) => {
-  const apiKey = req.headers['x-api-key'];
-
-  if (!apiKey) {
-    const error = new Error('API_KEY_MISSING: Please provide your Gemini API key');
-    error.statusCode = 401;
-    throw error;
+  // Priority 1: Server-managed key from environment
+  if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length >= 20) {
+    return process.env.GEMINI_API_KEY.trim();
   }
 
-  if (apiKey === 'PLACEHOLDER_API_KEY' || apiKey.length < 20) {
-    const error = new Error('API_KEY_INVALID: Please provide a valid Gemini API key');
-    error.statusCode = 401;
-    throw error;
+  // Priority 2: User-provided key via header (BYOK mode)
+  const userKey = req.headers['x-api-key'];
+  if (userKey && typeof userKey === 'string' && userKey.trim().length >= 20) {
+    return userKey.trim();
   }
 
-  return apiKey;
+  const error = new Error('API_KEY_MISSING');
+  error.code = 'API_KEY_MISSING';
+  error.statusCode = 401;
+  throw error;
 };
 
 const getClient = (req) => {
@@ -69,34 +73,69 @@ const getClient = (req) => {
   return new GoogleGenAI({ apiKey });
 };
 
-// Error handler middleware
+// Error handler middleware with proper error mapping
 const handleError = (res, error) => {
-  console.error('API Error:', error.message);
+  // Don't log API keys - only log error code/message
+  const errorCode = error.code || 'UNKNOWN_ERROR';
   const statusCode = error.statusCode || 500;
+
+  // Map specific error types for frontend
+  if (errorCode === 'API_KEY_MISSING') {
+    return res.status(401).json({ error: 'API_KEY_MISSING' });
+  }
+
+  if (errorCode === 'API_KEY_INVALID' || (statusCode === 401 && !error.code)) {
+    return res.status(401).json({ error: 'API_KEY_INVALID' });
+  }
+
+  if (statusCode === 400) {
+    return res.status(400).json({
+      error: 'BAD_REQUEST',
+      details: error.message || 'Invalid request'
+    });
+  }
+
+  // For all other errors
+  console.error('API Error:', errorCode);
   res.status(statusCode).json({
-    error: error.message || 'Internal Server Error',
-    code: error.code || 'UNKNOWN_ERROR'
+    error: statusCode >= 500 ? 'INTERNAL_ERROR' : error.message,
+    code: errorCode
   });
 };
 
 // --- Endpoints ---
 
+// Configuration endpoint for frontend to check mode
+app.get('/api/config', (req, res) => {
+  const hasServerKey = !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length >= 20);
+  res.json({
+    hasServerKey,
+    requiresUserKey: !hasServerKey
+  });
+});
+
 app.get('/', (req, res) => {
+  const hasServerKey = !!process.env.GEMINI_API_KEY;
   res.json({
     name: '🎬 Studio Jenial API',
-    mode: 'BYOK (Bring Your Own Key)',
+    mode: hasServerKey ? 'Server-Managed' : 'BYOK (Bring Your Own Key)',
     status: 'running',
-    message: 'Each user must provide their own Gemini API key'
+    message: hasServerKey
+      ? 'Server API key configured'
+      : 'Each user must provide their own Gemini API key'
   });
 });
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
+  const hasServerKey = !!process.env.GEMINI_API_KEY;
   res.json({
     status: 'ok',
-    mode: 'BYOK',
-    requiresUserKey: true,
-    message: 'Users must provide their own Gemini API key in the x-api-key header'
+    mode: hasServerKey ? 'server-managed' : 'BYOK',
+    requiresUserKey: !hasServerKey,
+    message: hasServerKey
+      ? 'Server API key configured'
+      : 'Users must provide their own Gemini API key in the x-api-key header'
   });
 });
 
@@ -423,7 +462,142 @@ app.post('/api/get-video-operation', async (req, res) => {
   }
 });
 
-// --- Start Server ---
+// ==========================================
+// GOOGLE DRIVE INTEGRATION
+// ==========================================
+// Allows users to save generated videos/images to their own Google Drive
+// No files are stored persistently on our servers
+
+// Check if Drive integration is enabled
+app.get('/api/google/drive/enabled', (req, res) => {
+  res.json({
+    enabled: driveService.isDriveConfigured()
+  });
+});
+
+// Get Drive connection status for current user
+app.get('/api/google/drive/status', async (req, res) => {
+  try {
+    // Get user ID from Supabase auth header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.json({ connected: false, reason: 'NOT_AUTHENTICATED' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    );
+
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      return res.json({ connected: false, reason: 'INVALID_TOKEN' });
+    }
+
+    const connected = await driveService.isDriveConnected(user.id);
+    res.json({ connected });
+  } catch (error) {
+    console.error('Drive status error:', error.message);
+    res.json({ connected: false, reason: 'ERROR' });
+  }
+});
+
+// Start OAuth flow - redirects user to Google
+app.get('/api/google/drive/auth', async (req, res) => {
+  try {
+    if (!driveService.isDriveConfigured()) {
+      return res.status(503).json({ error: 'DRIVE_NOT_CONFIGURED' });
+    }
+
+    // Get user ID from query or session
+    const userId = req.query.userId;
+    if (!userId) {
+      return res.status(400).json({ error: 'USER_ID_REQUIRED' });
+    }
+
+    const authUrl = driveService.getAuthUrl(userId);
+    res.redirect(authUrl);
+  } catch (error) {
+    console.error('Drive auth error:', error.message);
+    res.status(500).json({ error: 'AUTH_FAILED' });
+  }
+});
+
+// OAuth callback from Google
+app.get('/api/google/drive/callback', async (req, res) => {
+  try {
+    const { code, state: userId } = req.query;
+
+    if (!code || !userId) {
+      return res.redirect('/studio?drive=error&reason=missing_params');
+    }
+
+    // Exchange code for tokens
+    const tokens = await driveService.exchangeCodeForTokens(code);
+
+    // Save tokens for user
+    await driveService.saveTokensForUser(userId, tokens);
+
+    // Redirect back to studio with success
+    res.redirect('/studio?drive=connected');
+  } catch (error) {
+    console.error('Drive callback error:', error.message);
+    res.redirect('/studio?drive=error&reason=token_exchange');
+  }
+});
+
+// Upload file from URL to user's Drive
+app.post('/api/google/drive/upload-from-url', async (req, res) => {
+  try {
+    const { fileUrl, fileName, mimeType } = req.body;
+
+    if (!fileUrl || !fileName) {
+      return res.status(400).json({ error: 'MISSING_PARAMS', details: 'fileUrl and fileName required' });
+    }
+
+    // Get user from auth header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'NOT_AUTHENTICATED' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    );
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return res.status(401).json({ error: 'INVALID_TOKEN' });
+    }
+
+    // Upload to Drive
+    const result = await driveService.uploadFileToDrive(
+      user.id,
+      fileUrl,
+      fileName,
+      mimeType || 'video/mp4'
+    );
+
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    console.error('Drive upload error:', error.message);
+
+    if (error.message === 'DRIVE_NOT_CONNECTED') {
+      return res.status(401).json({ error: 'DRIVE_NOT_CONNECTED' });
+    }
+    if (error.message === 'SOURCE_DOWNLOAD_FAILED') {
+      return res.status(400).json({ error: 'SOURCE_DOWNLOAD_FAILED' });
+    }
+
+    res.status(500).json({ error: 'UPLOAD_FAILED', details: error.message });
+  }
+});
 const port = process.env.PORT || 3001;
 
 // Check if we're being imported by Vercel or run directly

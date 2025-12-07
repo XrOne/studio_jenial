@@ -32,6 +32,9 @@ import {
   reviseFollowingPrompts,
   getApiKey,
   hasCustomApiKey,
+  fetchGeminiConfig,
+  getLocalApiKey,
+  ApiError,
 } from './services/geminiService';
 import { useAuth } from './contexts/AuthContext';
 import {
@@ -345,15 +348,39 @@ const Studio: React.FC = () => {
   const [initialFormValues, setInitialFormValues] =
     useState<GenerateVideoParams | null>(null);
 
+  // State for API key error message to show in dialog
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+
   useEffect(() => {
-    // Initial check. If no key, show dialog. 
-    // Even if env key exists on server, we prioritize user key for beta testers.
-    // If this is strictly a "beta" deployment, we assume no env key, so getApiKey() return '' triggering dialog.
-    const apiKey = getApiKey();
-    if (!apiKey) {
-      setShowApiKeyDialog(true);
-    }
-    setHasCustomKey(hasCustomApiKey());
+    // Check server config to determine if we need user API key
+    const initCheck = async () => {
+      try {
+        const config = await fetchGeminiConfig();
+
+        // If server has key configured, no dialog needed
+        if (config.hasServerKey) {
+          setShowApiKeyDialog(false);
+          setHasCustomKey(true); // Treat as "has key" for UI purposes
+          return;
+        }
+
+        // BYOK mode: check if user has a key in localStorage
+        const localKey = getLocalApiKey();
+        if (!localKey) {
+          setShowApiKeyDialog(true);
+        } else {
+          setHasCustomKey(true);
+        }
+      } catch {
+        // Fallback to BYOK mode if config check fails
+        const localKey = getLocalApiKey();
+        if (!localKey) {
+          setShowApiKeyDialog(true);
+        }
+        setHasCustomKey(hasCustomApiKey());
+      }
+    };
+    initCheck();
   }, []);
 
   useEffect(() => {
@@ -557,16 +584,42 @@ const Studio: React.FC = () => {
         }
 
         console.error('Video generation failed:', error);
+
+        // Handle structured API errors from callVeoBackend
+        const apiError = error as ApiError;
+        if (apiError.status && apiError.error) {
+          // Structured error from our backend
+          if (apiError.status === 401 && apiError.error === 'API_KEY_MISSING') {
+            setApiKeyError('Aucune clé API configurée. Veuillez entrer votre clé Gemini.');
+            setShowApiKeyDialog(true);
+            setAppState(AppState.IDLE);
+            return;
+          } else if (apiError.status === 401 && apiError.error === 'API_KEY_INVALID') {
+            setApiKeyError('Clé API invalide. Vérifiez votre clé et réessayez.');
+            setShowApiKeyDialog(true);
+            setAppState(AppState.IDLE);
+            return;
+          } else if (apiError.status === 400) {
+            showStatusError(`Requête invalide: ${apiError.data?.details || 'Vérifiez vos paramètres.'}`);
+            return;
+          } else {
+            showStatusError('Erreur serveur. Réessayez plus tard.');
+            return;
+          }
+        }
+
+        // Legacy error handling for Error instances
         const errorMessage =
           error instanceof Error ? error.message : 'An unknown error occurred.';
 
         let userFriendlyMessage = `Video generation failed: ${errorMessage}`;
         let shouldOpenDialog = false;
+        let dialogErrorMsg: string | null = null;
 
         if (typeof errorMessage === 'string') {
           if (errorMessage.includes('Requested entity was not found.') || errorMessage.includes('404')) {
-            userFriendlyMessage =
-              'Model or Key issue. Please check if your API Key is valid and has access to Veo.';
+            userFriendlyMessage = 'Model or Key issue. Please check if your API Key is valid and has access to Veo.';
+            dialogErrorMsg = 'Clé API non valide pour Veo.';
             shouldOpenDialog = true;
           } else if (
             errorMessage.includes('API_KEY_INVALID') ||
@@ -575,14 +628,15 @@ const Studio: React.FC = () => {
             errorMessage.includes('API_KEY_MISSING') ||
             errorMessage.includes('403')
           ) {
-            userFriendlyMessage =
-              'Your API key is invalid, missing, or does not have the required permissions.';
+            userFriendlyMessage = 'Your API key is invalid, missing, or does not have the required permissions.';
+            dialogErrorMsg = 'Clé API invalide ou manquante.';
             shouldOpenDialog = true;
           }
         }
 
         showStatusError(userFriendlyMessage);
         if (shouldOpenDialog) {
+          setApiKeyError(dialogErrorMsg);
           setShowApiKeyDialog(true);
         }
       }
@@ -921,7 +975,12 @@ const Studio: React.FC = () => {
   return (
     <ErrorBoundary>
       <div className="w-screen h-screen bg-gray-900 font-sans flex flex-col">
-        {showApiKeyDialog && <ApiKeyDialog onContinue={handleApiKeyContinue} hasCustomKey={hasCustomKey} providerToken={providerToken} />}
+        {showApiKeyDialog && <ApiKeyDialog
+          onContinue={handleApiKeyContinue}
+          hasCustomKey={hasCustomKey}
+          providerToken={providerToken}
+          errorMessage={apiKeyError || undefined}
+        />}
         {isShotLibraryOpen && (
           <ShotLibrary
             isOpen={isShotLibraryOpen}
