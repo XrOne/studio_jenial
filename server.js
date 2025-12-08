@@ -152,6 +152,10 @@ app.post('/api/generate-content', async (req, res) => {
     const ai = getClient(req);
     const { model, contents, config } = req.body;
 
+    // Log request size for debugging large payload issues
+    const requestSize = JSON.stringify(req.body).length;
+    console.log(`[ContentAPI] Incoming request: model=${model}, size=${(requestSize / 1024).toFixed(1)}KB`);
+
     const response = await ai.models.generateContent({
       model,
       contents,
@@ -159,7 +163,45 @@ app.post('/api/generate-content', async (req, res) => {
     });
     res.json(response);
   } catch (error) {
-    handleError(res, error);
+    // Enhanced error logging and mapping for generate-content
+    const status = error.status || error.statusCode || 500;
+    const errorMessage = error.message || 'Unknown error';
+
+    console.error('[ContentAPI] Error:', {
+      status,
+      message: errorMessage,
+      code: error.code
+    });
+
+    // Map error types to user-friendly codes
+    let errorCode = 'INTERNAL_ERROR';
+    let userMessage = 'Une erreur technique est survenue. Réessayez.';
+
+    if (status === 413 || errorMessage.includes('too large') || errorMessage.includes('payload')) {
+      errorCode = 'PAYLOAD_TOO_LARGE';
+      userMessage = 'Le contexte de la conversation est trop volumineux (images ou historique). Réduisez le nombre d\'images ou commencez une nouvelle conversation.';
+      console.warn('[ContentAPI] Payload too large - user should reduce context');
+    } else if (status === 429 || errorMessage.includes('quota') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
+      errorCode = 'QUOTA_EXCEEDED';
+      userMessage = 'Le quota de l\'API Google est atteint. Attendez quelques minutes ou changez de clé API/projet GCP.';
+      console.warn('[ContentAPI] Quota exceeded');
+    } else if (status === 401 || status === 403 || errorMessage.includes('API_KEY')) {
+      errorCode = 'UNAUTHORIZED';
+      userMessage = 'La clé API Google n\'est pas valide ou a été révoquée.';
+      console.warn('[ContentAPI] Auth error');
+    } else if (status >= 500) {
+      errorCode = 'UPSTREAM_ERROR';
+      userMessage = 'Le service Google AI est temporairement indisponible. Réessayez dans quelques instants.';
+      console.warn('[ContentAPI] Upstream server error');
+    }
+
+    console.warn('[ContentAPI] Returning error to client', { code: errorCode, status, userMessage });
+
+    return res.status(status).json({
+      error: errorMessage,
+      code: errorCode,
+      message: userMessage
+    });
   }
 });
 

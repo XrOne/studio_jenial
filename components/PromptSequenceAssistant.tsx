@@ -441,14 +441,31 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         setFinalResult(result as AssistantResult);
       }
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : 'An unknown error occurred.';
+      // Extract error info - now includes user-friendly message from backend
+      const errorObj = err as any;
+      const errorCode = errorObj.code || 'UNKNOWN_ERROR';
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+
+      // Log for debugging
+      console.error('[Assistant] Chat error', { code: errorCode, message: errorMessage });
+
       setError(errorMessage);
+
+      // Create user-friendly message based on error code
+      let displayMessage = errorMessage;
+      if (errorCode === 'PAYLOAD_TOO_LARGE') {
+        displayMessage = `⚠️ ${errorMessage}\n\n💡 Conseil : Supprimez les images du contexte ou commencez une nouvelle conversation.`;
+      } else if (errorCode === 'QUOTA_EXCEEDED') {
+        displayMessage = `⚠️ ${errorMessage}\n\n💡 Conseil : Attendez quelques minutes ou utilisez une autre clé API.`;
+      } else if (errorCode === 'UNAUTHORIZED') {
+        displayMessage = `🔑 ${errorMessage}\n\n💡 Conseil : Vérifiez votre clé API dans les paramètres.`;
+      }
+
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: `Sorry, I encountered an error: ${errorMessage}`,
+          content: displayMessage,
           image: null,
         },
       ]);
@@ -935,8 +952,8 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
                           type="button"
                           onClick={() => handleSelectMode(mode)}
                           className={`w-full flex items-center gap-3 p-2 rounded-md text-left text-sm transition-colors ${generationMode === mode
-                              ? 'bg-indigo-600 text-white'
-                              : 'text-gray-300 hover:bg-gray-700'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-gray-300 hover:bg-gray-700'
                             }`}>
                           {modeIcons[mode]}
                           <span>{mode}</span>
@@ -1296,8 +1313,8 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
           <button
             onClick={() => setActiveTab('assistant')}
             className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'assistant'
-                ? 'text-white border-indigo-500'
-                : 'text-gray-400 border-transparent hover:text-gray-200'
+              ? 'text-white border-indigo-500'
+              : 'text-gray-400 border-transparent hover:text-gray-200'
               }`}
           >
             <div className="flex items-center gap-2">
@@ -1308,8 +1325,8 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
           <button
             onClick={() => setActiveTab('studio')}
             className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'studio'
-                ? 'text-white border-indigo-500'
-                : 'text-gray-400 border-transparent hover:text-gray-200'
+              ? 'text-white border-indigo-500'
+              : 'text-gray-400 border-transparent hover:text-gray-200'
               }`}
           >
             <div className="flex items-center gap-2">
@@ -1349,8 +1366,8 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
                     }`}>
                   <div
                     className={`max-w-[90%] p-3 rounded-2xl flex flex-col gap-2 ${msg.role === 'user'
-                        ? 'bg-indigo-600 text-white rounded-br-none'
-                        : 'bg-gray-700 text-gray-200 rounded-bl-none'
+                      ? 'bg-indigo-600 text-white rounded-br-none'
+                      : 'bg-gray-700 text-gray-200 rounded-bl-none'
                       }`}>
                     {msg.image && (
                       <img

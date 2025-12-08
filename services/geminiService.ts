@@ -192,7 +192,21 @@ const apiCall = async (endpoint: string, body: any) => {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API Request Failed: ${res.status}`);
+
+    // Log structured error for debugging
+    console.error('[ContextAPI] Error from backend', {
+      status: res.status,
+      code: err.code,
+      message: err.message,
+      error: err.error
+    });
+
+    // Use user-friendly message if available, otherwise fallback
+    const userMessage = err.message || err.error || `API Request Failed: ${res.status}`;
+    const error = new Error(userMessage) as any;
+    error.code = err.code || 'UNKNOWN_ERROR';
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 };
