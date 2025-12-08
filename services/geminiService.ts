@@ -25,6 +25,58 @@ import { SupabaseVideoStorage } from './storage/SupabaseVideoStorage';
 VideoStorageFactory.register(new SupabaseVideoStorage());
 
 // ===========================================
+// IMAGE COMPRESSION (to reduce payload size for Vercel 4.5MB limit)
+// ===========================================
+
+/**
+ * Compress a base64-encoded image to reduce payload size.
+ * Resizes to max dimension and compresses to JPEG.
+ */
+const compressImageBase64 = (base64: string, maxDimension: number = 1024, quality: number = 0.7): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        // Calculate new dimensions maintaining aspect ratio
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        // Create canvas and draw resized image
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to JPEG with compression
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        const compressedBase64 = dataUrl.split(',')[1];
+        resolve(compressedBase64);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => reject(new Error('Failed to load image for compression'));
+    img.src = `data:image/jpeg;base64,${base64}`;
+  });
+};
+
+// ===========================================
 // Reference: https://ai.google.dev/gemini-api/docs/models
 
 const MODELS = {
@@ -720,14 +772,31 @@ This describes the movement/direction from the original video that the extension
 
   // Add visual anchor as a dedicated context message if available
   if (visualAnchor) {
+    // Compress image to reduce payload size (Vercel has 4.5MB limit)
+    let anchorBase64 = visualAnchor.base64;
+    let anchorMimeType = visualAnchor.file.type || 'image/jpeg';
+
+    // If image is larger than 500KB, compress it
+    if (anchorBase64.length > 500 * 1024) {
+      try {
+        console.log('[GenContent] Compressing large anchor image:', `${(anchorBase64.length / 1024).toFixed(1)}KB`);
+        const compressed = await compressImageBase64(anchorBase64, 1024, 0.7);
+        anchorBase64 = compressed;
+        anchorMimeType = 'image/jpeg';
+        console.log('[GenContent] Compressed to:', `${(anchorBase64.length / 1024).toFixed(1)}KB`);
+      } catch (e) {
+        console.warn('[GenContent] Image compression failed, using original:', e);
+      }
+    }
+
     apiContents.push({
       role: 'user',
       parts: [
         { text: '[Visual Anchor - Last frame for continuity reference]' },
         {
           inlineData: {
-            data: visualAnchor.base64,
-            mimeType: visualAnchor.file.type || 'image/jpeg'
+            data: anchorBase64,
+            mimeType: anchorMimeType
           }
         }
       ]
