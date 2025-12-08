@@ -560,46 +560,35 @@ const Studio: React.FC = () => {
         }
       }
       // ═══════════════════════════════════════════════════════════════════
-
+      // EXTERNAL VIDEO CONTINUATION: Use TEXT_TO_VIDEO with last frame
       // ═══════════════════════════════════════════════════════════════════
-      // EXTERNAL VIDEO EXTENSION: Upload video to Google Files API if needed
-      // ═══════════════════════════════════════════════════════════════════
+      // Veo Extension mode ONLY works with Veo-generated videos.
+      // For external videos, we use TEXT_TO_VIDEO with the last frame as startFrame.
+      // The AI prompt already includes continuity context, so the result is seamless.
       if (
         effectiveParams.mode === GenerationMode.EXTEND_VIDEO &&
         originalVideoForExtension?.file &&
         !effectiveParams.inputVideoObject?.uri
       ) {
-        console.log('[Sequence/Extend] Starting extension from uploaded external video', {
+        console.log('[External Video] Detected external video continuation request', {
           rootVideoName: originalVideoForExtension.file.name,
-          rootVideoSize: `${(originalVideoForExtension.file.size / 1024 / 1024).toFixed(2)} MB`,
-          extensionPrompt: effectiveParams.prompt,
+          hasExtensionContext: !!assistantExtensionContext,
         });
 
-        try {
-          setAppState(AppState.LOADING);
-          setErrorMessage(null);
-          console.log('[Sequence/Extend] Uploading external root video to Google Files API...');
+        // Switch to TEXT_TO_VIDEO mode with the last frame as visual anchor
+        console.log('[External Video] Using TEXT_TO_VIDEO mode with startFrame (Veo Extension only supports Veo-generated videos)');
 
-          const uploadResult = await uploadToGoogleFiles(
-            originalVideoForExtension.file,
-            originalVideoForExtension.file.name
-          );
+        effectiveParams = {
+          ...effectiveParams,
+          mode: GenerationMode.TEXT_TO_VIDEO,
+          inputVideoObject: null, // Clear video reference - we use startFrame instead
+          startFrame: assistantExtensionContext || effectiveParams.startFrame,
+        };
 
-          console.log('[Sequence/Extend] External video uploaded successfully:', uploadResult.fileUri);
-
-          // Update effectiveParams with the uploaded video URI
-          effectiveParams = {
-            ...effectiveParams,
-            inputVideoObject: { uri: uploadResult.fileUri },
-          };
-        } catch (uploadError) {
-          console.error('[Sequence/Extend] Failed to upload external video:', uploadError);
-          showStatusError(
-            'Failed to upload the external video for extension. Please try again.'
-          );
-          setAppState(AppState.IDLE);
-          return;
-        }
+        console.log('[External Video] Converted to TEXT_TO_VIDEO with startFrame:', {
+          hasStartFrame: !!effectiveParams.startFrame,
+          prompt: effectiveParams.prompt?.substring(0, 100) + '...',
+        });
       }
 
       setAppState(AppState.LOADING);
