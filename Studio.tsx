@@ -35,6 +35,7 @@ import {
   fetchGeminiConfig,
   getLocalApiKey,
   ApiError,
+  uploadToGoogleFiles,
 } from './services/geminiService';
 import { useAuth } from './contexts/AuthContext';
 import {
@@ -511,14 +512,104 @@ const Studio: React.FC = () => {
         setSequenceProgress(null);
       }
 
+      // ═══════════════════════════════════════════════════════════════════
+      // GUARDRAIL 1 & 2: Validate base video for extensions, enforce mode
+      // ═══════════════════════════════════════════════════════════════════
+      let effectiveParams = { ...params };
+
+      if (promptSequence && currentPromptIndex !== -1) {
+        if (currentPromptIndex === 0) {
+          // ROOT SHOT: Must be TEXT_TO_VIDEO, no base video
+          console.log('[Sequence] Root shot index=0 → mode=TEXT_TO_VIDEO (no base video)');
+
+          // Force TEXT_TO_VIDEO for root shot (unless using frames/references mode)
+          if (effectiveParams.mode === GenerationMode.EXTEND_VIDEO) {
+            console.warn('[Sequence] WARNING: Root shot had EXTEND_VIDEO mode, forcing TEXT_TO_VIDEO');
+            effectiveParams = {
+              ...effectiveParams,
+              mode: GenerationMode.TEXT_TO_VIDEO,
+              inputVideoObject: null,
+            };
+          }
+        } else {
+          // EXTENSION: Must have base video with valid URI
+          const baseVideoData = sequenceVideoData[currentPromptIndex - 1];
+          const baseVideo = baseVideoData?.video;
+          const baseVideoUri = baseVideo?.uri;
+
+          if (!baseVideoUri) {
+            // GUARDRAIL 1: Block extension without base video
+            console.warn(`[Sequence] Cannot generate extension index=${currentPromptIndex}: missing base video for index=${currentPromptIndex - 1}`);
+            console.warn('[Sequence] WARNING: extension requested without base video, blocking generation');
+            setErrorMessage(
+              `The previous shot (Shot ${currentPromptIndex}) is not ready yet. Please generate or wait for the previous video before creating this extension.`
+            );
+            return; // BLOCK - do not proceed
+          }
+
+          // GUARDRAIL 2: Log and enforce extend mode with proper base video
+          console.log(`[Sequence] Preparing extension index=${currentPromptIndex} with base video from index=${currentPromptIndex - 1}: { uri: "${baseVideoUri}" }`);
+          console.log(`[Sequence] Extension index=${currentPromptIndex} → mode=EXTEND_VIDEO, baseVideoUri=${baseVideoUri}`);
+
+          // Force EXTEND_VIDEO mode with the correct base video
+          effectiveParams = {
+            ...effectiveParams,
+            mode: GenerationMode.EXTEND_VIDEO,
+            inputVideoObject: baseVideo,
+          };
+        }
+      }
+      // ═══════════════════════════════════════════════════════════════════
+
+      // ═══════════════════════════════════════════════════════════════════
+      // EXTERNAL VIDEO EXTENSION: Upload video to Google Files API if needed
+      // ═══════════════════════════════════════════════════════════════════
+      if (
+        effectiveParams.mode === GenerationMode.EXTEND_VIDEO &&
+        originalVideoForExtension?.file &&
+        !effectiveParams.inputVideoObject?.uri
+      ) {
+        console.log('[Sequence/Extend] Starting extension from uploaded external video', {
+          rootVideoName: originalVideoForExtension.file.name,
+          rootVideoSize: `${(originalVideoForExtension.file.size / 1024 / 1024).toFixed(2)} MB`,
+          extensionPrompt: effectiveParams.prompt,
+        });
+
+        try {
+          setAppState(AppState.LOADING);
+          setErrorMessage(null);
+          console.log('[Sequence/Extend] Uploading external root video to Google Files API...');
+
+          const uploadResult = await uploadToGoogleFiles(
+            originalVideoForExtension.file,
+            originalVideoForExtension.file.name
+          );
+
+          console.log('[Sequence/Extend] External video uploaded successfully:', uploadResult.fileUri);
+
+          // Update effectiveParams with the uploaded video URI
+          effectiveParams = {
+            ...effectiveParams,
+            inputVideoObject: { uri: uploadResult.fileUri },
+          };
+        } catch (uploadError) {
+          console.error('[Sequence/Extend] Failed to upload external video:', uploadError);
+          showStatusError(
+            'Failed to upload the external video for extension. Please try again.'
+          );
+          setAppState(AppState.IDLE);
+          return;
+        }
+      }
+
       setAppState(AppState.LOADING);
       setErrorMessage(null);
-      setLastConfig(params);
+      setLastConfig(effectiveParams);
       setInitialFormValues(null);
 
       if (
         !assistantExtensionContext &&
-        params.mode !== GenerationMode.EXTEND_VIDEO
+        effectiveParams.mode !== GenerationMode.EXTEND_VIDEO
       ) {
         setAssistantExtensionContext(null);
         setAssistantMotionDescription(null);
@@ -531,13 +622,19 @@ const Studio: React.FC = () => {
       setMentionedCharacters([]);
 
       if (currentPromptIndex === 0) {
-        setMainPromptConfig(params);
+        setMainPromptConfig(effectiveParams);
       }
 
       try {
+        // GUARDRAIL 4: Log the call for chain verification
+        if (promptSequence && currentPromptIndex > 0) {
+          const baseVideoUri = effectiveParams.inputVideoObject?.uri;
+          console.log(`[Sequence] Calling generateVideo for extension index=${currentPromptIndex} with mode=EXTEND_VIDEO and baseVideoUri=${baseVideoUri}`);
+        }
+
         // Use Gemini API for video generation
         const res = await generateVideo(
-          params,
+          effectiveParams,
           abortControllerRef.current.signal,
         );
         const { objectUrl, blob, video } = res;
@@ -545,6 +642,12 @@ const Studio: React.FC = () => {
         if (promptSequence && currentPromptIndex !== -1) {
           try {
             const thumbnail = await generateThumbnail(blob);
+            // GUARDRAIL 4: Clear chain logging
+            if (currentPromptIndex === 0) {
+              console.log(`[Sequence] Stored root video for index=0: { uri: "${video?.uri}" }`);
+            } else {
+              console.log(`[Sequence] Stored extension video for index=${currentPromptIndex}: { uri: "${video?.uri}" }`);
+            }
             setSequenceVideoData((prev) => ({
               ...prev,
               [currentPromptIndex]: { video, blob, url: objectUrl, thumbnail },
@@ -807,6 +910,9 @@ const Studio: React.FC = () => {
 
   const handleSelectPromptFromSequence = (prompt: string, index: number) => {
     const isMainPrompt = index === 0;
+    if (!isMainPrompt) {
+      console.log('[Sequence] Setting up Extension', index, 'with base video:', sequenceVideoData[index - 1]?.video);
+    }
     const baseConfig = isMainPrompt
       ? mainPromptConfig
       : sequenceVideoData[index - 1]
@@ -826,8 +932,10 @@ const Studio: React.FC = () => {
       setInitialFormValues(newConfig);
       setActivePromptIndex(index);
     } else {
-      alert(
-        'Please generate the previous video in the sequence before continuing.',
+      // GUARDRAIL 3: Block early selection of extensions
+      console.warn(`[Sequence] Blocked selection of extension index=${index}: previous shot (index=${index - 1}) not ready`);
+      setErrorMessage(
+        `Cannot select Extension ${index}: Shot ${index} must be generated first.`
       );
     }
   };
@@ -845,7 +953,9 @@ const Studio: React.FC = () => {
       ][nextIndex];
       const previousVideo = sequenceVideoData[nextIndex - 1];
 
-      if (previousVideo) {
+      if (previousVideo?.video?.uri) {
+        // GUARDRAIL 4: Log the chain clearly
+        console.log(`[Sequence] Preparing extension index=${nextIndex} with base video from index=${nextIndex - 1}: { uri: "${previousVideo.video.uri}" }`);
         const newConfig: GenerateVideoParams = {
           ...(mainPromptConfig as GenerateVideoParams),
           prompt: nextPrompt,
@@ -855,8 +965,10 @@ const Studio: React.FC = () => {
         setInitialFormValues(newConfig);
         setCurrentStage(AppStage.PROMPTING);
       } else {
-        alert(
-          'Cannot continue sequence: the result from the previous step is missing.',
+        // GUARDRAIL 1: Block if previous video is missing
+        console.warn(`[Sequence] Cannot continue to extension index=${nextIndex}: previous shot (index=${nextIndex - 1}) has no video URI`);
+        setErrorMessage(
+          `Cannot continue sequence: Shot ${nextIndex} must be generated first.`
         );
       }
     }

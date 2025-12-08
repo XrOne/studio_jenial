@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import * as React from 'react';
-import {PromptSequence, SequenceVideoData} from '../types';
-import {CheckIcon, PencilIcon, XMarkIcon} from './icons';
+import { PromptSequence, SequenceVideoData } from '../types';
+import { CheckIcon, PencilIcon, XMarkIcon } from './icons';
 
 interface SequenceManagerProps {
   sequence: PromptSequence;
@@ -14,6 +14,9 @@ interface SequenceManagerProps {
   onEditRequest: (index: number, prompt: string, thumbnail?: string) => void;
   revisingFromIndex: number | null;
   videoData: Record<number, SequenceVideoData>;
+  // Guardrail 3: Track generation state
+  isGenerating?: boolean;
+  generatingIndex?: number | null;
 }
 
 const SequenceManager: React.FC<SequenceManagerProps> = ({
@@ -24,6 +27,8 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
   onEditRequest,
   revisingFromIndex,
   videoData,
+  isGenerating = false,
+  generatingIndex = null,
 }) => {
   const allPrompts = [sequence.mainPrompt, ...sequence.extensionPrompts];
 
@@ -48,29 +53,50 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
               revisingFromIndex !== null && index > revisingFromIndex;
             const videoThumbnail = videoData[index]?.thumbnail;
 
+            // GUARDRAIL 3: Determine if this prompt can be selected
+            // - Root shot (index 0) can always be used
+            // - Extensions need the previous shot to be done
+            // - Cannot use if that index is currently generating
+            const previousDone = isMain || videoData[index - 1] !== undefined;
+            const isCurrentlyGenerating = isGenerating && generatingIndex === index;
+            const isPreviousGenerating = isGenerating && generatingIndex === index - 1;
+            const canUse = previousDone && !isCurrentlyGenerating && !isPreviousGenerating;
+
+            // Determine the reason for being disabled
+            let disabledReason = '';
+            if (!canUse) {
+              if (isPreviousGenerating) {
+                disabledReason = `Shot ${index} is generating...`;
+              } else if (!previousDone) {
+                disabledReason = `Generate Shot ${index} first`;
+              }
+            }
+
             return (
               <li
                 key={index}
-                className={`relative p-3 rounded-lg border-2 transition-all ${
-                  isDone
+                className={`relative p-3 rounded-lg border-2 transition-all ${isDone
                     ? 'bg-green-900/20 border-green-500/60'
-                    : isActive 
-                        ? 'bg-gray-800 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]' 
-                        : 'bg-gray-800 border-gray-700/50'
-                } ${isRevising ? 'opacity-50' : ''}`}>
+                    : isActive
+                      ? 'bg-gray-800 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]'
+                      : 'bg-gray-800 border-gray-700/50'
+                  } ${isRevising ? 'opacity-50' : ''}`}>
                 <div className="flex justify-between items-start gap-2 mb-2">
                   <div className="flex items-center gap-2">
                     {isDone ? (
                       <div className="w-6 h-6 flex-shrink-0 bg-green-500 rounded-full flex items-center justify-center shadow-md">
                         <CheckIcon className="w-4 h-4 text-white" />
                       </div>
+                    ) : isCurrentlyGenerating ? (
+                      <div className="w-6 h-6 flex-shrink-0 bg-yellow-500 rounded-full flex items-center justify-center shadow-md animate-pulse">
+                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      </div>
                     ) : (
                       <div
-                        className={`w-6 h-6 flex-shrink-0 rounded-full flex items-center justify-center font-bold transition-colors border-2 ${
-                          isActive
+                        className={`w-6 h-6 flex-shrink-0 rounded-full flex items-center justify-center font-bold transition-colors border-2 ${isActive
                             ? 'bg-red-500 border-red-600 text-white animate-pulse'
                             : 'bg-gray-700 border-gray-600 text-gray-400'
-                        }`}>
+                          }`}>
                         {index + 1}
                       </div>
                     )}
@@ -89,11 +115,16 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
                       <PencilIcon className="w-3 h-3" />
                     </button>
                     <button
-                      onClick={() => onSelectPrompt(prompt, index)}
-                      className={`text-xs px-3 py-1 rounded-md transition-colors font-medium ${
-                         isActive ? 'bg-indigo-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300 border border-gray-600'
-                      }`}>
-                      Use
+                      onClick={() => canUse && onSelectPrompt(prompt, index)}
+                      disabled={!canUse}
+                      title={disabledReason || 'Use this prompt'}
+                      className={`text-xs px-3 py-1 rounded-md transition-colors font-medium ${!canUse
+                          ? 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700'
+                          : isActive
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-gray-700 hover:bg-gray-600 text-gray-300 border border-gray-600'
+                        }`}>
+                      {isPreviousGenerating ? '⏳' : 'Use'}
                     </button>
                   </div>
                 </div>
@@ -105,25 +136,25 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
                 {videoThumbnail ? (
                   <div className="pl-8 mt-2">
                     <div className="relative w-full aspect-video rounded-md overflow-hidden border border-gray-600 shadow-lg group">
-                        <img
+                      <img
                         src={`data:image/jpeg;base64,${videoThumbnail}`}
                         alt={`Preview for prompt ${index + 1}`}
                         className="w-full h-full object-cover"
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <span className="text-xs text-white font-semibold bg-black/60 px-2 py-1 rounded">Preview</span>
-                        </div>
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <span className="text-xs text-white font-semibold bg-black/60 px-2 py-1 rounded">Preview</span>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                    // Placeholder for missing thumbnail if expected
-                    isDone && (
-                        <div className="pl-8 mt-2">
-                            <div className="w-full aspect-video bg-gray-900 rounded-md flex items-center justify-center border border-gray-700 border-dashed">
-                                <span className="text-xs text-gray-600">No Thumbnail</span>
-                            </div>
-                        </div>
-                    )
+                  // Placeholder for missing thumbnail if expected
+                  isDone && (
+                    <div className="pl-8 mt-2">
+                      <div className="w-full aspect-video bg-gray-900 rounded-md flex items-center justify-center border border-gray-700 border-dashed">
+                        <span className="text-xs text-gray-600">No Thumbnail</span>
+                      </div>
+                    </div>
+                  )
                 )}
                 {isRevising && (
                   <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center rounded-lg backdrop-blur-sm z-10">

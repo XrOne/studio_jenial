@@ -13,6 +13,13 @@ dotenv.config();
 
 const app = express();
 
+// Initialize Storage
+import { VideoStorageFactory } from './services/storage/StorageFactory.js';
+import { SupabaseVideoStorage } from './services/storage/providers/SupabaseStorage.js';
+
+// Register providers
+VideoStorageFactory.register(new SupabaseVideoStorage());
+
 // Allow large payloads for base64 images/videos
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(cors());
@@ -162,7 +169,7 @@ app.post('/api/generate-content', async (req, res) => {
 app.post('/api/video/generate', async (req, res) => {
   try {
     const apiKey = getApiKey(req);
-    const { model, prompt, parameters } = req.body;
+    const { model, prompt, parameters, videoUri } = req.body;
 
     if (!model) {
       return res.status(400).json({ error: 'Model is required' });
@@ -174,9 +181,20 @@ app.post('/api/video/generate', async (req, res) => {
 
     console.log(`[Veo] Starting video generation with model: ${model}`);
 
+    // Build instance with prompt
+    const instance = { prompt: prompt.trim() };
+
+    // If videoUri provided, add it for extend mode (visual continuity)
+    if (videoUri) {
+      instance.video = { uri: videoUri };
+      console.log(`[Veo] Extend mode enabled with base video: ${videoUri}`);
+    } else {
+      console.log('[Veo] Text-to-video mode (no base video)');
+    }
+
     // Build request body - MUST use instances format for predictLongRunning
     const requestBody = {
-      instances: [{ prompt: prompt.trim() }]
+      instances: [instance]
     };
 
     // Add parameters if provided
@@ -642,10 +660,61 @@ app.post('/api/google/drive/upload-from-url', async (req, res) => {
     res.status(500).json({ error: 'UPLOAD_FAILED', details: error.message });
   }
 });
+// ==========================================
+// STORAGE API
+// ==========================================
+
+// Save video from a remote URI (e.g. Veo generation) to configured storage
+app.post('/api/storage/save-from-uri', async (req, res) => {
+  try {
+    const { uri, filename, metadata } = req.body;
+
+    if (!uri) {
+      return res.status(400).json({ error: 'Missing uri' });
+    }
+
+    console.log(`[Storage] Remote save requested: ${uri}`);
+
+    // Download file from URI
+    const response = await fetch(uri);
+    if (!response.ok) {
+      throw new Error(`Failed to download source video: ${response.statusText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Get storage provider
+    const storage = await VideoStorageFactory.getProvider();
+
+    // Upload
+    const result = await storage.upload(
+      buffer,
+      filename || `video-${Date.now()}.mp4`,
+      {
+        contentType: response.headers.get('content-type') || 'video/mp4',
+        metadata: metadata
+      }
+    );
+
+    console.log(`[Storage] Saved to ${result.provider}: ${result.publicUrl}`);
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('[Storage] Save error:', error);
+    res.status(500).json({
+      error: 'Failed to save video',
+      details: error.message
+    });
+  }
+});
+
 const port = process.env.PORT || 3001;
 
 // Check if we're being imported by Vercel or run directly
 const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+console.log('[Debug] isVercel:', isVercel, 'VERCEL:', process.env.VERCEL, 'VERCEL_ENV:', process.env.VERCEL_ENV);
 
 // Force local startup - always start unless explicitly on Vercel
 if (!isVercel) {

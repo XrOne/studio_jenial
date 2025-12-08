@@ -1,11 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- * 
- * Studio Jenial - Gemini Service
- * BYOK Mode: All API calls use the user's own API key
- */
-
 import {
   ChatMessage,
   ComplianceResult,
@@ -22,12 +14,16 @@ import {
 } from '../types';
 import {
   isSupabaseConfigured,
-  uploadVideoToSupabase,
+  // uploadVideoToSupabase, // Removed in favor of VideoStorageProvider
   uploadImageToSupabase
 } from './supabaseClient';
+import { VideoStorageFactory } from './VideoStorageProvider';
+import { SupabaseVideoStorage } from './storage/SupabaseVideoStorage';
 
-// ===========================================
-// MODEL CONFIGURATION - Latest Google Models (Nov 2025)
+// Initialize Storage Providers
+// Verify we are not re-registering on hot reloads if possible, or Factory handles overwrites
+VideoStorageFactory.register(new SupabaseVideoStorage());
+
 // ===========================================
 // Reference: https://ai.google.dev/gemini-api/docs/models
 
@@ -387,6 +383,19 @@ export const generateVideo = async (
   signal: AbortSignal,
   onProgress?: (status: string) => void,
 ): Promise<{ objectUrl: string; blob: Blob; uri: string; video: any; supabaseUrl?: string }> => {
+  // Determine if this is an extension with a valid video reference
+  const videoUri = params.mode === GenerationMode.EXTEND_VIDEO && params.inputVideoObject?.uri
+    ? params.inputVideoObject.uri
+    : undefined;
+
+  // Clear logging for sequence debugging
+  if (videoUri) {
+    console.log(`[Sequence/Extend] Generating extension with baseVideo=${videoUri}`);
+  } else if (params.mode === GenerationMode.EXTEND_VIDEO) {
+    console.warn('[Sequence/Extend] WARNING: EXTEND_VIDEO mode but no baseVideo URI! Will generate as text-to-video instead of true extension.');
+  } else {
+    console.log(`[Sequence] Generating root shot with mode=${params.mode}`);
+  }
   console.log('[Veo] Starting video generation...', params);
 
   const apiKey = getApiKey();
@@ -442,6 +451,8 @@ export const generateVideo = async (
         model: params.model,
         prompt: finalPrompt.trim(),
         parameters: Object.keys(parameters).length > 0 ? parameters : undefined,
+        // Pass video URI for extend mode (visual continuity)
+        videoUri: videoUri,
       }),
       signal,
     });
@@ -530,17 +541,31 @@ export const generateVideo = async (
 
     console.log('[Veo] Video downloaded:', videoBlob.size, 'bytes');
 
-    // 4. Optional: Upload to Supabase if configured
+    // 4. Optional: Upload to Supabase if configured (via Provider)
     let supabaseUrl: string | undefined;
-    if (isSupabaseConfigured()) {
+
+    // Use the Storage Factory to get the best available provider
+    const storageProvider = await VideoStorageFactory.getAvailableProvider();
+
+    if (storageProvider) {
       try {
-        onProgress?.('Uploading to storage...');
-        console.log('[Veo] Uploading to Supabase...');
-        supabaseUrl = await uploadVideoToSupabase(videoBlob, `veo-${params.model}-${Date.now()}.mp4`) || undefined;
-        console.log('[Veo] Video uploaded to Supabase:', supabaseUrl);
+        onProgress?.(`Uploading to storage (${storageProvider.name})...`);
+        console.log(`[Veo] Uploading to ${storageProvider.name}...`);
+
+        const filename = `veo-${params.model}-${Date.now()}.mp4`;
+        const result = await storageProvider.upload(videoBlob, filename, {
+          contentType: 'video/mp4',
+          public: true
+        });
+
+        supabaseUrl = result.publicUrl;
+        console.log(`[Veo] Video uploaded to ${storageProvider.name}:`, supabaseUrl);
       } catch (uploadError) {
-        console.warn('[Veo] Failed to upload to Supabase:', uploadError);
+        console.warn('[Veo] Failed to upload to storage provider:', uploadError);
+        // Don't crash the generation if upload fails, just log it
       }
+    } else {
+      console.log('[Veo] No storage provider available, skipping upload.');
     }
 
     return {

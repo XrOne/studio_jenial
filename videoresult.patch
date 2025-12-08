@@ -1,0 +1,115 @@
+--- a/components/VideoResult.tsx
++++ b/components/VideoResult.tsx
+@@ -82,6 +82,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
+   const videoRef = useRef<HTMLVideoElement>(null);
+   const [isSaved, setIsSaved] = useState(false);
+   const [keyframes, setKeyframes] = useState<ImageFile[]>([]);
+   const [isExtractingFrames, setIsExtractingFrames] = useState(false);
++  const extractionInProgressRef = useRef(false); // Guard against multiple extractions
+   const [combinedVideoForDownload, setCombinedVideoForDownload] =
+     useState<Blob | null>(null);
+   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
+@@ -228,11 +229,45 @@ const VideoResult: React.FC<VideoResultProps> = ({
+           'sourceopen',
+           async () => {
+             try {
+-              const mime = originalBlob.type;
+-              if (!MediaSource.isTypeSupported(mime)) {
+-                throw new Error(`Unsupported MIME type for MediaSource: ${mime}`);
+-              }
+-              const sourceBuffer = mediaSource.addSourceBuffer(mime);
++              const baseMime = originalBlob.type || 'video/mp4';
++              
++              // Try multiple MIME type variants with common codecs
++              const mimeVariants = [
++                `${baseMime}; codecs="avc1.42E01E, mp4a.40.2"`, // H.264 Baseline + AAC-LC
++                `${baseMime}; codecs="avc1.4D401E, mp4a.40.2"`, // H.264 Main + AAC-LC
++                `${baseMime}; codecs="avc1.64001E, mp4a.40.2"`, // H.264 High + AAC-LC
++                `${baseMime}; codecs="avc1.42E01E"`,             // H.264 Baseline only
++                baseMime                                          // Fallback to basic MIME
++              ];
++
++              const supportedMime = mimeVariants.find(m => MediaSource.isTypeSupported(m));
++
++              if (!supportedMime) {
++                console.warn(`MediaSource does not support any MIME variant for: ${baseMime}`);
++                console.warn('Falling back to sequential playback');
++                
++                // Close MediaSource and use fallback
++                if (mediaSource.readyState === 'open') {
++                  mediaSource.endOfStream();
++                }
++                
++                // Fallback: play videos sequentially
++                const originalUrl = URL.createObjectURL(originalBlob);
++                video.src = originalUrl;
++                
++                const onEnded = () => {
++                  URL.revokeObjectURL(originalUrl);
++                  video.src = videoUrl;
++                  video.play().catch(e => console.error('Fallback playback error:', e));
++                };
++                
++                video.addEventListener('ended', onEnded, { once: true });
++                setIsPreparingVideo(false);
++                return;
++              }
++
++              console.log(`Using MediaSource with MIME type: ${supportedMime}`);
++              const sourceBuffer = mediaSource.addSourceBuffer(supportedMime);
+ 
+               const append = (buffer: ArrayBuffer): Promise<void> => {
+                 return new Promise((resolve, reject) => {
+@@ -313,10 +348,10 @@ const VideoResult: React.FC<VideoResultProps> = ({
+   // Effect for extracting keyframes when video data is ready
+   useEffect(() => {
+     const video = videoRef.current;
+-    if (!video || isPreparingVideo) return;
++    if (!video || isPreparingVideo || extractionInProgressRef.current) return;
+ 
+     const extract = async () => {
+-      if (isExtractingFrames || video.readyState < 2) return; // HAVE_CURRENT_DATA
++      if (video.readyState < 2) return; // HAVE_CURRENT_DATA
+ 
++      extractionInProgressRef.current = true;
+       setIsExtractingFrames(true);
+       setKeyframes([]);
+ 
+@@ -330,7 +365,6 @@ const VideoResult: React.FC<VideoResultProps> = ({
+             'Cannot extract frames, video duration is invalid:',
+             duration,
+           );
+-          setIsExtractingFrames(false);
+           // Restore playback state before early return
+           video.currentTime = savedTime;
+           if (!wasPaused) {
+@@ -365,18 +399,16 @@ const VideoResult: React.FC<VideoResultProps> = ({
+           video.play().catch(() => { });
+         }
+         setIsExtractingFrames(false);
++        extractionInProgressRef.current = false;
+       }
+     };
+ 
+-    const handleLoadedData = () => {
+-      // Using a small timeout to allow the browser to stabilize the video state
+-      setTimeout(extract, 100);
+-    };
+-
+-    video.addEventListener('loadeddata', handleLoadedData);
++    // Use 'once' to ensure extraction runs only once per video load
++    video.addEventListener('loadeddata', extract, { once: true });
+ 
++    // If video is already loaded, extract immediately
+     if (video.readyState >= 2) {
+-      handleLoadedData();
++      extract();
+     }
+ 
+     return () => {
+-      video.removeEventListener('loadeddata', handleLoadedData);
++      video.removeEventListener('loadeddata', extract);
++      extractionInProgressRef.current = false;
+     };
+-  }, [isPreparingVideo, captureFrameAtTime, isExtractingFrames]);
++  }, [videoUrl, isPreparingVideo, captureFrameAtTime]);

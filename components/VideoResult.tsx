@@ -83,6 +83,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
   const [isSaved, setIsSaved] = useState(false);
   const [keyframes, setKeyframes] = useState<ImageFile[]>([]);
   const [isExtractingFrames, setIsExtractingFrames] = useState(false);
+  const extractionInProgressRef = useRef(false); // Guard against multiple extractions
   const [combinedVideoForDownload, setCombinedVideoForDownload] =
     useState<Blob | null>(null);
   const [isPreparingVideo, setIsPreparingVideo] = useState(false);
@@ -228,11 +229,47 @@ const VideoResult: React.FC<VideoResultProps> = ({
           'sourceopen',
           async () => {
             try {
-              const mime = originalBlob.type;
-              if (!MediaSource.isTypeSupported(mime)) {
-                throw new Error(`Unsupported MIME type for MediaSource: ${mime}`);
+              const baseMime = originalBlob.type || 'video/mp4';
+
+              // Try multiple MIME type variants with common codecs
+              const mimeVariants = [
+                `${baseMime}; codecs="avc1.42E01E, mp4a.40.2"`, // H.264 Baseline + AAC-LC
+                `${baseMime}; codecs="avc1.4D401E, mp4a.40.2"`, // H.264 Main + AAC-LC
+                `${baseMime}; codecs="avc1.64001E, mp4a.40.2"`, // H.264 High + AAC-LC
+                `${baseMime}; codecs="avc1.42E01E"`,             // H.264 Baseline only
+                baseMime                                          // Fallback to basic MIME
+              ];
+
+              const supportedMime = mimeVariants.find(m => MediaSource.isTypeSupported(m));
+
+              if (!supportedMime) {
+                console.warn(
+                  `MediaSource does not support any MIME variant for: ${baseMime}`,
+                  mimeVariants
+                );
+                console.warn('[VideoResult] Falling back to extension-only playback');
+
+                // Close MediaSource properly
+                if (mediaSource.readyState === 'open') {
+                  mediaSource.endOfStream();
+                }
+
+                // Clean up any previous blob URL
+                try {
+                  if (video.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(video.src);
+                  }
+                } catch { }
+
+                // Fallback: extension-only preview (keyframes will be from extension)
+                // Note: combinedVideoForDownload still contains original + extension for download
+                video.src = videoUrl;
+                setIsPreparingVideo(false);
+                return;
               }
-              const sourceBuffer = mediaSource.addSourceBuffer(mime);
+
+              console.log(`Using MediaSource with MIME type: ${supportedMime}`);
+              const sourceBuffer = mediaSource.addSourceBuffer(supportedMime);
 
               const append = (buffer: ArrayBuffer): Promise<void> => {
                 return new Promise((resolve, reject) => {
@@ -313,13 +350,19 @@ const VideoResult: React.FC<VideoResultProps> = ({
   // Effect for extracting keyframes when video data is ready
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || isPreparingVideo) return;
+    if (!video || isPreparingVideo || extractionInProgressRef.current) return;
 
     const extract = async () => {
-      if (isExtractingFrames || video.readyState < 2) return; // HAVE_CURRENT_DATA
+      if (video.readyState < 2) return; // HAVE_CURRENT_DATA
 
+      extractionInProgressRef.current = true;
       setIsExtractingFrames(true);
       setKeyframes([]);
+
+      // UX Fix: Freeze playback during extraction to prevent visible jumping
+      const wasPaused = video.paused;
+      const savedTime = video.currentTime;
+      video.pause();
 
       try {
         const duration = video.duration;
@@ -328,7 +371,11 @@ const VideoResult: React.FC<VideoResultProps> = ({
             'Cannot extract frames, video duration is invalid:',
             duration,
           );
-          setIsExtractingFrames(false);
+          // Restore playback state before early return
+          video.currentTime = savedTime;
+          if (!wasPaused) {
+            video.play().catch(() => { });
+          }
           return;
         }
         const frameCount = 5;
@@ -353,25 +400,29 @@ const VideoResult: React.FC<VideoResultProps> = ({
       } catch (error) {
         console.error('Failed to extract keyframes:', error);
       } finally {
+        // Restore original playback position and state
+        video.currentTime = savedTime;
+        if (!wasPaused) {
+          video.play().catch(() => { });
+        }
         setIsExtractingFrames(false);
+        extractionInProgressRef.current = false;
       }
     };
 
-    const handleLoadedData = () => {
-      // Using a small timeout to allow the browser to stabilize the video state
-      setTimeout(extract, 100);
-    };
+    // Use 'once' to ensure extraction runs only once per video load
+    video.addEventListener('loadeddata', extract, { once: true });
 
-    video.addEventListener('loadeddata', handleLoadedData);
-
+    // If video is already loaded, extract immediately
     if (video.readyState >= 2) {
-      handleLoadedData();
+      extract();
     }
 
     return () => {
-      video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('loadeddata', extract);
+      extractionInProgressRef.current = false;
     };
-  }, [isPreparingVideo, captureFrameAtTime, isExtractingFrames]);
+  }, [videoUrl, isPreparingVideo, captureFrameAtTime]);
 
   const handleSaveShot = async () => {
     setIsSaved(true);
@@ -536,10 +587,10 @@ const VideoResult: React.FC<VideoResultProps> = ({
                   <button
                     onClick={() => setShowComplianceDetails(!showComplianceDetails)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-md border transition-all shadow-lg ${complianceResult.score >= 80
-                        ? 'bg-green-900/80 border-green-500 text-green-300'
-                        : complianceResult.score >= 50
-                          ? 'bg-yellow-900/80 border-yellow-500 text-yellow-300'
-                          : 'bg-red-900/80 border-red-500 text-red-300'
+                      ? 'bg-green-900/80 border-green-500 text-green-300'
+                      : complianceResult.score >= 50
+                        ? 'bg-yellow-900/80 border-yellow-500 text-yellow-300'
+                        : 'bg-red-900/80 border-red-500 text-red-300'
                       }`}
                   >
                     <ShieldCheckIcon className="w-4 h-4" />
@@ -627,10 +678,10 @@ const VideoResult: React.FC<VideoResultProps> = ({
                 }}
                 disabled={isUploadingToDrive || driveUploadSuccess}
                 className={`flex items-center gap-2 px-5 py-2.5 font-semibold rounded-lg transition-colors ${driveUploadSuccess
-                    ? 'bg-green-600 text-white'
-                    : isUploadingToDrive
-                      ? 'bg-blue-800 text-blue-200 cursor-wait'
-                      : 'bg-blue-600 hover:bg-blue-500 text-white'
+                  ? 'bg-green-600 text-white'
+                  : isUploadingToDrive
+                    ? 'bg-blue-800 text-blue-200 cursor-wait'
+                    : 'bg-blue-600 hover:bg-blue-500 text-white'
                   }`}>
                 {driveUploadSuccess ? (
                   <><CheckIcon className="w-5 h-5" /> Saved to Drive!</>
