@@ -1287,6 +1287,7 @@ const Studio: React.FC = () => {
                         onCharacterInjected={() => setCharacterToInject(null)}
                         characters={characters}
                         onMentionedCharactersChange={setMentionedCharacters}
+                        motionDescription={assistantMotionDescription}
                       />
                     </div>
                     <div className="col-span-1 h-full">

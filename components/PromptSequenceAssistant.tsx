@@ -79,6 +79,7 @@ interface PromptSequenceAssistantProps {
   onCharacterInjected: () => void;
   characters: Character[];
   onMentionedCharactersChange: (characters: Character[]) => void;
+  motionDescription?: string | null; // Continuity context from modal
 }
 
 type AssistantResult = {
@@ -165,6 +166,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   onCharacterInjected,
   characters,
   onMentionedCharactersChange,
+  motionDescription,
 }) => {
   // --- Merged State from PromptForm ---
   const [prompt, setPrompt] = useState(initialValues?.prompt ?? '');
@@ -430,6 +432,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         activeDogma,
         parseInt(duration, 10),
         extensionContext,
+        motionDescription,
       );
 
       if (typeof result === 'string') {

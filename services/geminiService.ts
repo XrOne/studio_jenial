@@ -667,11 +667,20 @@ export const generateSequenceFromConversation = async (
   dogma: Dogma | null,
   duration: number,
   extensionContext?: ImageFile | null,
+  motionDescription?: string | null,
 ): Promise<string | { creativePrompt: string; veoOptimizedPrompt: string }> => {
 
-  const contextInstruction = extensionContext
-    ? `User wants to EXTEND a video. Last frame provided.`
-    : `User wants a NEW video. Duration: ${duration}s.`;
+  // Build context instruction based on whether this is an extension
+  let contextInstruction = '';
+  if (extensionContext) {
+    contextInstruction = `User wants to EXTEND a video. Last frame provided as visual anchor.`;
+    if (motionDescription) {
+      contextInstruction += `\nCONTINUITY CONTEXT (from video analysis): "${motionDescription}"
+This describes the movement/direction from the original video that the extension should continue.`;
+    }
+  } else {
+    contextInstruction = `User wants a NEW video. Duration: ${duration}s.`;
+  }
 
   const systemInstruction = `You are "Prompt Guardian", expert AI video director.
   Goal: Help user create VEO 3.1 video prompt. Follow Dogma: ${dogma?.title || 'None'}.
@@ -680,22 +689,61 @@ export const generateSequenceFromConversation = async (
   Step 2: When ready, output strictly JSON: { "creativePrompt": "...", "veoOptimizedPrompt": "..." }
   Detect user language and respond in same language.`;
 
-  // Map internal ChatMessage to API Content
-  const apiContents = messages.map(msg => {
-    const parts: any[] = [];
-    if (msg.content) parts.push({ text: msg.content });
-    if (msg.image) {
-      parts.push({
-        inlineData: {
-          data: msg.image.base64,
-          mimeType: msg.image.file.type || 'image/jpeg'
-        }
+  // ═══════════════════════════════════════════════════════════════════
+  // SANITIZE MESSAGES: Keep only text from history, use ONE visual anchor
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Find the visual anchor: prefer extensionContext, else the last image in messages
+  let visualAnchor: ImageFile | null = extensionContext || null;
+  if (!visualAnchor) {
+    // Find the most recent image in the conversation
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].image) {
+        visualAnchor = messages[i].image;
+        break;
+      }
+    }
+  }
+
+  // Build sanitized API contents: text only from history, anchor image once at the end
+  const apiContents: any[] = [];
+
+  // Add text-only versions of all messages (no images in history)
+  for (const msg of messages) {
+    if (msg.content) {
+      apiContents.push({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }]
       });
     }
-    return {
-      role: msg.role === 'assistant' ? 'model' : 'user',
-      parts
-    };
+  }
+
+  // Add visual anchor as a dedicated context message if available
+  if (visualAnchor) {
+    apiContents.push({
+      role: 'user',
+      parts: [
+        { text: '[Visual Anchor - Last frame for continuity reference]' },
+        {
+          inlineData: {
+            data: visualAnchor.base64,
+            mimeType: visualAnchor.file.type || 'image/jpeg'
+          }
+        }
+      ]
+    });
+  }
+
+  // Log sanitized message summary for debugging
+  const totalTextLength = apiContents.reduce((sum, msg) =>
+    sum + msg.parts.reduce((s: number, p: any) => s + (p.text?.length || 0), 0), 0);
+  const hasAnchorImage = !!visualAnchor;
+
+  console.log('[GenContent] Sanitized messages:', {
+    totalMessages: apiContents.length,
+    textLength: totalTextLength,
+    hasVisualAnchor: hasAnchorImage,
+    anchorImageSize: visualAnchor ? `${(visualAnchor.base64.length / 1024).toFixed(1)}KB` : 'none'
   });
 
   const response = await apiCall('/generate-content', {
