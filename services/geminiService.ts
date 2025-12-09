@@ -714,6 +714,64 @@ export const generatePromptSequence = async (
   }
 };
 
+// ===========================================
+// AUTOMATIC MOTION ANALYSIS (Gemini Vision)
+// ===========================================
+
+/**
+ * Automatically analyze motion/movement between two video frames using Gemini Vision.
+ * Returns a concise description of direction, speed, and trajectory.
+ */
+export const analyzeMotionBetweenFrames = async (
+  firstFrame: ImageFile,
+  lastFrame: ImageFile,
+): Promise<string> => {
+  console.log('[MotionAnalysis] Analyzing motion between frames...');
+
+  const systemPrompt = `You are a video continuity expert. Analyze the motion/movement between these two video frames (first frame and last frame of an 8-second clip).
+
+Describe in 2-3 sentences:
+1. The DIRECTION of movement (left-to-right, upward, toward camera, etc.)
+2. The SPEED/INTENSITY (slow pan, fast action, static, etc.)
+3. Any notable CHANGES (zoom, rotation, subject movement)
+
+Be specific and concise. Use cinematic terminology. Respond in the same language as any visible text, or French by default.`;
+
+  try {
+    // Compress images if needed to reduce payload
+    let firstBase64 = firstFrame.base64;
+    let lastBase64 = lastFrame.base64;
+
+    if (firstBase64.length > 300 * 1024) {
+      firstBase64 = await compressImageBase64(firstBase64, 512, 0.6);
+    }
+    if (lastBase64.length > 300 * 1024) {
+      lastBase64 = await compressImageBase64(lastBase64, 512, 0.6);
+    }
+
+    const response = await apiCall('/generate-content', {
+      model: MODELS.FLASH, // Use faster model for quick analysis
+      contents: [{
+        role: 'user',
+        parts: [
+          { text: 'First frame (start of video):' },
+          { inlineData: { data: firstBase64, mimeType: 'image/jpeg' } },
+          { text: 'Last frame (end of video):' },
+          { inlineData: { data: lastBase64, mimeType: 'image/jpeg' } },
+        ]
+      }],
+      config: { systemInstruction: systemPrompt }
+    });
+
+    const analysis = extractText(response);
+    console.log('[MotionAnalysis] Result:', analysis);
+    return analysis;
+  } catch (error) {
+    console.error('[MotionAnalysis] Failed:', error);
+    return ''; // Return empty on error - user can still describe manually
+  }
+};
+
 export const generateSequenceFromConversation = async (
   messages: ChatMessage[],
   dogma: Dogma | null,

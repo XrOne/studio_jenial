@@ -182,7 +182,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
   }, [keyframes, complianceResult, isAnalyzingCompliance, lastConfig, activeDogma]);
 
 
-  // Main effect to handle setting the video source (single or combined via MediaSource)
+  // Main effect to handle setting the video source (single or combined via Server-Side Fusion)
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -192,148 +192,81 @@ const VideoResult: React.FC<VideoResultProps> = ({
     setComplianceResult(null); // Reset critic
 
     if (originalVideoForExtension && videoUrl) {
+      // ═══════════════════════════════════════════════════════════════════
+      // EXTERNAL VIDEO MODE: Use Server-Side Fusion
+      // ═══════════════════════════════════════════════════════════════════
+      // MediaSource stitching fails for external videos due to codec mismatch.
+      // Instead, we call the server to combine videos into a single MP4.
       setIsPreparingVideo(true);
+      console.log('[ContinuityResult] External video detected, requesting server-side fusion...');
 
-      const getDuration = (blob: Blob): Promise<number> => {
-        return new Promise((resolve, reject) => {
-          const tempVideo = document.createElement('video');
-          tempVideo.preload = 'metadata';
-          const url = URL.createObjectURL(blob);
-          tempVideo.src = url;
-          tempVideo.onloadedmetadata = () => {
-            URL.revokeObjectURL(url);
-            resolve(tempVideo.duration);
-          };
-          tempVideo.onerror = (e) => {
-            URL.revokeObjectURL(url);
-            reject('Could not load video metadata to get duration.');
-          };
-        });
+      const combineVideosOnServer = async () => {
+        try {
+          // Convert original file to base64 for upload
+          const originalFile = originalVideoForExtension.file;
+          const originalBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              const base64 = result.split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(originalFile);
+          });
+
+          console.log('[ContinuityResult] Sending to /api/video/combine...', {
+            originalSize: `${(originalFile.size / 1024 / 1024).toFixed(2)} MB`,
+            extensionUrl: videoUrl.substring(0, 100) + '...'
+          });
+
+          const response = await fetch('/api/video/combine', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              originalBlob: originalBase64,
+              extensionUrl: videoUrl,
+            }),
+          });
+
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+            throw new Error(error.error || `Server combine failed: ${response.status}`);
+          }
+
+          const { combinedUrl } = await response.json();
+          console.log('[ContinuityResult] Using combined clip:', combinedUrl);
+
+          // Set the combined video as source
+          video.src = combinedUrl;
+          activeUrl = combinedUrl;
+
+          // Also fetch the combined video for download
+          const combinedBlob = await fetch(combinedUrl).then(r => r.blob());
+          setCombinedVideoForDownload(combinedBlob);
+
+        } catch (error) {
+          console.error('[ContinuityResult] Server-side fusion failed:', error);
+          console.warn('[ContinuityResult] Falling back to extension-only playback');
+
+          // Fallback: Show extension only
+          video.src = videoUrl;
+          activeUrl = videoUrl;
+
+          // Still allow downloading extension
+          const extensionBlob = await fetch(videoUrl).then(r => r.blob());
+          setCombinedVideoForDownload(extensionBlob);
+        } finally {
+          setIsPreparingVideo(false);
+        }
       };
 
-      const setupMediaSource = async () => {
-        const originalBlob = originalVideoForExtension.file;
-        const extensionBlob = await fetch(videoUrl).then((r) => r.blob());
+      combineVideosOnServer();
 
-        setCombinedVideoForDownload(
-          new Blob([originalBlob, extensionBlob], { type: originalBlob.type }),
-        );
-
-        const originalDuration = await getDuration(originalBlob);
-
-        const mediaSource = new MediaSource();
-        activeUrl = URL.createObjectURL(mediaSource);
-        video.src = activeUrl;
-
-        mediaSource.addEventListener(
-          'sourceopen',
-          async () => {
-            try {
-              const baseMime = originalBlob.type || 'video/mp4';
-
-              // Try multiple MIME type variants with common codecs
-              const mimeVariants = [
-                `${baseMime}; codecs="avc1.42E01E, mp4a.40.2"`, // H.264 Baseline + AAC-LC
-                `${baseMime}; codecs="avc1.4D401E, mp4a.40.2"`, // H.264 Main + AAC-LC
-                `${baseMime}; codecs="avc1.64001E, mp4a.40.2"`, // H.264 High + AAC-LC
-                `${baseMime}; codecs="avc1.42E01E"`,             // H.264 Baseline only
-                baseMime                                          // Fallback to basic MIME
-              ];
-
-              const supportedMime = mimeVariants.find(m => MediaSource.isTypeSupported(m));
-
-              if (!supportedMime) {
-                console.warn(
-                  `MediaSource does not support any MIME variant for: ${baseMime}`,
-                  mimeVariants
-                );
-                console.warn('[VideoResult] Falling back to extension-only playback');
-
-                // Close MediaSource properly
-                if (mediaSource.readyState === 'open') {
-                  mediaSource.endOfStream();
-                }
-
-                // Clean up any previous blob URL
-                try {
-                  if (video.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(video.src);
-                  }
-                } catch { }
-
-                // Fallback: extension-only preview (keyframes will be from extension)
-                // Note: combinedVideoForDownload still contains original + extension for download
-                video.src = videoUrl;
-                setIsPreparingVideo(false);
-                return;
-              }
-
-              console.log(`Using MediaSource with MIME type: ${supportedMime}`);
-              const sourceBuffer = mediaSource.addSourceBuffer(supportedMime);
-
-              const append = (buffer: ArrayBuffer): Promise<void> => {
-                return new Promise((resolve, reject) => {
-                  const onUpdateEnd = () => {
-                    sourceBuffer.removeEventListener('updateend', onUpdateEnd);
-                    sourceBuffer.removeEventListener('error', onError);
-                    resolve();
-                  };
-                  const onError = (ev: Event) => {
-                    sourceBuffer.removeEventListener('updateend', onUpdateEnd);
-                    sourceBuffer.removeEventListener('error', onError);
-                    reject(ev);
-                  };
-
-                  sourceBuffer.addEventListener('updateend', onUpdateEnd);
-                  sourceBuffer.addEventListener('error', onError);
-                  try {
-                    sourceBuffer.appendBuffer(buffer);
-                  } catch (e) {
-                    reject(e);
-                  }
-                });
-              };
-
-              const originalBuffer = await originalBlob.arrayBuffer();
-              await append(originalBuffer);
-
-              sourceBuffer.timestampOffset = originalDuration;
-
-              const extensionBuffer = await extensionBlob.arrayBuffer();
-              await append(extensionBuffer);
-
-              if (mediaSource.readyState === 'open') {
-                mediaSource.endOfStream();
-              }
-            } catch (error) {
-              console.error('Failed to append buffers:', error);
-              if (mediaSource.readyState === 'open') {
-                try {
-                  mediaSource.endOfStream();
-                } catch (e) {
-                  console.error('Failed to end stream on error:', e);
-                }
-              }
-            }
-          },
-          { once: true },
-        );
-
-        mediaSource.addEventListener('sourceended', () =>
-          setIsPreparingVideo(false),
-        );
-        mediaSource.addEventListener('sourceclose', () =>
-          setIsPreparingVideo(false),
-        );
-      };
-
-      setupMediaSource().catch((error) => {
-        console.error('Stitching failed:', error);
-        setIsPreparingVideo(false);
-        if (video) video.src = videoUrl; // fallback
-      });
     } else {
-      // Single video
+      // Single video (no external original)
       setIsPreparingVideo(false);
       setCombinedVideoForDownload(null);
       activeUrl = videoUrl;

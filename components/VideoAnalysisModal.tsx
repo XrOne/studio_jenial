@@ -2,10 +2,11 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {ImageFile} from '../types';
-import {CheckIcon, FilmIcon, XMarkIcon} from './icons';
-import {fileToBase64} from './PromptForm';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ImageFile } from '../types';
+import { CheckIcon, FilmIcon, XMarkIcon, SparklesIcon } from './icons';
+import { fileToBase64 } from './PromptForm';
+import { analyzeMotionBetweenFrames } from '../services/geminiService';
 
 interface VideoAnalysisModalProps {
   videoFile: File;
@@ -27,6 +28,7 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
   const [lastFrame, setLastFrame] = useState<ImageFile | null>(null);
   const [motionDescription, setMotionDescription] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -51,7 +53,7 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
               const file = new File(
                 [blob],
                 `frame_at_${time.toFixed(2)}s.png`,
-                {type: 'image/png'},
+                { type: 'image/png' },
               );
               try {
                 const imageFile = await fileToBase64<ImageFile>(file);
@@ -70,17 +72,16 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
           video.removeEventListener('error', onError);
           reject(
             new Error(
-              `Video seeking error: ${
-                e instanceof Event
-                  ? (e.target as HTMLVideoElement).error?.message
-                  : e
+              `Video seeking error: ${e instanceof Event
+                ? (e.target as HTMLVideoElement).error?.message
+                : e
               }`,
             ),
           );
         };
 
-        video.addEventListener('seeked', onSeeked, {once: true});
-        video.addEventListener('error', onError, {once: true});
+        video.addEventListener('seeked', onSeeked, { once: true });
+        video.addEventListener('error', onError, { once: true });
 
         // This is the most reliable way to trigger a seek.
         video.currentTime = time;
@@ -88,6 +89,21 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
     },
     [],
   );
+
+  // Auto-analyze motion when both frames are available
+  const runAutoAnalysis = useCallback(async (first: ImageFile, last: ImageFile) => {
+    setIsAnalyzing(true);
+    try {
+      const analysis = await analyzeMotionBetweenFrames(first, last);
+      if (analysis) {
+        setMotionDescription(analysis);
+      }
+    } catch (error) {
+      console.error('[VideoAnalysis] Auto-analysis failed:', error);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, []);
 
   useEffect(() => {
     const src = URL.createObjectURL(videoFile);
@@ -110,14 +126,16 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
           Math.max(0, duration - 0.1), // Pull back slightly from the very end.
         );
         setLastFrame(last);
+
+        // Auto-analyze motion between frames
+        setIsLoading(false);
+        runAutoAnalysis(first, last);
       } catch (error) {
         console.error('Failed to extract frames:', error);
         alert(
           'Could not process video file. It might be corrupt or in an unsupported format.',
         );
         onClose();
-      } finally {
-        setIsLoading(false);
       }
     };
 
@@ -133,7 +151,7 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
     return () => {
       URL.revokeObjectURL(src);
     };
-  }, [videoFile, captureFrameAtTime, onClose]);
+  }, [videoFile, captureFrameAtTime, onClose, runAutoAnalysis]);
 
   const handleConfirm = () => {
     if (lastFrame && motionDescription.trim()) {
@@ -208,18 +226,40 @@ const VideoAnalysisModal: React.FC<VideoAnalysisModalProps> = ({
             <div>
               <label
                 htmlFor="motion-description"
-                className="text-sm font-semibold mb-2 text-gray-300 block text-center">
-                Décrivez le mouvement principal ou l'action entre ces deux
-                images
+                className="text-sm font-semibold mb-2 text-gray-300 flex items-center justify-center gap-2">
+                {isAnalyzing ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-t-transparent border-indigo-400 rounded-full animate-spin"></div>
+                    Analyse du mouvement en cours...
+                  </>
+                ) : (
+                  <>
+                    <SparklesIcon className="w-4 h-4 text-indigo-400" />
+                    Description du mouvement (analysé par l'IA)
+                  </>
+                )}
               </label>
-              <input
-                id="motion-description"
-                type="text"
-                value={motionDescription}
-                onChange={(e) => setMotionDescription(e.target.value)}
-                placeholder="Ex: travelling avant lent, un personnage marche de gauche à droite..."
-                className="w-full bg-[#1f1f1f] border border-gray-600 rounded-lg p-3 text-center focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-              />
+              <div className="flex gap-2">
+                <textarea
+                  id="motion-description"
+                  value={motionDescription}
+                  onChange={(e) => setMotionDescription(e.target.value)}
+                  placeholder={isAnalyzing ? "Analyse en cours..." : "Ex: travelling avant lent, un personnage marche de gauche à droite..."}
+                  disabled={isAnalyzing}
+                  rows={3}
+                  className="flex-1 bg-[#1f1f1f] border border-gray-600 rounded-lg p-3 text-center focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50 resize-none"
+                />
+                {firstFrame && lastFrame && !isAnalyzing && (
+                  <button
+                    type="button"
+                    onClick={() => runAutoAnalysis(firstFrame, lastFrame)}
+                    className="px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/50 text-indigo-300 rounded-lg transition-colors flex items-center gap-1"
+                    title="Réanalyser avec l'IA"
+                  >
+                    <SparklesIcon className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

@@ -11,6 +11,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
     "@google/genai": "^1.22.0",
     "@supabase/supabase-js": "^2.39.3",
     "body-parser": "^1.20.2",
