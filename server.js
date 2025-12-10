@@ -233,7 +233,11 @@ app.post('/api/video/generate', async (req, res) => {
     } else if (startFrame) {
       // For external video continuation: use startFrame as image reference
       // Veo accepts image via bytesBase64Encoded for visual continuity
-      instance.image = { bytesBase64Encoded: startFrame };
+      // Must include mimeType (we force jpeg in geminiService compression)
+      instance.image = {
+        bytesBase64Encoded: startFrame,
+        mimeType: 'image/jpeg'
+      };
       console.log(`[Veo] Image-to-video mode with startFrame (${(startFrame.length / 1024).toFixed(0)}KB)`);
     } else {
       console.log('[Veo] Text-to-video mode (no base video or startFrame)');
