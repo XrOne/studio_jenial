@@ -294,6 +294,8 @@ const Studio: React.FC = () => {
     useState<GenerateVideoParams | null>(null);
   const [originalVideoForExtension, setOriginalVideoForExtension] =
     useState<VideoFile | null>(null);
+  // Explicit flag to distinguish external videos from internal Veo extensions
+  const [isExternalVideoSource, setIsExternalVideoSource] = useState(false);
   const [assistantExtensionContext, setAssistantExtensionContext] =
     useState<ImageFile | null>(null);
   const [assistantImage, setAssistantImage] = useState<ImageFile | null>(null);
@@ -565,10 +567,12 @@ const Studio: React.FC = () => {
       // Veo Extension mode ONLY works with Veo-generated videos.
       // For external videos, we use TEXT_TO_VIDEO with the last frame as startFrame.
       // The AI prompt already includes continuity context, so the result is seamless.
+      // EXTERNAL VIDEO DETECTION: Only trigger for explicitly external sources
+      // isExternalVideoSource is ONLY set by handleStartExternalExtensionAssistant
       if (
         effectiveParams.mode === GenerationMode.EXTEND_VIDEO &&
-        originalVideoForExtension?.file &&
-        !effectiveParams.inputVideoObject?.uri
+        isExternalVideoSource &&
+        originalVideoForExtension?.file
       ) {
         console.log('[External Video] Detected external video continuation request', {
           rootVideoName: originalVideoForExtension.file.name,
@@ -603,6 +607,7 @@ const Studio: React.FC = () => {
         setAssistantExtensionContext(null);
         setAssistantMotionDescription(null);
         setOriginalVideoForExtension(null);
+        setIsExternalVideoSource(false); // Reset flag
       }
 
       // Don't clear assistantImage immediately so context radar persists during load
@@ -1059,6 +1064,7 @@ const Studio: React.FC = () => {
         base64: '',
       });
     }
+    setIsExternalVideoSource(false); // Ensure internal extension doesn't trigger external flow
 
     setCurrentStage(AppStage.PROMPTING);
   };
@@ -1072,6 +1078,7 @@ const Studio: React.FC = () => {
     setAssistantExtensionContext(context.lastFrame);
     setAssistantMotionDescription(context.motionDescription);
     setOriginalVideoForExtension({ file: context.originalVideo, base64: '' });
+    setIsExternalVideoSource(true); // Mark as external source
     setCurrentStage(AppStage.PROMPTING);
     setInitialFormValues(null);
   };
