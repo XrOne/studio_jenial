@@ -211,7 +211,7 @@ app.post('/api/generate-content', async (req, res) => {
 app.post('/api/video/generate', async (req, res) => {
   try {
     const apiKey = getApiKey(req);
-    const { model, prompt, parameters, videoUri } = req.body;
+    const { model, prompt, parameters, videoUri, startFrame } = req.body;
 
     if (!model) {
       return res.status(400).json({ error: 'Model is required' });
@@ -230,8 +230,13 @@ app.post('/api/video/generate', async (req, res) => {
     if (videoUri) {
       instance.video = { uri: videoUri };
       console.log(`[Veo] Extend mode enabled with base video: ${videoUri}`);
+    } else if (startFrame) {
+      // For external video continuation: use startFrame as image reference
+      // Veo accepts image via bytesBase64Encoded for visual continuity
+      instance.image = { bytesBase64Encoded: startFrame };
+      console.log(`[Veo] Image-to-video mode with startFrame (${(startFrame.length / 1024).toFixed(0)}KB)`);
     } else {
-      console.log('[Veo] Text-to-video mode (no base video)');
+      console.log('[Veo] Text-to-video mode (no base video or startFrame)');
     }
 
     // Build request body - MUST use instances format for predictLongRunning

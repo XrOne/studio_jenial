@@ -44,6 +44,7 @@ interface VideoResultProps {
   onStartExtensionAssistant: (lastFrame: ImageFile) => void;
   activeDogma: Dogma | null;
   onPromptRevised: (newPrompt: string) => void;
+  onVideoFused?: (blob: Blob) => void;
 }
 
 const fileToBase64 = (file: File): Promise<string> => {
@@ -78,6 +79,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
   onStartExtensionAssistant,
   activeDogma,
   onPromptRevised,
+  onVideoFused,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isSaved, setIsSaved] = useState(false);
@@ -222,9 +224,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
 
           const response = await fetch('/api/video/combine', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               originalBlob: originalBase64,
               extensionUrl: videoUrl,
@@ -232,30 +232,90 @@ const VideoResult: React.FC<VideoResultProps> = ({
           });
 
           if (!response.ok) {
-            const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-            throw new Error(error.error || `Server combine failed: ${response.status}`);
+            throw new Error(`Server combine failed: ${response.status}`);
           }
 
-          const { combinedUrl } = await response.json();
-          console.log('[ContinuityResult] Using combined clip:', combinedUrl);
+          const data = await response.json();
+          console.log('[ContinuityResult] Response:', data);
 
-          // Set the combined video as source
-          video.src = combinedUrl;
-          activeUrl = combinedUrl;
+          if (data.isSeparate) {
+            // SEQUENTIAL PLAYBACK & CLIENT-SIDE FUSION
+            // 1. Setup sequential playback
+            video.src = data.originalUrl;
+            activeUrl = data.originalUrl;
 
-          // Also fetch the combined video for download
-          const combinedBlob = await fetch(combinedUrl).then(r => r.blob());
-          setCombinedVideoForDownload(combinedBlob);
+            // Add listener for seamless transition
+            const playNext = () => {
+              console.log('[ContinuityResult] Switching to extension video...');
+              video.src = data.extensionUrl;
+              video.play();
+              video.removeEventListener('ended', playNext);
+            };
+            video.addEventListener('ended', playNext);
+
+            // 2. Perform FFmpeg fusion for DOWNLOAD
+            // (Client-side fusion ensures we get a valid MP4 with all tracks)
+            setIsPreparingVideo(true); // Keep showing loading state for download preparation
+
+            try {
+              console.log('[ContinuityResult] Starting client-side FFmpeg fusion for download...');
+              // Import FFmpeg dynamically to avoid SSR issues
+              const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+              const { toBlobURL } = await import('@ffmpeg/util');
+
+              const ffmpeg = new FFmpeg();
+              const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+
+              await ffmpeg.load({
+                coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+                wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+              });
+
+              // Write files to FFmpeg FS
+              const origData = await fetch(data.originalUrl).then(r => r.arrayBuffer());
+              const extData = await fetch(data.extensionUrl).then(r => r.arrayBuffer());
+
+              await ffmpeg.writeFile('part1.mp4', new Uint8Array(origData));
+              await ffmpeg.writeFile('part2.mp4', new Uint8Array(extData));
+
+              // Create list file for concatenation
+              await ffmpeg.writeFile('list.txt', "file 'part1.mp4'\nfile 'part2.mp4'");
+
+              // Run ffmpeg concat
+              // -f concat -safe 0 -i list.txt -c copy output.mp4
+              // We use -c copy for speed/quality if codecs match, else re-encode
+              // Let's try re-encode to ensure perfect compatibility: -c:v libx264
+              await ffmpeg.exec(['-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', 'output.mp4']);
+
+              const dataOut = await ffmpeg.readFile('output.mp4');
+              // Ensure we have a Uint8Array for Blob
+              const u8 = dataOut instanceof Uint8Array ? dataOut : new Uint8Array(dataOut as any);
+              const combinedBlob = new Blob([u8.buffer as any], { type: 'video/mp4' });
+
+              setCombinedVideoForDownload(combinedBlob);
+              onVideoFused?.(combinedBlob);
+              console.log('[ContinuityResult] Client-side fusion complete! size:', combinedBlob.size);
+            } catch (ffmpegError) {
+              console.error('[ContinuityResult] FFmpeg fusion failed:', ffmpegError);
+              // Fallback to separate download (or extension only)
+              const extBlob = await fetch(data.extensionUrl).then(r => r.blob());
+              setCombinedVideoForDownload(extBlob);
+            }
+
+          } else if (data.combinedUrl) {
+            // Server returned a single URL (if we ever enable server-side fallback)
+            video.src = data.combinedUrl;
+            activeUrl = data.combinedUrl;
+            const combinedBlob = await fetch(data.combinedUrl).then(r => r.blob());
+            setCombinedVideoForDownload(combinedBlob);
+            onVideoFused?.(combinedBlob);
+          }
 
         } catch (error) {
-          console.error('[ContinuityResult] Server-side fusion failed:', error);
-          console.warn('[ContinuityResult] Falling back to extension-only playback');
-
-          // Fallback: Show extension only
+          console.error('[ContinuityResult] Fusion pipeline failed:', error);
+          // Fallback
           video.src = videoUrl;
           activeUrl = videoUrl;
-
-          // Still allow downloading extension
           const extensionBlob = await fetch(videoUrl).then(r => r.blob());
           setCombinedVideoForDownload(extensionBlob);
         } finally {

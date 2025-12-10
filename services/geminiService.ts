@@ -505,7 +505,11 @@ export const generateVideo = async (
 
     // 1. Start Generation using /api/video/generate endpoint
     onProgress?.('Starting video generation...');
-    console.log('[Veo] Calling /api/video/generate...');
+    console.log('[Veo] Calling /api/video/generate...', {
+      hasVideoUri: !!videoUri,
+      hasStartFrame: !!params.startFrame,
+      mode: params.mode
+    });
 
     const startResponse = await fetch(`${API_BASE}/video/generate`, {
       method: 'POST',
@@ -517,8 +521,10 @@ export const generateVideo = async (
         model: params.model,
         prompt: finalPrompt.trim(),
         parameters: Object.keys(parameters).length > 0 ? parameters : undefined,
-        // Pass video URI for extend mode (visual continuity)
+        // Pass video URI for extend mode (Veo-generated videos)
         videoUri: videoUri,
+        // Pass startFrame for external video continuation (image-to-video)
+        startFrame: params.startFrame?.base64,
       }),
       signal,
     });
