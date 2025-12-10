@@ -511,6 +511,25 @@ export const generateVideo = async (
       mode: params.mode
     });
 
+    // Compress startFrame if present to avoid 413 Payload Too Large (Vercel limit ~4.5MB)
+    let startFrameBase64 = params.startFrame?.base64;
+    if (startFrameBase64) {
+      try {
+        const originalSize = startFrameBase64.length;
+        console.log('[Veo] Compressing startFrame...', { originalSize: `${(originalSize / 1024).toFixed(0)}KB` });
+
+        // compressImageBase64 is defined at the top of this file
+        startFrameBase64 = await compressImageBase64(startFrameBase64, 1024, 0.7);
+
+        console.log('[Veo] Compression result:', {
+          newSize: `${(startFrameBase64.length / 1024).toFixed(0)}KB`,
+          ratio: `${((startFrameBase64.length / originalSize) * 100).toFixed(1)}%`
+        });
+      } catch (e) {
+        console.warn('[Veo] Failed to compress startFrame, sending original (risks 413):', e);
+      }
+    }
+
     const startResponse = await fetch(`${API_BASE}/video/generate`, {
       method: 'POST',
       headers: {
@@ -523,8 +542,8 @@ export const generateVideo = async (
         parameters: Object.keys(parameters).length > 0 ? parameters : undefined,
         // Pass video URI for extend mode (Veo-generated videos)
         videoUri: videoUri,
-        // Pass startFrame for external video continuation (image-to-video)
-        startFrame: params.startFrame?.base64,
+        // Pass compressed startFrame for external video continuation
+        startFrame: startFrameBase64,
       }),
       signal,
     });
