@@ -1076,11 +1076,6 @@ const Studio: React.FC = () => {
     setInitialFormValues(null);
   };
 
-  const handleVideoFused = (blob: Blob) => {
-    console.log('[Studio] Fused video received from VideoResult. Updating base for next extension.');
-    setLastVideoBlob(blob);
-  };
-
   const { providerToken } = useAuth(); // Get provider token
 
   return (
@@ -1327,7 +1322,6 @@ const Studio: React.FC = () => {
                     onStartExtensionAssistant={handleStartExtensionAssistant}
                     activeDogma={activeDogma}
                     onPromptRevised={handlePromptRevised}
-                    onVideoFused={handleVideoFused}
                   />
                 )}
                 {currentStage === AppStage.EDITING && frameToEdit && (
