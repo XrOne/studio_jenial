@@ -243,7 +243,12 @@ const VideoResult: React.FC<VideoResultProps> = ({
 
         } catch (error) {
           console.error('[ContinuityResult] Fusion pipeline failed:', error);
-          // Fallback
+          console.error('[ContinuityResult] Error details:', {
+            message: error instanceof Error ? error.message : 'Unknown',
+            stack: error instanceof Error ? error.stack : 'No stack'
+          });
+          // Fallback - show extension only but log the issue clearly
+          console.warn('[ContinuityResult] FALLBACK: Showing extension only due to fusion failure');
           video.src = videoUrl;
           activeUrl = videoUrl;
           const extensionBlob = await fetch(videoUrl).then(r => r.blob());
