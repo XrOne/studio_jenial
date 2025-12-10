@@ -1,14 +1,26 @@
 /**
  * Video Combine Endpoint
- * For external video continuations: stores both videos and returns their URLs.
+ * Concatenates two videos (original + extension) into a single MP4 using FFmpeg (Server-Side).
  * 
- * IMPORTANT: Simple binary concatenation of MP4 files does NOT work.
- * MP4 has a complex structure (ftyp, moov, mdat atoms) that must be properly merged.
- * True video fusion requires FFmpeg or similar tool.
- * 
- * Current approach: Return both URLs, let frontend handle sequential playback/download.
+ * Strategy:
+ * 1. Receive URLs (not blobs) to avoid 413 Payload Too Large.
+ * 2. Download inputs to temp storage.
+ * 3. Use fluent-ffmpeg + ffmpeg-static to concat.
+ * 4. Upload result to Supabase.
  */
 import { createClient } from '@supabase/supabase-js';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegPath from 'ffmpeg-static';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { promisify } from 'util';
+import stream from 'stream';
+
+const pipeline = promisify(stream.pipeline);
+
+// Configure ffmpeg path
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
@@ -16,6 +28,14 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SU
 const supabase = supabaseUrl && supabaseKey
     ? createClient(supabaseUrl, supabaseKey)
     : null;
+
+// Helper to download URL to file
+async function downloadFile(url, outputPath) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Failed to download ${url}: ${response.statusText}`);
+    const fileStream = fs.createWriteStream(outputPath);
+    await pipeline(response.body, fileStream);
+}
 
 export default async function handler(req, res) {
     // CORS headers
@@ -31,73 +51,95 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
+    const tempDir = os.tmpdir();
+    const inputPath1 = path.join(tempDir, `input1_${Date.now()}.mp4`);
+    const inputPath2 = path.join(tempDir, `input2_${Date.now()}.mp4`);
+    // Output path to .mp4 to ensure container format
+    const outputPath = path.join(tempDir, `output_${Date.now()}.mp4`);
+
     try {
-        const { originalBlob, extensionUrl } = req.body;
+        const { originalUrl, extensionUrl } = req.body;
 
         console.log('[VideoCombine] Request received:', {
-            hasOriginalBlob: !!originalBlob,
-            originalBlobSize: originalBlob ? `${(originalBlob.length / 1024).toFixed(0)}KB` : 'none',
+            hasOriginalUrl: !!originalUrl,
             hasExtensionUrl: !!extensionUrl
         });
 
-        if (!extensionUrl) {
-            return res.status(400).json({ error: 'extensionUrl is required' });
+        if (!originalUrl || !extensionUrl) {
+            return res.status(400).json({ error: 'originalUrl and extensionUrl are required' });
         }
 
-        let originalUrl = null;
+        // 1. Download Inputs
+        console.log('[VideoCombine] Downloading inputs...');
+        await Promise.all([
+            downloadFile(originalUrl, inputPath1),
+            downloadFile(extensionUrl, inputPath2)
+        ]);
+        console.log('[VideoCombine] Downloads complete.');
 
-        // If original blob provided, upload it to Supabase for later download
-        if (originalBlob && supabase) {
-            try {
-                const originalBuffer = Buffer.from(originalBlob, 'base64');
-                console.log('[VideoCombine] Original video size:', (originalBuffer.length / 1024 / 1024).toFixed(2), 'MB');
+        // 2. Perform FFmpeg Fusion
+        console.log('[VideoCombine] Starting FFmpeg fusion...');
+        await new Promise((resolve, reject) => {
+            ffmpeg()
+                .input(inputPath1)
+                .input(inputPath2)
+                .on('start', (cmd) => console.log('[VideoCombine] FFmpeg command:', cmd))
+                .on('end', resolve)
+                .on('error', (err) => reject(err))
+                .mergeToFile(outputPath, tempDir);
+        });
+        console.log('[VideoCombine] FFmpeg fusion complete.');
 
-                const filename = `original_${Date.now()}.mp4`;
-                const filePath = `continuity/${filename}`;
+        // Verify output exists and has size
+        const stats = fs.statSync(outputPath);
+        console.log('[VideoCombine] Output size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
 
-                const { error: uploadError } = await supabase.storage
-                    .from('videos')
-                    .upload(filePath, originalBuffer, {
-                        contentType: 'video/mp4',
-                        cacheControl: '3600',
-                        upsert: false
-                    });
+        if (stats.size === 0) throw new Error('Output file is empty');
 
-                if (uploadError) {
-                    console.warn('[VideoCombine] Original upload failed:', uploadError.message);
-                } else {
-                    const { data: urlData } = supabase.storage
-                        .from('videos')
-                        .getPublicUrl(filePath);
-                    originalUrl = urlData.publicUrl;
-                    console.log('[VideoCombine] Original URL:', originalUrl);
-                }
-            } catch (e) {
-                console.warn('[VideoCombine] Failed to process original:', e.message);
-            }
+        // 3. Upload to Supabase
+        if (!supabase) {
+            throw new Error('Supabase storage not configured');
         }
 
-        console.log('[VideoCombine] Returning video URLs:', {
-            originalUrl: originalUrl ? 'set' : 'none',
-            extensionUrl: extensionUrl.substring(0, 50) + '...'
-        });
+        const filename = `combined_${Date.now()}.mp4`;
+        const storagePath = `combined/${filename}`;
+        const fileContent = fs.readFileSync(outputPath);
 
-        // Return both URLs - frontend will handle sequential playback
-        // NOTE: True MP4 fusion requires FFmpeg. Simple concat produces corrupted files.
-        return res.json({
-            originalUrl,
-            extensionUrl,
-            // Flag to indicate this is a two-part response
-            isSeparate: true,
-            message: 'Videos are separate. Download or play sequentially.'
-        });
+        console.log('[VideoCombine] Uploading to Supabase:', storagePath);
+        const { error: uploadError } = await supabase.storage
+            .from('videos')
+            .upload(storagePath, fileContent, {
+                contentType: 'video/mp4',
+                cacheControl: '3600',
+                upsert: false
+            });
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+            .from('videos')
+            .getPublicUrl(storagePath);
+
+        const combinedUrl = urlData.publicUrl;
+        console.log('[VideoCombine] Success! URL:', combinedUrl);
+
+        return res.json({ combinedUrl });
 
     } catch (error) {
         console.error('[VideoCombine] Error:', error);
         return res.status(500).json({
-            error: error.message || 'Video processing failed',
+            error: error.message || 'Video combination failed',
             details: error.toString()
         });
+    } finally {
+        // Cleanup temp files
+        try {
+            if (fs.existsSync(inputPath1)) fs.unlinkSync(inputPath1);
+            if (fs.existsSync(inputPath2)) fs.unlinkSync(inputPath2);
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        } catch (e) {
+            console.warn('[VideoCombine] Cleanup warning:', e.message);
+        }
     }
 }
 

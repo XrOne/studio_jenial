@@ -26,6 +26,7 @@ import {
 } from './icons';
 import KeyframeRefinementAssistant from './KeyframeRefinementAssistant';
 import { analyzeVideoCompliance } from '../services/geminiService';
+import { uploadVideoToSupabase } from '../services/supabaseClient';
 import { isDriveEnabled, isDriveConnected, connectDrive, uploadToDrive } from '../services/googleDriveClient';
 
 interface VideoResultProps {
@@ -202,21 +203,12 @@ const VideoResult: React.FC<VideoResultProps> = ({
 
       const combineVideosOnServer = async () => {
         try {
-          // Convert original file to base64 for upload
+          // Upload to Supabase to get a public URL
           const originalFile = originalVideoForExtension.file;
-          const originalBase64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = reader.result as string;
-              const base64 = result.split(',')[1];
-              resolve(base64);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(originalFile);
-          });
+          const originalUrl = await uploadVideoToSupabase(originalFile, 'original-temp.mp4');
 
-          console.log('[ContinuityResult] Sending to /api/video/combine...', {
-            originalSize: `${(originalFile.size / 1024 / 1024).toFixed(2)} MB`,
+          console.log('[ContinuityResult] Sending to /api/video/combine (via URL)...', {
+            originalUrl,
             extensionUrl: videoUrl.substring(0, 100) + '...'
           });
 
@@ -224,7 +216,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              originalBlob: originalBase64,
+              originalUrl: originalUrl,
               extensionUrl: videoUrl,
             }),
           });
@@ -236,34 +228,17 @@ const VideoResult: React.FC<VideoResultProps> = ({
           const data = await response.json();
           console.log('[ContinuityResult] Response:', data);
 
-          if (data.isSeparate) {
-            // SEQUENTIAL PLAYBACK ONLY (No client-side fusion)
-            // 1. Setup sequential playback
-            video.src = data.originalUrl;
-            activeUrl = data.originalUrl;
-
-            // Add listener for seamless transition
-            const playNext = () => {
-              console.log('[ContinuityResult] Switching to extension video...');
-              video.src = data.extensionUrl;
-              video.play();
-              video.removeEventListener('ended', playNext);
-            };
-            video.addEventListener('ended', playNext);
-
-            // 2. Download: Extension Only (Fallback as per strict requirements)
-            // Since we cannot use FFmpeg client-side and server-side failed to concat,
-            // we default to downloading the extension.
-            const extBlob = await fetch(data.extensionUrl).then(r => r.blob());
-            setCombinedVideoForDownload(extBlob);
-
-            // Note: onVideoFused is removed as part of strict revert
-          } else if (data.combinedUrl) {
-            // Server returned a single URL (if we ever enable server-side fallback)
+          if (data.combinedUrl) {
+            // SUCCESS: Server returned a fused MP4 (via FFmpeg)
+            console.log('[ContinuityResult] Fusion successful! Playing combined video.');
             video.src = data.combinedUrl;
             activeUrl = data.combinedUrl;
+
+            // Prepare for download
             const combinedBlob = await fetch(data.combinedUrl).then(r => r.blob());
             setCombinedVideoForDownload(combinedBlob);
+          } else {
+            throw new Error('Server response missing combinedUrl');
           }
 
         } catch (error) {
