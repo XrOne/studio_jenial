@@ -817,8 +817,16 @@ This describes the movement/direction from the original video that the extension
     contextInstruction = `User wants a NEW video. Duration: ${duration}s.`;
   }
 
+  // DEBUG: Log dogma being used
+  console.log('[DogmaDebug] generateSequenceFromConversation called with dogma:', {
+    id: dogma?.id || 'none',
+    title: dogma?.title || 'none',
+    textPreview: dogma?.text?.substring(0, 100) + '...' || 'none'
+  });
+
   const systemInstruction = `You are "Prompt Guardian", expert AI video director.
   Goal: Help user create VEO 3.1 video prompt. Follow Dogma: ${dogma?.title || 'None'}.
+  ${dogma?.text ? `Dogma Rules: ${dogma.text}` : ''}
   ${contextInstruction}
   Step 1: Creative Conversation.
   Step 2: When ready, output strictly JSON: { "creativePrompt": "...", "veoOptimizedPrompt": "..." }
@@ -1149,6 +1157,13 @@ export const regenerateSinglePrompt = async (
 ): Promise<string> => {
   const { instruction, promptToRevise, dogma, promptBefore, promptAfter } = params;
 
+  // DEBUG: Log which dogma is being used
+  console.log('[DogmaDebug] regenerateSinglePrompt called with dogma:', {
+    id: dogma?.id || 'none',
+    title: dogma?.title || 'none',
+    textPreview: dogma?.text?.substring(0, 100) + '...' || 'none'
+  });
+
   const systemInstruction = `Revise ONE prompt in a sequence. Dogma: ${dogma?.text}.
   Context: Before: "${promptBefore}", After: "${promptAfter}".
   Target: "${promptToRevise}". User Change: "${instruction}".
@@ -1195,6 +1210,13 @@ export const getRevisionAssistant = async () => {
 }
 
 export const getRevisionAssistantResponse = async (params: any) => {
+  // DEBUG: Log which dogma is being used for revision
+  console.log('[DogmaDebug] getRevisionAssistantResponse called with dogma:', {
+    id: params.dogma?.id || 'none',
+    title: params.dogma?.title || 'none',
+    textPreview: params.dogma?.text?.substring(0, 100) + '...' || 'none'
+  });
+
   const res = await generateSequenceFromConversation(
     params.messages,
     params.dogma,
