@@ -358,14 +358,29 @@ app.get('/api/video/status', async (req, res) => {
       return res.json({ done: false });
     }
 
-    // Extract video URI from response
-    const videoUri = data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+    // Extract video URI from response - try multiple paths for different Veo versions
+    let videoUri = data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+
+    // Fallback paths for different API response formats
+    if (!videoUri) {
+      videoUri = data.response?.video?.uri;
+    }
+    if (!videoUri) {
+      videoUri = data.response?.generatedSamples?.[0]?.video?.uri;
+    }
+    if (!videoUri) {
+      videoUri = data.result?.video?.uri;
+    }
+    if (!videoUri) {
+      videoUri = data.video?.uri;
+    }
 
     if (!videoUri) {
-      console.error('[Veo] No video URI in response:', JSON.stringify(data, null, 2));
+      console.error('[Veo] No video URI found in response. Full response:', JSON.stringify(data, null, 2));
       return res.status(500).json({
         done: true,
-        error: 'No video URI in completed operation response'
+        error: 'No video URI in completed operation response',
+        debug: { responseKeys: Object.keys(data || {}), hasResponse: !!data.response }
       });
     }
 
