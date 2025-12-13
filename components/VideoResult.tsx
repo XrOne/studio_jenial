@@ -10,6 +10,7 @@ import {
   Dogma,
   GenerateVideoParams,
   ImageFile,
+  PromptSequence,
   SequenceProgress,
   VideoFile,
 } from '../types';
@@ -45,6 +46,10 @@ interface VideoResultProps {
   onStartExtensionAssistant: (lastFrame: ImageFile) => void;
   activeDogma: Dogma | null;
   onPromptRevised: (newPrompt: string) => void;
+  // === NANO BANANA PRO: Drift Control ===
+  onRecalNano?: (segmentIndex: number, baseImage: ImageFile, initialPrompt: string) => void;
+  promptSequence?: PromptSequence | null;
+  activePromptIndex?: number | null;
 }
 
 const fileToBase64 = (file: File): Promise<string> => {
@@ -79,6 +84,10 @@ const VideoResult: React.FC<VideoResultProps> = ({
   onStartExtensionAssistant,
   activeDogma,
   onPromptRevised,
+  // Drift Control props
+  onRecalNano,
+  promptSequence,
+  activePromptIndex,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isSaved, setIsSaved] = useState(false);
@@ -462,6 +471,46 @@ const VideoResult: React.FC<VideoResultProps> = ({
     }
   }
 
+  // === NANO BANANA PRO: Drift Control ===
+  // Show button only for extensions (segmentIndex >= 1) with video/keyframes available
+  const canShowDriftControl =
+    onRecalNano &&
+    promptSequence &&
+    activePromptIndex !== null &&
+    activePromptIndex !== undefined &&
+    activePromptIndex >= 1 &&
+    keyframes.length > 0;
+
+  const handleRecalNano = async () => {
+    if (!onRecalNano || !promptSequence || activePromptIndex === null || activePromptIndex === undefined) return;
+    if (activePromptIndex < 1) {
+      console.warn('[DriftControl] Cannot recal root prompt via drift control');
+      return;
+    }
+
+    // Get extension prompt (extensionPrompts is 0-indexed, activePromptIndex is 1-indexed for extensions)
+    const extensionIndex = activePromptIndex - 1;
+    const initialPrompt = promptSequence.extensionPrompts[extensionIndex] || '';
+
+    // Use last keyframe as base image (most representative of drift)
+    const baseImage = keyframes.length > 0
+      ? keyframes[keyframes.length - 1]
+      : null;
+
+    if (!baseImage) {
+      console.warn('[DriftControl] No keyframes available for drift control');
+      return;
+    }
+
+    console.log('[DriftControl] Opening Nano editor for extension', {
+      segmentIndex: activePromptIndex,
+      hasBaseImage: !!baseImage,
+      promptLength: initialPrompt.length,
+    });
+
+    onRecalNano(activePromptIndex, baseImage, initialPrompt);
+  };
+
   const isSequenceInProgress =
     sequenceProgress && sequenceProgress.current < sequenceProgress.total;
 
@@ -658,6 +707,17 @@ const VideoResult: React.FC<VideoResultProps> = ({
                 Extend with Assistant
               </button>
             </>
+          )}
+
+          {/* Nano Banana Pro: Drift Control Button */}
+          {canShowDriftControl && (
+            <button
+              onClick={handleRecalNano}
+              title="Corrige le cadrage/axe à partir d'un frame, puis applique un prompt d'extension corrigé."
+              className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors text-sm shadow-lg shadow-orange-900/20">
+              <SparklesIcon className="w-4 h-4" />
+              Recaler avec Nano
+            </button>
           )}
         </div>
       </div>

@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import * as React from 'react';
-import {useEffect, useRef, useState} from 'react';
-import {getRevisionAssistantResponse} from '../services/geminiService';
-import {ChatMessage, Dogma, ImageFile} from '../types';
-import {ArrowRightIcon, PencilIcon, XMarkIcon} from './icons';
+import { useEffect, useRef, useState } from 'react';
+import { getRevisionAssistantResponse } from '../services/geminiService';
+import { ChatMessage, Dogma, ImageFile } from '../types';
+import { ArrowRightIcon, PencilIcon, SparklesIcon, XMarkIcon } from './icons';
 
 interface PromptEditorModalProps {
   originalPrompt: string;
@@ -16,6 +16,8 @@ interface PromptEditorModalProps {
   dogma: Dogma | null;
   promptBefore?: string;
   promptAfter?: string;
+  // === NANO BANANA PRO: Visual alignment ===
+  onOpenNanoEditor?: () => void;  // Callback to open Nano editor for alignment
 }
 
 const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
@@ -26,6 +28,7 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
   dogma,
   promptBefore,
   promptAfter,
+  onOpenNanoEditor,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userInput, setUserInput] = useState('');
@@ -43,24 +46,23 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
       const file = new File([blob], 'visual_context.jpg', {
         type: 'image/jpeg',
       });
-      initialImage = {file, base64: visualContextBase64};
+      initialImage = { file, base64: visualContextBase64 };
     }
 
     setMessages([
       {
         role: 'assistant',
-        content: `I'm ready to help you revise this prompt segment. I see the original prompt${
-          visualContextBase64
+        content: `I'm ready to help you revise this prompt segment. I see the original prompt${visualContextBase64
             ? ' and a frame from the previous video result'
             : ''
-        }. What would you like to change?`,
+          }. What would you like to change?`,
         image: initialImage,
       },
     ]);
   }, [originalPrompt, visualContextBase64]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -69,7 +71,7 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
 
     const newMessages: ChatMessage[] = [
       ...messages,
-      {role: 'user', content: userInput, image: null},
+      { role: 'user', content: userInput, image: null },
     ];
     setMessages(newMessages);
     setUserInput('');
@@ -89,7 +91,7 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
       if (typeof result === 'string') {
         setMessages((prev) => [
           ...prev,
-          {role: 'assistant', content: result, image: null},
+          { role: 'assistant', content: result, image: null },
         ]);
       } else if (result.isFinalRevision) {
         setFinalPrompt(result.revisedPrompt);
@@ -150,15 +152,13 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
               {messages.map((msg, index) => (
                 <div
                   key={index}
-                  className={`flex ${
-                    msg.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}>
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'
+                    }`}>
                   <div
-                    className={`max-w-[90%] p-3 rounded-2xl flex flex-col gap-2 ${
-                      msg.role === 'user'
+                    className={`max-w-[90%] p-3 rounded-2xl flex flex-col gap-2 ${msg.role === 'user'
                         ? 'bg-indigo-600 text-white rounded-br-none'
                         : 'bg-gray-700 text-gray-200 rounded-bl-none'
-                    }`}>
+                      }`}>
                     {msg.image && (
                       <img
                         src={`data:image/jpeg;base64,${msg.image.base64}`}
@@ -251,18 +251,34 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
           </div>
         </div>
 
-        <div className="flex justify-end items-center gap-4 flex-shrink-0 pt-4 border-t border-gray-700">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors">
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={!finalPrompt || isLoading}
-            className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
-            Confirm Revision
-          </button>
+        <div className="flex justify-between items-center gap-4 flex-shrink-0 pt-4 border-t border-gray-700">
+          {/* Left side: Nano alignment button */}
+          <div>
+            {onOpenNanoEditor && visualContextBase64 && (
+              <button
+                onClick={onOpenNanoEditor}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-orange-900/20"
+              >
+                <SparklesIcon className="w-4 h-4" />
+                Aligner au visuel (Nano)
+              </button>
+            )}
+          </div>
+
+          {/* Right side: Cancel and Confirm */}
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onClose}
+              className="px-6 py-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={!finalPrompt || isLoading}
+              className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
+              Confirm Revision
+            </button>
+          </div>
         </div>
       </div>
     </div>

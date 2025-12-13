@@ -1,129 +1,231 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
-*/
+ * 
+ * StoryboardPreviewModal - 12 Shot Variants Grid
+ * 
+ * Displays a grid of 12 camera angle/framing variants generated via Nano API.
+ * User can select "Utiliser ce plan" to apply the variant to the current segment.
+ */
 import * as React from 'react';
-import {useEffect, useState} from 'react';
-import {ImageFile, Storyboard} from '../types';
-import {ArrowPathIcon, CheckIcon, PencilIcon, XMarkIcon} from './icons';
+import { useCallback, useEffect, useState } from 'react';
+import { Dogma, ImageFile, NanoApplyPayload, STANDARD_SHOT_LIST } from '../types';
+import { SparklesIcon, XMarkIcon } from './icons';
+import { generateShotVariants } from '../services/nanoService';
 
 interface StoryboardPreviewModalProps {
-  storyboard: Storyboard;
+  isOpen: boolean;
   onClose: () => void;
-  onConfirm: (storyboard: Storyboard) => void;
-  onRegenerate: () => void;
-  startFrame?: ImageFile | null;
-  endFrame?: ImageFile | null;
+  onApplyVariant: (payload: NanoApplyPayload) => void;
+  segmentIndex: number;  // 0 = root, 1..N = extensions
+  baseImage: ImageFile;
+  currentPrompt: string;
+  dogma: Dogma | null;
+}
+
+interface VariantGridItem {
+  shotType: typeof STANDARD_SHOT_LIST[number];
+  image: ImageFile | null;
+  prompt: string;
+  isLoading: boolean;
+  error: string | null;
 }
 
 const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
-  storyboard,
+  isOpen,
   onClose,
-  onConfirm,
-  onRegenerate,
-  startFrame,
-  endFrame,
+  onApplyVariant,
+  segmentIndex,
+  baseImage,
+  currentPrompt,
+  dogma,
 }) => {
-  const [editableStoryboard, setEditableStoryboard] =
-    useState<Storyboard>(storyboard);
+  const [variants, setVariants] = useState<VariantGridItem[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [globalError, setGlobalError] = useState<string | null>(null);
 
+  // Derive target from segment index
+  const target = segmentIndex === 0 ? 'root' : 'extension';
+
+  // Initialize grid with empty slots
   useEffect(() => {
-    // Create a deep copy to avoid mutating the original prop
-    const newStoryboard = JSON.parse(JSON.stringify(storyboard)) as Storyboard;
-    let modified = false;
-
-    if (startFrame && newStoryboard.keyframes.length > 0) {
-      newStoryboard.keyframes[0].imageBase64 = startFrame.base64;
-      modified = true;
+    if (isOpen) {
+      const initialVariants: VariantGridItem[] = STANDARD_SHOT_LIST.map(shotType => ({
+        shotType,
+        image: null,
+        prompt: '',
+        isLoading: false,
+        error: null,
+      }));
+      setVariants(initialVariants);
+      setGlobalError(null);
     }
-    if (endFrame && newStoryboard.keyframes.length > 2) {
-      newStoryboard.keyframes[newStoryboard.keyframes.length - 1].imageBase64 =
-        endFrame.base64;
-      modified = true;
-    }
+  }, [isOpen]);
 
-    if (modified) {
-      setEditableStoryboard(newStoryboard);
-    } else {
-      setEditableStoryboard(storyboard);
-    }
-  }, [storyboard, startFrame, endFrame]);
+  // Generate all variants
+  const handleGenerateAll = useCallback(async () => {
+    setIsGenerating(true);
+    setGlobalError(null);
 
-  const handleDescriptionChange = (index: number, newDescription: string) => {
-    setEditableStoryboard((prev) => {
-      const newKeyframes = [...prev.keyframes];
-      newKeyframes[index] = {...newKeyframes[index], description: newDescription};
-      return {...prev, keyframes: newKeyframes};
+    // Mark all as loading
+    setVariants(prev => prev.map(v => ({ ...v, isLoading: true, error: null })));
+
+    try {
+      const results = await generateShotVariants({
+        baseImage: baseImage,
+        shotList: [...STANDARD_SHOT_LIST],
+        dogma: dogma,
+      });
+
+      // Update variants with results
+      setVariants(prev => prev.map(v => {
+        // Find result matching this shot type by label
+        const result = results.variants.find(r => r.label === v.shotType);
+        if (result) {
+          return {
+            ...v,
+            image: result.previewImage,
+            prompt: result.deltaInstruction || currentPrompt,
+            isLoading: false,
+          };
+        }
+        return { ...v, isLoading: false, error: 'Not generated' };
+      }));
+    } catch (error) {
+      setGlobalError(error instanceof Error ? error.message : 'Failed to generate variants');
+      setVariants(prev => prev.map(v => ({ ...v, isLoading: false })));
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [currentPrompt, baseImage, dogma]);
+
+  // Apply a variant
+  const handleApplyVariant = useCallback((variant: VariantGridItem) => {
+    if (!variant.image) return;
+
+    const payload: NanoApplyPayload = {
+      target: target as 'root' | 'extension',
+      segmentIndex,
+      previewPrompt: variant.prompt || currentPrompt,
+      previewImage: variant.image,
+      cameraNotes: variant.shotType,
+    };
+
+    console.log('[StoryboardPreview] Applying variant:', {
+      shotType: variant.shotType,
+      segmentIndex,
+      target,
     });
-  };
+
+    onApplyVariant(payload);
+    onClose();
+  }, [segmentIndex, target, currentPrompt, onApplyVariant, onClose]);
+
+  if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-xl w-full max-w-7xl h-[90vh] p-6 flex flex-col gap-4">
-        <div className="flex justify-between items-center flex-shrink-0">
-          <div>
-            <h2 className="text-2xl font-bold text-white">Storyboard Preview</h2>
-            <p className="text-gray-400 text-sm max-w-2xl truncate">
-              Review and edit the AI's plan for: "{storyboard.prompt}"
-            </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-[90vw] max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+          <div className="flex items-center gap-3">
+            <SparklesIcon className="w-6 h-6 text-orange-400" />
+            <div>
+              <h2 className="text-xl font-bold text-white">Couverture de Plans</h2>
+              <p className="text-sm text-gray-400">
+                {segmentIndex === 0 ? 'Root' : `Extension ${segmentIndex}`} — 12 variantes de cadrage
+              </p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-gray-700 text-gray-400">
-            <XMarkIcon className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleGenerateAll}
+              disabled={isGenerating}
+              className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-t-transparent border-white rounded-full animate-spin" />
+                  Génération...
+                </>
+              ) : (
+                <>
+                  <SparklesIcon className="w-4 h-4" />
+                  Générer 12 Plans
+                </>
+              )}
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              <XMarkIcon className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        <div className="flex-grow flex items-center justify-center overflow-x-auto overflow-y-hidden py-4">
-          <div className="flex gap-6 px-4">
-            {editableStoryboard.keyframes.map((frame, index) => (
+        {/* Error Banner */}
+        {globalError && (
+          <div className="mx-4 mt-4 p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
+            {globalError}
+          </div>
+        )}
+
+        {/* Grid */}
+        <div className="flex-grow overflow-y-auto p-4">
+          <div className="grid grid-cols-4 gap-4">
+            {variants.map((variant, idx) => (
               <div
-                key={index}
-                className="flex flex-col gap-3 w-80 flex-shrink-0">
-                <div className="aspect-video bg-black rounded-lg overflow-hidden border-2 border-gray-700">
-                  <img
-                    src={`data:image/png;base64,${frame.imageBase64}`}
-                    alt={`Keyframe ${index + 1}`}
-                    className="w-full h-full object-cover"
-                  />
+                key={variant.shotType}
+                className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden group hover:border-orange-500/50 transition-colors"
+              >
+                {/* Image / Placeholder */}
+                <div className="aspect-video relative bg-gray-900">
+                  {variant.isLoading ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-8 h-8 border-3 border-t-transparent border-orange-500 rounded-full animate-spin" />
+                    </div>
+                  ) : variant.image ? (
+                    <>
+                      <img
+                        src={`data:image/jpeg;base64,${variant.image.base64}`}
+                        alt={variant.shotType}
+                        className="w-full h-full object-cover"
+                      />
+                      {/* Hover Action */}
+                      <button
+                        onClick={() => handleApplyVariant(variant)}
+                        className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                      >
+                        <span className="px-3 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg shadow-lg">
+                          Utiliser ce plan
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-xs">
+                      Non généré
+                    </div>
+                  )}
                 </div>
-                <div className="text-center">
-                  <h3 className="font-semibold text-white">
-                    {frame.timestamp}
-                  </h3>
-                  <textarea
-                    value={frame.description}
-                    onChange={(e) =>
-                      handleDescriptionChange(index, e.target.value)
-                    }
-                    className="w-full h-24 bg-gray-900/50 text-sm text-gray-400 leading-snug p-2 rounded-md resize-none border border-transparent focus:border-indigo-500 focus:outline-none transition-colors"
-                    aria-label={`Description for keyframe ${index + 1}`}
-                  />
+
+                {/* Label */}
+                <div className="p-2">
+                  <div className="text-xs font-semibold text-gray-300 truncate">
+                    {variant.shotType}
+                  </div>
+                  {variant.error && (
+                    <div className="text-[10px] text-red-400 mt-1">{variant.error}</div>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="flex justify-center items-center gap-4 flex-shrink-0 pt-4 border-t border-gray-700">
-          <button
-            onClick={onClose}
-            className="flex items-center gap-2 px-6 py-3 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors">
-            <PencilIcon className="w-5 h-5" />
-            Refine Prompt
-          </button>
-          <button
-            onClick={onRegenerate}
-            className="flex items-center gap-2 px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg transition-colors">
-            <ArrowPathIcon className="w-5 h-5" />
-            Retry
-          </button>
-          <button
-            onClick={() => onConfirm(editableStoryboard)}
-            className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors">
-            <CheckIcon className="w-5 h-5" />
-            Confirm & Generate
-          </button>
+        {/* Footer hint */}
+        <div className="p-3 border-t border-gray-700 text-center text-xs text-gray-500">
+          Cliquez sur une vignette pour l'appliquer au segment courant
         </div>
       </div>
     </div>

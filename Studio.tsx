@@ -23,6 +23,7 @@ import PromptEditorModal from './components/PromptEditorModal';
 import PromptSequenceAssistant from './components/PromptSequenceAssistant';
 import SequenceManager from './components/SequenceManager';
 import ShotLibrary from './components/ShotLibrary';
+import StoryboardPreviewModal from './components/StoryboardPreviewModal';
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
 import useLocalStorage from './hooks/useLocalStorage';
@@ -46,220 +47,226 @@ import {
   GenerateVideoParams,
   GenerationMode,
   ImageFile,
+  NanoApplyPayload,
+  NanoEditorContext,
   PromptSequence,
+  PromptSequenceStatus,
   SavedShot,
   SequenceProgress,
   SequenceVideoData,
+  StoryboardPreview,
   VeoModel,
   VideoFile,
   VideoProvider,
 } from './types';
 
-// Removed conflicting window.aistudio declaration
-
-const declicsDogma: Dogma = {
-  id: 'declics-dogma-v1', // Stable ID
-  title: 'DA Déclics - Lumière & Ombre',
-  text: `
-You are the AI Art Director for the series "Déclics" - visual style "LIGHT AND SHADOW". Your mission is to choose the best rendering strategy for each shot, based on the analysis of the reference image, and then generate a detailed prompt that strictly respects our binary "LIGHT AND SHADOW" artistic direction.
-
-### PRIMARY MISSION
-
-Analyze the reference image. Is it a simple, high-impact composition, or a complex scene with many elements that risk overlapping? Based on your conclusion, **choose one of the two strategies below** and apply it rigorously.
-
----
-### STRATEGY A: "PURE GRAPHIC CONTRAST"
-**(To be used for simple and iconic scenes where readability is obvious)**
-
-1.  **Absolute Golden Rule:** EVERYTHING material (characters, objects, set, nature) is a **pure black silhouette (#000000)**.
-2.  **Specifications:** Solid, monolithic, opaque, without any detail, texture, reflection, or shade of gray.
-3.  **Light:** The only exception is the light source (sky, lamp halo), which is photorealistic and can contain colors and nuances.
-4.  **Negative Prompt:** Must include \`gray silhouettes\`.
-
----
-### STRATEGY B: "ATMOSPHERIC DEPTH"
-**(To be used for complex scenes where silhouettes could merge and become unreadable)**
-
-1.  **Depth Rule (Z-Depth):** The background is lighter than the foreground. The gradient must be subtle and progressive. The foreground is never pure black to remain readable.
-2.  **Readability Rule:** You must intelligently "cheat" to separate overlapping dark shapes by using:
-    - Very dark grayscale value offsets.
-    - Atmospheric layers (suspended dust, volumetric mist, stray light rays).
-3.  **Nuanced Silhouette Rule:** Shapes remain very dark and without texture, but can receive subtle tints from ambient light to differentiate themselves.
-4.  **Negative Prompt:** Must NOT include \`gray silhouettes\`, but must insist on \`merged silhouettes, flat black shapes, lack of depth\`.
-
----
-### UNIVERSAL RULES
-1.  **Animation Style:** All motion must be natural and realistic. Avoid any cartoonish, exaggerated, or physically impossible animations. The movement should feel grounded and fluid, respecting the laws of physics unless specified otherwise for a specific effect.
-2.  **Negative Prompts:** Actively use the \`negative_prompt\` field to enforce the artistic direction. For instance, to maintain the stark, minimalist aesthetic, always include negative prompts like \`cartoon, 3d render, video game, drawing, painting, illustrative\`. To ensure fluid motion, add \`jerky movement, stuttering animation\`.
-`.trim(),
-  referenceImages: [],
-};
-
-const satinEtStatiqueDogma: Dogma = {
-  id: 'satin-statique-dogma-v1',
-  title: 'Dogma: Satin & Statique',
-  text: `
-Vous êtes le grand directeur artistique IA, metteur en scène et chef opérateur. Votre mission est de naviguer une dualité esthétique radicale, oscillant entre une pureté glaciale et une fureur analogique. Vous devez choisir l'un des deux modes ci-dessous pour chaque plan, sans jamais les mélanger. Le passage de l'un à l'autre doit être une rupture narrative brutale.
-
----
-### MODE A: "SATIN" (L'ÉPURE GLACIALE)
-**(À utiliser pour les scènes d'exposition, les moments de calme avant la tempête, l'esthétique du défilé de mode.)**
-
-1.  **Règle Visuelle:** Propreté clinique et absolue. Esthétique de défilé de mode, "fashion week". Image 4K, couleurs hyper-calibrées et saturées, peaux parfaitement lissées. L'image est léchée, publicitaire, presque stérile dans sa perfection.
-2.  **Lumière:** Douce, diffuse, enveloppante. Pas d'ombres dures. Éclairage de studio perfectly maîtrisé.
-3.  **Caméra:** Mouvements fluides, gracieux et contrôlés. Lents travellings, panoramiques amples, plans stables sur grue ou Steadicam.
-4.  **Mots-clés Positifs:** \`ultra-high definition\`, \`4k\`, \`fashion film\`, \`flawless skin\`, \`vibrant colors\`, \`soft studio lighting\`, \`smooth camera movement\`.
-5.  **Mots-clés Négatifs:** \`film grain\`, \`dust\`, \`scratches\`, \`handheld camera\`, \`shaky cam\`, \`harsh shadows\`.
-
----
-### MODE B: "STATIQUE" (LA FUREUR ANALOGIQUE)
-**(À utiliser pour les moments de chaos, de violence, de rupture et de tension psychologique.)**
-
-1.  **Règle Visuelle:** Hommage direct au cinéma des années 70 et à l'esthétique des clips de Skrillex. L'image doit être "sale". Grain de pellicule 35mm très prononcé, poussières, rayures, aberrations chromatiques.
-2.  **Lumière:** Contraste brutal et écrasé. Hautes lumières brûlées, noirs profonds, "lens flares" agressifs. Lumière souvent dure, venant d'une seule source.
-3.  **Caméra:** Chaos contrôlé. Caméra à l'épaule instable ("shaky cam"), zooms brutaux ("crash zooms"), changements de focus rapides, très gros plans anxiogènes.
-4.  **Mots-clés Positifs:** \`35mm film grain\`, \`70s thriller aesthetic\`, \`style of Sidney Lumet\`, \`dust and scratches\`, \`high contrast\`, \`blown-out highlights\`, \`crushed blacks\`, \`anamorphic lens flare\`, \`handheld shaky camera\`, \`extreme close-up\`, \`rack focus\`.
-5.  **Mots-clés Négatifs:** \`clean\`, \`digital look\`, \`4k\`, \`soft light\`, \`stable shot\`, \`smooth movement\`.
-
----
-### MANDATS DE RÉALISATION (RÈGLES UNIVERSELLES)
-
-1.  **Arc Narratif : La Révolte.** Le clip doit raconter l'histoire d'un défilé de mode qui bascule dans le chaos. Il commence en Mode SATIN et, à un point de rupture précis (un mannequin qui se rebelle), passe brutalement et définitivement en Mode STATIQUE.
-2.  **La Transformation (Femmes-Gommes) :** Les mannequins commencent comme des "femmes-gommes" en Mode SATIN – des silhouettes parfaites, presque sans âme. En Mode STATIQUE, elles deviennent des forces primales, agressives, leur individualité explosant à travers des expressions intenses.
-3.  **Le Point de Rupture :** La transition du Mode SATIN au Mode STATIQUE doit être un choc visuel et sonore. Elle est déclenchée par une action violente : un vêtement déchiré, un talon utilisé comme arme.
-4.  **Focus sur le Gros Plan :** Quel que soit le mode, utilisez massivement les très gros plans (TGP) : sur un regard, une bouche, des mains crispées, un talon aiguille menaçant. Le TGP est l'outil principal pour raconter l'histoire intime et la montée de la tension.
-`.trim(),
-  referenceImages: [],
-};
+// ===================================================================
+// NEUTRAL DEFAULT: No hardcoded dogmas
+// Dogma templates are available in data/dogmaTemplates.ts for optional import
+// ===================================================================
 
 const PromptConception: React.FC<{
   motionDescription: string | null;
   referenceImage: ImageFile | null;
   activeChatImage: ImageFile | null;
   mentionedCharacters: Character[];
-  sequenceHistory?: SequenceVideoData[]; // Feature 2: Time Injection
-}> = ({ motionDescription, referenceImage, activeChatImage, mentionedCharacters, sequenceHistory = [] }) => {
-  const displayImage = activeChatImage || referenceImage;
-  const hasContent =
-    motionDescription || displayImage || mentionedCharacters.length > 0 || sequenceHistory.length > 0;
+  sequenceHistory?: SequenceVideoData[];
+  // === NANO BANANA PRO: Thumbnail Retouche ===
+  onOpenNanoEditor?: (segmentIndex: number, baseImage: ImageFile, initialPrompt: string) => void;
+  promptSequence?: PromptSequence | null;
+  storyboardByIndex?: Record<number, StoryboardPreview>;
+}> = ({
+  motionDescription,
+  referenceImage,
+  activeChatImage,
+  mentionedCharacters,
+  sequenceHistory = [],
+  onOpenNanoEditor,
+  promptSequence,
+  storyboardByIndex = {},
+}) => {
+    const displayImage = activeChatImage || referenceImage;
+    const hasContent =
+      motionDescription || displayImage || mentionedCharacters.length > 0 || sequenceHistory.length > 0;
 
-  // Determine the main title based on context
-  const title = motionDescription
-    ? 'Vecteur de Continuité'
-    : displayImage
-      ? 'Référence Active'
-      : mentionedCharacters.length > 0
-        ? 'Personnages Actifs'
-        : 'Conception du Prompt';
+    // Determine the main title based on context
+    const title = motionDescription
+      ? 'Vecteur de Continuité'
+      : displayImage
+        ? 'Référence Active'
+        : mentionedCharacters.length > 0
+          ? 'Personnages Actifs'
+          : 'Conception du Prompt';
 
-  return (
-    <div className="bg-[#1f1f1f] border border-gray-700 rounded-2xl h-full flex flex-col shadow-lg p-4 transition-all duration-500">
-      <h3 className="text-lg font-semibold text-white mb-4 flex-shrink-0 flex items-center gap-2">
-        <SparklesIcon className="w-5 h-5 text-indigo-400" />
-        {title}
-      </h3>
-      <div className="flex-grow flex flex-col gap-4 overflow-y-auto">
-        {!hasContent ? (
-          <div className="flex-grow flex flex-col items-center justify-center text-center p-4 border-2 border-dashed border-gray-800 rounded-xl bg-gray-900/50">
-            <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-3 animate-pulse">
-              <UsersIcon className="w-6 h-6 text-gray-600" />
+    // Helper: Get preview badge status
+    const getPreviewStatus = (segmentIndex: number): 'ok' | 'missing' | 'dirty' => {
+      // Check if dirty (extension in dirtyExtensions)
+      if (segmentIndex >= 1 && promptSequence?.dirtyExtensions?.includes(segmentIndex)) {
+        return 'dirty';
+      }
+      // Check if storyboard preview exists
+      if (storyboardByIndex[segmentIndex]) {
+        return 'ok';
+      }
+      return 'missing';
+    };
+
+    // Helper: Get prompt for segment
+    const getPromptForSegment = (segmentIndex: number): string => {
+      if (!promptSequence) return '';
+      if (segmentIndex === 0) return promptSequence.mainPrompt;
+      return promptSequence.extensionPrompts[segmentIndex - 1] || '';
+    };
+
+    // Helper: Handle thumbnail click for Nano
+    const handleThumbnailNano = (segmentIndex: number, thumbnail: string | undefined) => {
+      if (!onOpenNanoEditor || !thumbnail) return;
+
+      const baseImage: ImageFile = {
+        file: new File([], `thumbnail_${segmentIndex}.jpg`, { type: 'image/jpeg' }),
+        base64: thumbnail,
+      };
+      const initialPrompt = getPromptForSegment(segmentIndex);
+      onOpenNanoEditor(segmentIndex, baseImage, initialPrompt);
+    };
+
+    return (
+      <div className="bg-[#1f1f1f] border border-gray-700 rounded-2xl h-full flex flex-col shadow-lg p-4 transition-all duration-500">
+        <h3 className="text-lg font-semibold text-white mb-4 flex-shrink-0 flex items-center gap-2">
+          <SparklesIcon className="w-5 h-5 text-indigo-400" />
+          {title}
+        </h3>
+        <div className="flex-grow flex flex-col gap-4 overflow-y-auto">
+          {!hasContent ? (
+            <div className="flex-grow flex flex-col items-center justify-center text-center p-4 border-2 border-dashed border-gray-800 rounded-xl bg-gray-900/50">
+              <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-3 animate-pulse">
+                <UsersIcon className="w-6 h-6 text-gray-600" />
+              </div>
+              <p className="text-gray-400 font-medium">Context Radar Active</p>
+              <p className="text-xs text-gray-600 mt-1 max-w-[200px]">
+                Mention characters with "@", upload images in chat, or use Studio references to populate this panel.
+              </p>
             </div>
-            <p className="text-gray-400 font-medium">Context Radar Active</p>
-            <p className="text-xs text-gray-600 mt-1 max-w-[200px]">
-              Mention characters with "@", upload images in chat, or use Studio references to populate this panel.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Feature 2: Time Injection - Timeline Visualization */}
-            {sequenceHistory.length > 0 && (
-              <div className="flex flex-col gap-2 bg-gray-800/50 p-2 rounded-xl border border-gray-700/50">
-                <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex justify-between items-center">
-                  <span>Sequence Flow</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-900 text-indigo-300">{sequenceHistory.length} shots</span>
+          ) : (
+            <>
+              {/* Feature 2: Time Injection - Timeline Visualization with Nano Actions */}
+              {sequenceHistory.length > 0 && (
+                <div className="flex flex-col gap-2 bg-gray-800/50 p-2 rounded-xl border border-gray-700/50">
+                  <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex justify-between items-center">
+                    <span>Sequence Flow</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-900 text-indigo-300">{sequenceHistory.length} shots</span>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-2 snap-x">
+                    {sequenceHistory.map((data, idx) => {
+                      const previewStatus = getPreviewStatus(idx);
+
+                      return (
+                        <div key={idx} className="flex-shrink-0 w-24 snap-start relative group">
+                          <div className="aspect-video rounded-md overflow-hidden border border-gray-600 relative">
+                            {data.thumbnail ? (
+                              <img src={`data:image/jpeg;base64,${data.thumbnail}`} className="w-full h-full object-cover" alt={`Shot ${idx + 1}`} />
+                            ) : (
+                              <div className="w-full h-full bg-gray-900 flex items-center justify-center text-xs text-gray-500">Shot {idx + 1}</div>
+                            )}
+
+                            {/* Nano Hover Button */}
+                            {onOpenNanoEditor && data.thumbnail && (
+                              <button
+                                onClick={() => handleThumbnailNano(idx, data.thumbnail)}
+                                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                              >
+                                <span className="px-2 py-1 bg-orange-600 text-white text-[9px] font-semibold rounded-md shadow-lg flex items-center gap-1">
+                                  <SparklesIcon className="w-3 h-3" />
+                                  Nano
+                                </span>
+                              </button>
+                            )}
+
+                            {/* Preview Badge */}
+                            <div className={`absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded ${previewStatus === 'ok'
+                              ? 'bg-green-600/80 text-green-100'
+                              : previewStatus === 'dirty'
+                                ? 'bg-orange-600/80 text-orange-100'
+                                : 'bg-gray-600/80 text-gray-300'
+                              }`}>
+                              {previewStatus === 'ok' ? 'OK' : previewStatus === 'dirty' ? '⚠' : '—'}
+                            </div>
+                          </div>
+                          <div className="text-[10px] text-center text-gray-500 mt-1">
+                            {idx === 0 ? 'Root' : `Ext ${idx}`}
+                          </div>
+                          {idx === sequenceHistory.length - 1 && (
+                            <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]" title="Current Anchor" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-2 snap-x">
-                  {sequenceHistory.map((data, idx) => (
-                    <div key={idx} className="flex-shrink-0 w-24 snap-start relative group">
-                      <div className="aspect-video rounded-md overflow-hidden border border-gray-600">
-                        {data.thumbnail ? (
-                          <img src={`data:image/jpeg;base64,${data.thumbnail}`} className="w-full h-full object-cover" alt={`Shot ${idx + 1}`} />
-                        ) : (
-                          <div className="w-full h-full bg-gray-900 flex items-center justify-center text-xs text-gray-500">Shot {idx + 1}</div>
+              )}
+
+              {motionDescription && (
+                <div className="bg-gray-800 p-4 rounded-xl border border-green-500/30 flex-shrink-0 shadow-md">
+                  <div className="text-xs text-green-500 font-bold uppercase mb-1 tracking-wider">
+                    Motion Vector
+                  </div>
+                  <p className="text-sm text-green-100 leading-relaxed">
+                    {motionDescription}
+                  </p>
+                </div>
+              )}
+              {/* Always show reference/active image if it exists */}
+              {displayImage && (
+                <div className="relative group w-full aspect-video bg-black rounded-xl overflow-hidden flex-shrink-0 border border-gray-700 shadow-lg">
+                  <img
+                    src={URL.createObjectURL(displayImage.file)}
+                    alt="Visual Context"
+                    className="w-full h-full object-contain"
+                  />
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+                    <span className="text-xs text-white font-medium">
+                      {activeChatImage ? "Working Image" : "Visual Anchor"}
+                    </span>
+                  </div>
+                </div>
+              )}
+              {/* Show mentioned characters in a separate section */}
+              {mentionedCharacters.length > 0 && (
+                <div className="flex flex-col gap-3">
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider pl-1">
+                    Cast on Set
+                  </div>
+                  {mentionedCharacters.map((char) => (
+                    <div
+                      key={char.id}
+                      className="flex items-center gap-3 bg-gray-800/80 p-2 rounded-xl border border-gray-700 hover:border-indigo-500 transition-colors">
+                      <div className="w-12 h-12 bg-black rounded-lg overflow-hidden flex-shrink-0">
+                        {char.images.length > 0 && (
+                          <img
+                            src={`data:${char.images[0].type};base64,${char.images[0].base64}`}
+                            alt={char.name}
+                            className="w-full h-full object-cover"
+                          />
                         )}
                       </div>
-                      <div className="text-[10px] text-center text-gray-500 mt-1">Shot {idx + 1}</div>
-                      {idx === sequenceHistory.length - 1 && (
-                        <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]" title="Current Anchor" />
-                      )}
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="font-semibold text-gray-200 truncate text-sm">
+                          {char.name}
+                        </span>
+                        <span className="text-xs text-gray-500 truncate">
+                          {char.voiceName || 'No voice assigned'}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {motionDescription && (
-              <div className="bg-gray-800 p-4 rounded-xl border border-green-500/30 flex-shrink-0 shadow-md">
-                <div className="text-xs text-green-500 font-bold uppercase mb-1 tracking-wider">
-                  Motion Vector
-                </div>
-                <p className="text-sm text-green-100 leading-relaxed">
-                  {motionDescription}
-                </p>
-              </div>
-            )}
-            {/* Always show reference/active image if it exists */}
-            {displayImage && (
-              <div className="relative group w-full aspect-video bg-black rounded-xl overflow-hidden flex-shrink-0 border border-gray-700 shadow-lg">
-                <img
-                  src={URL.createObjectURL(displayImage.file)}
-                  alt="Visual Context"
-                  className="w-full h-full object-contain"
-                />
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                  <span className="text-xs text-white font-medium">
-                    {activeChatImage ? "Working Image" : "Visual Anchor"}
-                  </span>
-                </div>
-              </div>
-            )}
-            {/* Show mentioned characters in a separate section */}
-            {mentionedCharacters.length > 0 && (
-              <div className="flex flex-col gap-3">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider pl-1">
-                  Cast on Set
-                </div>
-                {mentionedCharacters.map((char) => (
-                  <div
-                    key={char.id}
-                    className="flex items-center gap-3 bg-gray-800/80 p-2 rounded-xl border border-gray-700 hover:border-indigo-500 transition-colors">
-                    <div className="w-12 h-12 bg-black rounded-lg overflow-hidden flex-shrink-0">
-                      {char.images.length > 0 && (
-                        <img
-                          src={`data:${char.images[0].type};base64,${char.images[0].base64}`}
-                          alt={char.name}
-                          className="w-full h-full object-cover"
-                        />
-                      )}
-                    </div>
-                    <div className="flex flex-col overflow-hidden">
-                      <span className="font-semibold text-gray-200 truncate text-sm">
-                        {char.name}
-                      </span>
-                      <span className="text-xs text-gray-500 truncate">
-                        {char.voiceName || 'No voice assigned'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
 const Studio: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
@@ -292,6 +299,12 @@ const Studio: React.FC = () => {
   >({});
   const [mainPromptConfig, setMainPromptConfig] =
     useState<GenerateVideoParams | null>(null);
+
+  // === NANO BANANA PRO: 12 Vignettes Modal ===
+  const [storyboardModalContext, setStoryboardModalContext] = useState<{
+    segmentIndex: number;
+    baseImage: ImageFile;
+  } | null>(null);
   const [originalVideoForExtension, setOriginalVideoForExtension] =
     useState<VideoFile | null>(null);
   // Explicit flag to distinguish external videos from internal Veo extensions
@@ -319,10 +332,24 @@ const Studio: React.FC = () => {
     null,
   );
   const [isDogmaManagerOpen, setIsDogmaManagerOpen] = useState(false);
+  // === NEW: Sequence-bound dogma (scoped to current PromptSequence) ===
+  const [sequenceBoundDogma, setSequenceBoundDogma] = useState<Dogma | null>(null);
   const activeDogma = useMemo(
     () => dogmas.find((d) => d.id === activeDogmaId) ?? null,
     [dogmas, activeDogmaId],
   );
+
+  /**
+   * Sequence history must be numerically sorted by segment index to avoid unstable timeline order.
+   * Object.values() does NOT guarantee order - this useMemo ensures root→ext1→ext2... always.
+   */
+  const sortedSequenceHistory = useMemo(() => {
+    return Object.entries(sequenceVideoData)
+      .map(([k, v]) => ({ idx: Number(k), v }))
+      .filter(x => Number.isFinite(x.idx))
+      .sort((a, b) => a.idx - b.idx)
+      .map(x => x.v);
+  }, [sequenceVideoData]);
   // --- Shot Library State (Now using smart hook) ---
   const {
     shots: savedShots,
@@ -347,6 +374,10 @@ const Studio: React.FC = () => {
     prompt: string;
     thumbnail?: string;
   } | null>(null);
+
+  // === NANO BANANA PRO: Centralized editor context ===
+  const [nanoEditorContext, setNanoEditorContext] = useState<NanoEditorContext | null>(null);
+  const [storyboardByIndex, setStoryboardByIndex] = useState<Record<number, StoryboardPreview>>({});
 
   const [initialFormValues, setInitialFormValues] =
     useState<GenerateVideoParams | null>(null);
@@ -386,30 +417,8 @@ const Studio: React.FC = () => {
     initCheck();
   }, []);
 
-  useEffect(() => {
-    setDogmas((currentDogmas) => {
-      const defaultDogmasToAdd: Dogma[] = [];
-      const declicsExists = currentDogmas.some(
-        (d) => d.id === 'declics-dogma-v1',
-      );
-      const satinExists = currentDogmas.some(
-        (d) => d.id === 'satin-statique-dogma-v1',
-      );
-
-      if (!declicsExists) {
-        defaultDogmasToAdd.push(declicsDogma);
-      }
-      if (!satinExists) {
-        defaultDogmasToAdd.push(satinEtStatiqueDogma);
-      }
-
-      if (defaultDogmasToAdd.length > 0) {
-        return [...defaultDogmasToAdd, ...currentDogmas];
-      }
-      return currentDogmas;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // NOTE: No auto-injection of default dogmas. 
+  // Users can import optional templates from data/dogmaTemplates.ts via DogmaManager
 
   const confirmUnsavedVideo = useCallback(() => {
     if (appState === AppState.SUCCESS && !isCurrentVideoSaved) {
@@ -748,17 +757,26 @@ const Studio: React.FC = () => {
 
   const handleStartNewProject = useCallback(() => {
     if (!confirmUnsavedVideo()) return;
+
+    console.log('[StateTransition] handleStartNewProject - Full reset');
+
+    // Core state
     setAppState(AppState.IDLE);
     setCurrentStage(AppStage.PROMPTING);
     setVideoUrl(null);
     setLastConfig(null);
     setLastVideoObject(null);
     setLastVideoBlob(null);
+
+    // Sequence state - CRITICAL: Clear everything including bound dogma
     setPromptSequence(null);
+    setSequenceBoundDogma(null);  // Clear sequence-bound dogma
     setActivePromptIndex(null);
     setSequenceProgress(null);
     setSequenceVideoData({});
     setMainPromptConfig(null);
+
+    // Context state
     setInitialFormValues(null);
     setOriginalVideoForExtension(null);
     setAssistantExtensionContext(null);
@@ -766,7 +784,148 @@ const Studio: React.FC = () => {
     setAssistantReferenceVideo(null);
     setAssistantMotionDescription(null);
     setMentionedCharacters([]);
-  }, [confirmUnsavedVideo]);
+    setIsExternalVideoSource(false);
+
+    // NOTE: activeDogma (global library selection) is preserved - user may want same dogma for new project
+    console.log('[StateTransition] Reset complete. Global activeDogma preserved:', activeDogmaId);
+  }, [confirmUnsavedVideo, activeDogmaId]);
+
+  // =========================================================================
+  // NANO BANANA PRO: Centralized editor controller
+  // =========================================================================
+
+  /**
+   * Derive target from segment index - strict mapping (no truthy/falsy)
+   */
+  const deriveTargetFromIndex = (segmentIndex: number | null): 'root' | 'extension' | 'character' => {
+    if (segmentIndex === null) return 'character';
+    if (segmentIndex === 0) return 'root';
+    return 'extension';
+  };
+
+  /**
+   * Open Nano editor from any entry point (stylet, thumbnails, drift, characters)
+   */
+  const openNanoEditor = useCallback((opts: {
+    segmentIndex: number | null;
+    baseImage?: ImageFile;
+    initialPrompt?: string;
+  }) => {
+    const target = deriveTargetFromIndex(opts.segmentIndex);
+    // CRITICAL: effectiveDogma = sequenceBoundDogma ?? activeDogma
+    const effectiveDogma = promptSequence ? (sequenceBoundDogma ?? activeDogma) : activeDogma;
+
+    console.log('[NanoEditor] Opening with context:', {
+      segmentIndex: opts.segmentIndex,
+      target,
+      dogmaId: effectiveDogma?.id,
+      hasBaseImage: !!opts.baseImage,
+    });
+
+    setNanoEditorContext({
+      segmentIndex: opts.segmentIndex,
+      target,
+      dogma: effectiveDogma,
+      baseImage: opts.baseImage,
+      initialPrompt: opts.initialPrompt,
+    });
+  }, [promptSequence, sequenceBoundDogma, activeDogma]);
+
+  /**
+   * Close Nano editor and reset context
+   */
+  const closeNanoEditor = useCallback(() => {
+    console.log('[NanoEditor] Closing');
+    setNanoEditorContext(null);
+  }, []);
+
+  /**
+   * Handle Apply from Nano editor - updates prompts and storyboard
+   * CRITICAL: Proper handling for root/extension/character
+   */
+  const handleNanoApply = useCallback((payload: NanoApplyPayload) => {
+    console.log('[NanoEditor] Apply payload:', {
+      target: payload.target,
+      segmentIndex: payload.segmentIndex,
+      promptLength: payload.previewPrompt.length,
+    });
+
+    // Update storyboard preview
+    const storyboardEntry: StoryboardPreview = {
+      id: crypto.randomUUID(),
+      owner: payload.target,
+      segmentIndex: payload.segmentIndex ?? undefined,
+      previewImage: payload.previewImage,
+      previewPrompt: payload.previewPrompt,
+      cameraNotes: payload.cameraNotes,
+      movementNotes: payload.movementNotes,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (payload.target === 'root') {
+      // === ROOT: Update mainPrompt + mark all extensions dirty ===
+      if (!promptSequence) return;
+
+      const extensionsCount = promptSequence.extensionPrompts.length;
+      const updatedSequence: PromptSequence = {
+        ...promptSequence,
+        mainPrompt: payload.previewPrompt,
+        status: extensionsCount > 0 ? PromptSequenceStatus.ROOT_MODIFIED : PromptSequenceStatus.CLEAN,
+        // CRITICAL: Extensions are indexed 1..N (not 0..N-1)
+        dirtyExtensions: extensionsCount > 0
+          ? Array.from({ length: extensionsCount }, (_, i) => i + 1)
+          : [],
+        rootModifiedAt: new Date().toISOString(),
+      };
+
+      setPromptSequence(updatedSequence);
+      setStoryboardByIndex(prev => ({ ...prev, [0]: storyboardEntry }));
+
+      if (extensionsCount > 0) {
+        setErrorMessage(`⚠️ Prompt root modifié. ${extensionsCount} extension(s) à régénérer.`);
+      }
+
+    } else if (payload.target === 'extension') {
+      // === EXTENSION: Update specific extension + remove from dirty ===
+      if (!promptSequence || payload.segmentIndex === null) return;
+
+      // CRITICAL: extensionPrompts uses 0-based index, segmentIndex is 1-based
+      const extensionIndex = payload.segmentIndex - 1;
+      if (extensionIndex < 0 || extensionIndex >= promptSequence.extensionPrompts.length) {
+        console.error('[NanoEditor] Invalid extension index:', extensionIndex);
+        return;
+      }
+
+      const newExtensionPrompts = [...promptSequence.extensionPrompts];
+      newExtensionPrompts[extensionIndex] = payload.previewPrompt;
+
+      // Remove this extension from dirtyExtensions
+      const newDirtyExtensions = (promptSequence.dirtyExtensions || [])
+        .filter(idx => idx !== payload.segmentIndex);
+
+      const updatedSequence: PromptSequence = {
+        ...promptSequence,
+        extensionPrompts: newExtensionPrompts,
+        dirtyExtensions: newDirtyExtensions,
+        status: newDirtyExtensions.length > 0
+          ? PromptSequenceStatus.EXTENSIONS_DIRTY
+          : PromptSequenceStatus.CLEAN,
+      };
+
+      setPromptSequence(updatedSequence);
+      setStoryboardByIndex(prev => ({ ...prev, [payload.segmentIndex!]: storyboardEntry }));
+
+    } else if (payload.target === 'character') {
+      // === CHARACTER: Update character asset (no dirty logic) ===
+      // TODO: Implement character storyboard storage when character system is extended
+      console.log('[NanoEditor] Character apply - storing preview');
+    }
+
+    // Close editor and clear editing state
+    closeNanoEditor();
+    setEditingPromptDetails(null);
+  }, [promptSequence, closeNanoEditor]);
 
   const handleRetryLastPrompt = useCallback(() => {
     if (lastConfig) {
@@ -876,8 +1035,26 @@ const Studio: React.FC = () => {
     sequence: PromptSequence,
     isExtension: boolean,
   ) => {
-    setPromptSequence(sequence);
-    const firstPrompt = sequence.mainPrompt;
+    // === RULE 3: Bind current dogma to this sequence ===
+    const boundDogma = activeDogma;
+    setSequenceBoundDogma(boundDogma);
+    console.log('[SequenceIntegrity] Bound dogma to sequence:', {
+      dogmaId: boundDogma?.id || 'none',
+      dogmaTitle: boundDogma?.title || 'none',
+    });
+
+    // Create scoped sequence with proper structure
+    const scopedSequence: PromptSequence = {
+      ...sequence,
+      id: sequence.id || crypto.randomUUID(),
+      dogmaId: boundDogma?.id ?? null,
+      status: PromptSequenceStatus.CLEAN,
+      dirtyExtensions: [],
+      createdAt: sequence.createdAt || new Date().toISOString(),
+    };
+    setPromptSequence(scopedSequence);
+
+    const firstPrompt = scopedSequence.mainPrompt;
     let configBase = lastConfig;
 
     if (isExtension) {
@@ -998,12 +1175,49 @@ const Studio: React.FC = () => {
     newPrompt: string,
   ) => {
     if (!promptSequence) return;
+
+    // === RULE 1: Validate sequence context ===
+    const effectiveDogma = sequenceBoundDogma; // Use sequence-bound, not global!
+    if (!effectiveDogma && promptSequence.dogmaId) {
+      console.error('[SequenceIntegrity] Lost dogma binding! Blocking revision.');
+      setErrorMessage('Erreur de contexte: le dogma associé à cette séquence est introuvable.');
+      return;
+    }
+
     const allPrompts = [
       promptSequence.mainPrompt,
       ...promptSequence.extensionPrompts,
     ];
     allPrompts[index] = newPrompt;
+
+    const isRootModified = index === 0;
+    const extensionsCount = promptSequence.extensionPrompts.length;
+
+    // === RULE 2: Root modified → Mark extensions dirty ===
+    if (isRootModified && extensionsCount > 0) {
+      console.log('[SequenceIntegrity] Root prompt modified, marking extensions dirty');
+
+      const updatedSequence: PromptSequence = {
+        ...promptSequence,
+        mainPrompt: newPrompt,
+        status: PromptSequenceStatus.ROOT_MODIFIED,
+        // CRITICAL FIX: Extensions are indexed 1..N (root is 0)
+        dirtyExtensions: Array.from({ length: extensionsCount }, (_, i) => i + 1),
+        rootModifiedAt: new Date().toISOString(),
+      };
+      setPromptSequence(updatedSequence);
+      setEditingPromptDetails(null);
+
+      // Show user they need to regenerate extensions
+      setErrorMessage(
+        `⚠️ Le prompt racine a été modifié. Les ${extensionsCount} extension(s) doivent être régénérées.`
+      );
+      return; // Don't auto-regenerate - user must explicitly trigger
+    }
+
+    // Non-root modification: proceed with existing logic
     const newSequence: PromptSequence = {
+      ...promptSequence,
       mainPrompt: allPrompts[0],
       extensionPrompts: allPrompts.slice(1),
     };
@@ -1014,7 +1228,7 @@ const Studio: React.FC = () => {
       setIsRevisingSequence({ fromIndex: index });
       try {
         const revisedFollowing = await reviseFollowingPrompts({
-          dogma: activeDogma,
+          dogma: effectiveDogma, // Use sequence-bound dogma!
           promptBefore: allPrompts[index - 1],
           editedPrompt: newPrompt,
           promptsToRevise,
@@ -1024,13 +1238,25 @@ const Studio: React.FC = () => {
           ...revisedFollowing,
         ];
         const finalSequence: PromptSequence = {
+          ...promptSequence,
           mainPrompt: finalPrompts[0],
           extensionPrompts: finalPrompts.slice(1),
+          status: PromptSequenceStatus.CLEAN,
+          dirtyExtensions: [],
         };
         setPromptSequence(finalSequence);
       } catch (e) {
         console.error('Failed to revise subsequent prompts', e);
-        setPromptSequence(newSequence);
+        // Mark remaining extensions as dirty instead of failing
+        const failedSequence: PromptSequence = {
+          ...newSequence,
+          status: PromptSequenceStatus.EXTENSIONS_DIRTY,
+          dirtyExtensions: Array.from(
+            { length: promptsToRevise.length },
+            (_, i) => index + 1 + i
+          ),
+        };
+        setPromptSequence(failedSequence);
       } finally {
         setIsRevisingSequence(null);
       }
@@ -1161,7 +1387,7 @@ const Studio: React.FC = () => {
             onConfirm={(newPrompt) =>
               handleConfirmPromptRevision(editingPromptDetails.index, newPrompt)
             }
-            dogma={activeDogma}
+            dogma={sequenceBoundDogma}  // Use sequence-bound dogma, NOT global!
             promptBefore={
               promptSequence
                 ? [
@@ -1178,6 +1404,54 @@ const Studio: React.FC = () => {
                 ][editingPromptDetails.index + 1]
                 : undefined
             }
+            onOpenNanoEditor={() => {
+              // Create base image from thumbnail for Nano editor
+              const baseImage = editingPromptDetails.thumbnail ? {
+                file: new File([], 'thumbnail.jpg', { type: 'image/jpeg' }),
+                base64: editingPromptDetails.thumbnail,
+              } : undefined;
+
+              openNanoEditor({
+                segmentIndex: editingPromptDetails.index,
+                baseImage,
+                initialPrompt: editingPromptDetails.prompt,
+              });
+            }}
+          />
+        )}
+
+        {/* NANO BANANA PRO: AI Editor Modal */}
+        {nanoEditorContext && nanoEditorContext.baseImage && (
+          <AIEditorModal
+            image={nanoEditorContext.baseImage}
+            onClose={closeNanoEditor}
+            onConfirm={(newImage) => {
+              // Image-only confirm - for non-prompt workflows
+              console.log('[NanoEditor] Image confirmed');
+              closeNanoEditor();
+            }}
+            dogma={nanoEditorContext.dogma}
+            onApply={handleNanoApply}
+            segmentIndex={nanoEditorContext.segmentIndex}
+            target={nanoEditorContext.target}
+            initialPrompt={nanoEditorContext.initialPrompt}
+          />
+        )}
+
+        {/* NANO BANANA PRO: 12 Vignettes Modal */}
+        {storyboardModalContext && (
+          <StoryboardPreviewModal
+            isOpen={true}
+            onClose={() => setStoryboardModalContext(null)}
+            onApplyVariant={handleNanoApply}
+            segmentIndex={storyboardModalContext.segmentIndex}
+            baseImage={storyboardModalContext.baseImage}
+            currentPrompt={
+              storyboardModalContext.segmentIndex === 0
+                ? promptSequence?.mainPrompt || ''
+                : promptSequence?.extensionPrompts[storyboardModalContext.segmentIndex - 1] || ''
+            }
+            dogma={sequenceBoundDogma ?? activeDogma}
           />
         )}
         <header className="flex justify-between items-center p-4 border-b border-gray-700/50 flex-shrink-0">
@@ -1305,8 +1579,14 @@ const Studio: React.FC = () => {
                           referenceImage={assistantExtensionContext}
                           activeChatImage={assistantImage}
                           mentionedCharacters={mentionedCharacters}
-                          // Pass sequence history values to enable timeline view
-                          sequenceHistory={Object.values(sequenceVideoData)}
+                          // Sequence history must be numerically sorted by segment index
+                          sequenceHistory={sortedSequenceHistory}
+                          // Nano Banana Pro: Thumbnail Retouche
+                          onOpenNanoEditor={(segmentIndex, baseImage, initialPrompt) => {
+                            openNanoEditor({ segmentIndex, baseImage, initialPrompt });
+                          }}
+                          promptSequence={promptSequence}
+                          storyboardByIndex={storyboardByIndex}
                         />
                       )}
                     </div>
@@ -1329,6 +1609,12 @@ const Studio: React.FC = () => {
                     onStartExtensionAssistant={handleStartExtensionAssistant}
                     activeDogma={activeDogma}
                     onPromptRevised={handlePromptRevised}
+                    // Nano Banana Pro: Drift Control
+                    onRecalNano={(segmentIndex, baseImage, initialPrompt) => {
+                      openNanoEditor({ segmentIndex, baseImage, initialPrompt });
+                    }}
+                    promptSequence={promptSequence}
+                    activePromptIndex={activePromptIndex}
                   />
                 )}
                 {currentStage === AppStage.EDITING && frameToEdit && (

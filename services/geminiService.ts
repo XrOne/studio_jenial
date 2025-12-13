@@ -6,6 +6,7 @@ import {
   GenerationMode,
   ImageFile,
   PromptSequence,
+  PromptSequenceStatus,
   RegeneratePromptParams,
   ReviseFollowingPromptsParams,
   Storyboard,
@@ -732,10 +733,32 @@ export const generatePromptSequence = async (
 
   const text = extractText(response);
   try {
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    // Return full PromptSequence structure with defaults for new fields
+    const sequence: PromptSequence = {
+      id: crypto.randomUUID(),
+      dogmaId: dogma?.id ?? null,
+      mainPrompt: parsed.mainPrompt,
+      extensionPrompts: parsed.extensionPrompts || [],
+      status: PromptSequenceStatus.CLEAN,
+      dirtyExtensions: [],
+      createdAt: new Date().toISOString(),
+    };
+    return sequence;
   } catch {
     const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return {
+        id: crypto.randomUUID(),
+        dogmaId: dogma?.id ?? null,
+        mainPrompt: parsed.mainPrompt,
+        extensionPrompts: parsed.extensionPrompts || [],
+        status: PromptSequenceStatus.CLEAN,
+        dirtyExtensions: [],
+        createdAt: new Date().toISOString(),
+      };
+    }
     throw new Error('Failed to parse sequence response');
   }
 };
