@@ -212,30 +212,22 @@ app.post('/api/nano/preview', nanoHandlers.preview);
 app.post('/api/nano/retouch', nanoHandlers.retouch);
 app.post('/api/nano/shot-variants', nanoHandlers.shotVariants);
 
-// 1.6 File Upload Proxy (BYOK Security)
-// Proxies file uploads to Google Files API to avoid direct frontend calls/key exposure
-// LIMITATION: Vercel Serverless Functions have 4.5MB request body limit
+// 1.6 File Upload Proxy (BYOK Security + Large Files)
+// Step 1: Frontend calls this to get a secure Upload URL
+// Step 2: Frontend uploads directly to Google (bypassing Vercel 4.5MB limit)
 app.post('/api/files/upload', async (req, res) => {
   try {
     const apiKey = getApiKey(req);
-    const { displayName, mimeType, data } = req.body;
+    const { displayName, mimeType, fileSize } = req.body;
 
-    if (!data) {
-      return res.status(400).json({ error: 'File data required (base64)' });
+    if (!fileSize) {
+      return res.status(400).json({ error: 'fileSize is required' });
     }
 
-    // Check size (approximate from base64)
-    const sizeInBytes = Math.ceil((data.length * 3) / 4);
-    if (sizeInBytes > 4 * 1024 * 1024) {
-      console.warn('[Files] Upload warning: File size ~' + (sizeInBytes / 1024 / 1024).toFixed(2) + 'MB approaches Vercel limit');
-    }
+    console.log(`[Files] Initiating secure upload: ${displayName} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
 
-    console.log(`[Files] Proxying upload: ${displayName} (${mimeType})`);
-
-    // 1. Convert base64 to buffer
-    const buffer = Buffer.from(data, 'base64');
-
-    // 2. Initial Resumable Request to get Upload URL
+    // Initial Resumable Request to get Upload URL
+    // We send this from Backend to keep API Key secure
     const uploadUrlResponse = await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=resumable', {
       method: 'POST',
       headers: {
@@ -243,7 +235,7 @@ app.post('/api/files/upload', async (req, res) => {
         'Content-Type': 'application/json',
         'X-Goog-Upload-Protocol': 'resumable',
         'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': buffer.length.toString(),
+        'X-Goog-Upload-Header-Content-Length': fileSize.toString(),
         'X-Goog-Upload-Header-Content-Type': mimeType,
       },
       body: JSON.stringify({
@@ -253,7 +245,7 @@ app.post('/api/files/upload', async (req, res) => {
 
     if (!uploadUrlResponse.ok) {
       const err = await uploadUrlResponse.json().catch(() => ({}));
-      throw new Error(`Failed to initialize upload: ${err.error?.message || uploadUrlResponse.statusText}`);
+      throw new Error(`Failed to initiate upload: ${err.error?.message || uploadUrlResponse.statusText}`);
     }
 
     const uploadUrl = uploadUrlResponse.headers.get('x-goog-upload-url');
@@ -261,29 +253,11 @@ app.post('/api/files/upload', async (req, res) => {
       throw new Error('No upload URL received from Google');
     }
 
-    // 3. Upload file content to the Upload URL
-    const uploadFileResponse = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Length': buffer.length.toString(),
-        'X-Goog-Upload-Offset': '0',
-        'X-Goog-Upload-Command': 'upload, finalize',
-      },
-      body: buffer
-    });
-
-    if (!uploadFileResponse.ok) {
-      const err = await uploadFileResponse.text();
-      throw new Error(`Failed to upload content: ${err}`);
-    }
-
-    const result = await uploadFileResponse.json();
-    console.log(`[Files] Upload success: ${result.file?.uri}`);
-
-    res.json(result);
+    // Return the URL to frontend so it can upload directly
+    res.json({ uploadUrl });
 
   } catch (error) {
-    console.error('[Files] Upload proxy error:', error);
+    console.error('[Files] Init upload error:', error);
     handleError(res, error);
   }
 });

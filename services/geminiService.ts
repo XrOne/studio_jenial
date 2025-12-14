@@ -294,8 +294,8 @@ interface GoogleFileUploadResult {
  */
 /**
  * Upload a file to Google Files API via backend proxy
- * SECURITY: All traffic goes through backend. No direct Google calls.
- * LIMITATION: Max ~4MB file size due to Vercel Limits.
+ * SECURITY: Backend initiates upload (API key hidden). Frontend uploads bytes directly.
+ * LIMITATION: Bypasses Vercel 4.5MB limit (supports up to 2GB).
  */
 export const uploadToGoogleFiles = async (
   file: File | Blob,
@@ -303,27 +303,45 @@ export const uploadToGoogleFiles = async (
 ): Promise<GoogleFileUploadResult> => {
   const mimeType = file instanceof File ? file.type : 'application/octet-stream';
   const fileName = displayName || (file instanceof File ? file.name : `upload-${Date.now()}`);
+  const numBytes = file.size;
 
-  // Convert Blob/File to Base64
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  const base64 = btoa(binary);
+  console.log(`[GoogleFiles] Starting secure direct upload: ${fileName} (${(numBytes / 1024 / 1024).toFixed(2)} MB)`);
 
-  console.log(`[GoogleFiles] Proxying upload via backend: ${fileName} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-
-  // Call backend proxy
-  const result = await callVeoBackend('/api/files/upload', {
+  // Step 1: Get Upload URL from backend (Secure Init)
+  // We send only metadata, not the file itself
+  const initResult = await callVeoBackend('/api/files/upload', {
     displayName: fileName,
     mimeType,
-    data: base64
+    fileSize: numBytes
   });
 
+  if (!initResult.uploadUrl) {
+    throw new Error('Upload init failed: No URL received');
+  }
+
+  console.log('[GoogleFiles] Got upload URL, uploading bytes directly to Google...');
+
+  // Step 2: Upload bytes directly to Google (Bypass Vercel Limit)
+  // No API key needed here, the URL is pre-signed/session-bound
+  const uploadResponse = await fetch(initResult.uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Length': numBytes.toString(),
+      'X-Goog-Upload-Offset': '0',
+      'X-Goog-Upload-Command': 'upload, finalize',
+    },
+    body: file,
+  });
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(`Failed to upload content to Google: ${uploadResponse.status} - ${errorText}`);
+  }
+
+  const result = await uploadResponse.json();
+
   if (!result.file || !result.file.uri) {
-    throw new Error('Upload failed: No file URI received from backend');
+    throw new Error('Upload failed: No file URI in final response');
   }
 
   console.log(`[GoogleFiles] Upload complete: ${result.file.uri}`);
