@@ -1,6 +1,6 @@
 # Nano Banana Pro - Documentation Technique
 
-> **Version** : 2025-12-13 | **Status** : Prod-ready (architecture) / Mock provider en dev
+> **Version** : 2025-12-14 | **Status** : Prod-ready (Image-First workflow active)
 
 ## Nomenclature Officielle
 
@@ -12,6 +12,25 @@
 > **Important** : Nano Banana ≠ Imagen. Ce sont les modèles Gemini natifs pour génération/édition d'images.
 
 ---
+
+## Conventions d'Index (CRITIQUE)
+
+| segmentIndex | Type | Description |
+|--------------|------|-------------|
+| `0` | Root | Prompt principal |
+| `1..N` | Extension | Extensions 1 à N |
+| `null` | Character | Asset personnage (hors séquence) |
+
+```typescript
+// CORRECT: dirtyExtensions après modification root
+dirtyExtensions = [1, 2, 3]; // Extensions 1-3 dirty (PAS [0, 1, 2])
+
+// Helper function (nanoService.ts)
+deriveDirtyExtensions(extensionsCount: 3) => [1, 2, 3]
+```
+
+---
+
 
 ## Architecture
 
