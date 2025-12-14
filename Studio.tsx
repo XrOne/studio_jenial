@@ -1775,6 +1775,45 @@ const Studio: React.FC = () => {
                 : promptSequence?.extensionPrompts[storyboardModalContext.segmentIndex - 1] || ''
             }
             dogma={sequenceBoundDogma ?? activeDogma}
+            // Pass mode based on current sequenceMode
+            mode={sequenceMode === 'decoupage' ? 'ordered-select' : 'single-select'}
+            onBuildTimeline={(shots) => {
+              console.log('[Découpage] Building timeline from shots:', shots);
+              // Create extension prompts from ordered shots
+              const orderedPrompts = shots.map((s, idx) =>
+                `[Plan ${idx + 1}] ${s.shotType}: ${s.prompt}`
+              );
+              // Update storyboard with ordered shot images
+              const newStoryboard: Record<number, StoryboardPreview> = {};
+              shots.forEach((shot, idx) => {
+                newStoryboard[idx] = {
+                  id: crypto.randomUUID(),
+                  owner: idx === 0 ? 'root' : 'extension',
+                  previewImage: shot.image,
+                  previewPrompt: shot.prompt,
+                  segmentIndex: idx,
+                  cameraNotes: shot.shotType,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+              });
+              setStoryboardByIndex(newStoryboard);
+              // Create prompt sequence from ordered shots
+              if (shots.length > 0) {
+                const newSequence: PromptSequence = {
+                  id: crypto.randomUUID(),
+                  dogmaId: (sequenceBoundDogma ?? activeDogma)?.id ?? null,
+                  status: PromptSequenceStatus.CLEAN,
+                  createdAt: new Date().toISOString(),
+                  mainPrompt: orderedPrompts[0] || '',
+                  extensionPrompts: orderedPrompts.slice(1),
+                  dirtyExtensions: [],  // No dirty extensions initially
+                };
+                setPromptSequence(newSequence);
+                setActivePromptIndex(0);
+              }
+              setStoryboardModalContext(null);
+            }}
           />
         )}
         <header className="flex justify-between items-center p-4 border-b border-gray-700/50 flex-shrink-0">
