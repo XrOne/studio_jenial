@@ -1264,12 +1264,51 @@ const Studio: React.FC = () => {
   };
 
   const handleClearSequence = () => {
+    // === P0.3 RESET: Complete purge of all sequence-related state ===
+    console.log('[Reset] Clearing all sequence state (P0.3 full reset)');
+
+    // Core sequence state
     setPromptSequence(null);
     setActivePromptIndex(null);
     setSequenceProgress(null);
     setSequenceVideoData({});
     setMainPromptConfig(null);
     setInitialFormValues(null);
+
+    // Dogma binding (scoped to sequence)
+    setSequenceBoundDogma(null);
+
+    // Storyboard / Nano Banana state
+    setStoryboardByIndex({});
+    setNanoEditorContext(null);
+    setStoryboardModalContext(null);
+
+    // Video extension state
+    setOriginalVideoForExtension(null);
+    setIsExternalVideoSource(false);
+
+    // Assistant context (chat messages handled internally by component reset)
+    setAssistantExtensionContext(null);
+    setAssistantImage(null);
+    setAssistantReferenceVideo(null);
+    setAssistantMotionDescription(null);
+    setMentionedCharacters([]);
+
+    // Reset video display
+    setVideoUrl(null);
+    setLastVideoBlob(null);
+    setLastVideoObject(null);
+    setLastConfig(null);
+    setIsCurrentVideoSaved(false);
+
+    // Clear any editing state
+    setEditingPromptDetails(null);
+    setFrameToEdit(null);
+
+    // Return to initial stage
+    setCurrentStage(AppStage.PROMPTING);
+    setAppState(AppState.IDLE);
+    setErrorMessage(null);
   };
 
   const handlePromptRevised = (newPrompt: string) => {
