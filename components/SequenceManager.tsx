@@ -30,6 +30,9 @@ interface SequenceManagerProps {
   onThumbnailClick?: (thumbnailBase64: string, index: number) => void;
   // IMAGE-FIRST: Storyboard keyframe previews
   storyboardByIndex?: Record<number, StoryboardPreview>;
+  // P2.4: Keyframe actions
+  onRegenerateKeyframe?: (segmentIndex: number) => void;
+  onUseKeyframeAsBase?: (segmentIndex: number, image: { base64: string }) => void;
 }
 
 const SequenceManager: React.FC<SequenceManagerProps> = ({
