@@ -1,88 +1,126 @@
-# Nano Banana Pro - Documentation Technique Complète
+# Nano Banana Pro - Documentation Technique
 
-> **Dernière mise à jour** : 2025-12-13
+> **Version** : 2025-12-13 | **Status** : Prod-ready (architecture) / Mock provider en dev
 
-## Vue d'ensemble
+## Nomenclature Officielle
 
-Nano Banana Pro étend Studio Jenial avec des capacités de storyboarding visuel et d'alignement prompt/image. L'objectif : **voir → retoucher → appliquer → générer Veo**.
+| Alias Interne | Modèle API Google | Usage |
+|---------------|-------------------|-------|
+| **Nano Banana** | `gemini-2.5-flash-image` | Preview, Retouch (rapide, 1024px) |
+| **Nano Banana Pro** | `gemini-3-pro-image-preview` | Shot Variants (qualité pro) |
+
+> **Important** : Nano Banana ≠ Imagen. Ce sont les modèles Gemini natifs pour génération/édition d'images.
 
 ---
 
 ## Architecture
 
-```mermaid
-graph TD
-    subgraph "Frontend - React"
-        STUDIO[Studio.tsx] --> |nanoEditorContext| AIE[AIEditorModal]
-        STUDIO --> |storyboardModalContext| SPM[StoryboardPreviewModal]
-        STUDIO --> |openNanoEditor| PEM[PromptEditorModal]
-        STUDIO --> |openNanoEditor| VR[VideoResult]
-        STUDIO --> |openNanoEditor| PC[PromptConception]
-        AIE --> |onApply| HNA[handleNanoApply]
-        SPM --> |onApplyVariant| HNA
-        HNA --> |update| PS[promptSequence]
-        HNA --> |update| SBBI[storyboardByIndex]
-    end
-    
-    subgraph "Backend - API"
-        API[/api/nano/*] --> MOCK[MockNanoProvider]
-        API -.-> REAL[RealNanoProvider - TODO]
-    end
+```
+Frontend (React)
+    │
+    └── nanoService.ts
+            │
+            ├── x-gemini-api-key (header, session-only)
+            │
+            └── /api/nano/* (Vercel)
+                    │
+                    ├── BYOK mode: clé du header
+                    ├── Server mode: GEMINI_API_KEY env
+                    │
+                    └── Gemini API
 ```
 
 ---
 
-## Fichiers
+## Sécurité BYOK
 
-### Nouveaux fichiers
+### Règles strictes :
 
-| Fichier | Description |
-|---------|-------------|
-| `api/nano/index.js` | Endpoints mock: `/preview`, `/retouch`, `/shot-variants` |
-| `services/nanoService.ts` | Frontend service + helpers |
-| `components/StoryboardPreviewModal.tsx` | Modal 12 vignettes |
+1. **Aucun appel direct à Google depuis le frontend**
+2. **Clé BYOK = session uniquement** (`sessionStorage`, pas `localStorage`)
+3. **Clé jamais loggée** (ni backend ni frontend)
+4. **Transit uniquement vers /api/nano/*** (Vercel)
+5. **Backend scrub les headers sensibles** (pas de dump request)
 
-### Fichiers modifiés
+### Frontend :
 
-| Fichier | Modifications |
-|---------|---------------|
-| `types.ts` | +`NanoApplyPayload`, `NanoEditorContext`, `StoryboardPreview`, `ShotVariant`, `STANDARD_SHOT_LIST` |
-| `Studio.tsx` | +`nanoEditorContext`, `storyboardByIndex`, `storyboardModalContext`, `openNanoEditor`, `handleNanoApply`, `sortedSequenceHistory` |
-| `components/AIEditorModal.tsx` | +`onApply`, `segmentIndex`, `target`, `initialPrompt`, bouton "Appliquer Prompt" |
-| `components/PromptEditorModal.tsx` | +`onOpenNanoEditor`, bouton "Aligner au visuel (Nano)" |
-| `components/VideoResult.tsx` | +`onRecalNano`, `promptSequence`, `activePromptIndex`, bouton "Recaler avec Nano" |
+```typescript
+// nanoService.ts - BYOK session-only
+const apiKey = window.sessionStorage.getItem('gemini_api_key');
+headers['x-gemini-api-key'] = apiKey;
+```
+
+### Backend :
+
+```javascript
+// api/nano/index.js - Priorité
+1. Header 'x-gemini-api-key' (BYOK)
+2. Variable GEMINI_API_KEY (server fallback)
+// ⚠️ Aucun log de req.headers
+```
 
 ---
 
-## Types Clés
+## Configuration
 
-### NanoApplyPayload
-```typescript
-interface NanoApplyPayload {
-  target: 'root' | 'extension' | 'character';
-  segmentIndex: number | null;  // null = character, 0 = root, 1..N = extensions
-  previewPrompt: string;
-  previewImage: ImageFile;
-  cameraNotes?: string;
-  movementNotes?: string;
-}
+### Vercel Environment Variables
+
+```bash
+# Production
+NANO_MOCK_MODE=false
+GEMINI_API_KEY=your-api-key  # Si pas BYOK
+
+# Development
+NANO_MOCK_MODE=true
 ```
 
-### NanoEditorContext
+---
+
+## Endpoints
+
+### POST /api/nano/preview
+
 ```typescript
-interface NanoEditorContext {
-  segmentIndex: number | null;
-  target: 'root' | 'extension' | 'character';
-  dogma: Dogma | null;
-  baseImage?: ImageFile;
-  initialPrompt?: string;
-}
+// Request
+{ textPrompt: string, baseImage?: ImageFile, dogma?: Dogma }
+
+// Response
+{ previewImage: ImageFile, previewPrompt: string, requestId: string }
 ```
 
-### ShotVariant
+### POST /api/nano/retouch
+
 ```typescript
+// Request
+{ baseImage: ImageFile, instruction: string, target: 'root'|'extension'|'character', dogma?: Dogma }
+
+// Response
+{ previewImage: ImageFile, previewPrompt: string, requestId: string, target: string }
+```
+
+### POST /api/nano/shot-variants
+
+```typescript
+// Request
+{ baseImage: ImageFile, shotList: string[], dogma?: Dogma }
+
+// Response
+{ variants: ShotVariant[], requestId: string }
+```
+
+---
+
+## Types
+
+```typescript
+interface ImageFile {
+  base64: string;
+  file?: File;
+  mimeType?: string;
+}
+
 interface ShotVariant {
-  label: string;               // "Plan moyen", "Plan épaule", etc.
+  label: string;
   previewImage: ImageFile;
   cameraNotes: string;
   deltaInstruction: string;
@@ -91,176 +129,66 @@ interface ShotVariant {
 
 ---
 
-## Convention d'Indices (CRITIQUE)
-
-| segmentIndex | Target | Accès |
-|--------------|--------|-------|
-| `null` | character | N/A |
-| `0` | root | `mainPrompt` |
-| `1` | extension 1 | `extensionPrompts[0]` |
-| `2` | extension 2 | `extensionPrompts[1]` |
-| `N` | extension N | `extensionPrompts[N-1]` |
-
-### Helpers (nanoService.ts)
+## 12 Plans Standard
 
 ```typescript
-deriveTarget(segmentIndex)          // null→character, 0→root, ≥1→extension
-deriveDirtyExtensions(count)        // Returns [1, 2, ..., N] (NOT [0..N-1])
-getEffectiveDogma(seqBound, active) // sequenceBoundDogma ?? activeDogma
-```
+const STANDARD_SHOT_LIST = [
+  'Plan d\'ensemble', 'Demi-ensemble', 'Plan moyen', 'Plan genoux',
+  'Plan américain', 'Plan taille', 'Plan poitrine', 'Plan épaule',
+  'Gros plan', 'Très gros plan', 'Plongée', 'Contre-plongée',
+] as const;
 
----
-
-## Controller Central (Studio.tsx)
-
-### States
-
-```typescript
-const [nanoEditorContext, setNanoEditorContext] = useState<NanoEditorContext | null>(null);
-const [storyboardByIndex, setStoryboardByIndex] = useState<Record<number, StoryboardPreview>>({});
-const [storyboardModalContext, setStoryboardModalContext] = useState<{
-  segmentIndex: number;
-  baseImage: ImageFile;
-} | null>(null);
-```
-
-### openNanoEditor()
-
-Ouvre AIEditorModal avec le contexte approprié :
-
-```typescript
-openNanoEditor({
-  segmentIndex: 0,           // ou 1..N, ou null pour character
-  baseImage: thumbnailImage,
-  initialPrompt: currentPrompt,
+// Usage correct
+await generateShotVariants({
+  baseImage: myImage,
+  shotList: [...STANDARD_SHOT_LIST],
+  dogma: activeDogma,
 });
-```
-
-### handleNanoApply(payload)
-
-| Target | Action |
-|--------|--------|
-| `root` | MAJ `mainPrompt`, `dirtyExtensions=[1..N]`, `storyboardByIndex[0]` |
-| `extension` | MAJ `extensionPrompts[idx-1]`, retrait du dirty, `storyboardByIndex[idx]` |
-| `character` | TODO |
-
-### sortedSequenceHistory
-
-Garantit l'ordre stable de la timeline :
-
-```typescript
-const sortedSequenceHistory = useMemo(() => {
-  return Object.entries(sequenceVideoData)
-    .map(([k, v]) => ({ idx: Number(k), v }))
-    .filter(x => Number.isFinite(x.idx))
-    .sort((a, b) => a.idx - b.idx)
-    .map(x => x.v);
-}, [sequenceVideoData]);
 ```
 
 ---
 
 ## Flows UX
 
-### 1. Stylet → Nano
+| Flow | Chemin |
+|------|--------|
+| Stylet → Nano | PromptEditorModal → "Aligner au visuel" → AIEditorModal → "Appliquer" |
+| Drift Control | VideoResult → "Recaler avec Nano" → AIEditorModal → "Appliquer" |
+| Thumbnails | PromptConception → hover "Nano" → AIEditorModal |
+| 12 Vignettes | StoryboardPreviewModal → "Générer 12 Plans" → "Utiliser ce plan" |
 
-```
-PromptEditorModal (stylet)
-    ↓ clic "Aligner au visuel (Nano)"
-AIEditorModal
-    ↓ retouche image
-    ↓ clic "Appliquer Prompt"
-handleNanoApply()
-```
+---
 
-### 2. Drift Control
+## Timeline Ordering
 
-```
-VideoResult (après génération extension)
-    ↓ clic "Recaler avec Nano" (visible si activePromptIndex ≥ 1)
-AIEditorModal (avec dernier keyframe)
-    ↓ instruction recadrage
-    ↓ clic "Appliquer Prompt"
-handleNanoApply()
-```
+```typescript
+// Studio.tsx - ligne 1583
+sequenceHistory={sortedSequenceHistory}  // ✅ Trié numériquement
 
-### 3. Thumbnail Retouche
-
-```
-PromptConception (Sequence Flow)
-    ↓ hover thumbnail → bouton "Nano" (orange)
-AIEditorModal
-    ↓ clic "Appliquer Prompt"
-handleNanoApply()
-```
-
-### 4. 12 Vignettes
-
-```
-Trigger (à venir: bouton dans UI)
-    ↓ StoryboardPreviewModal s'ouvre
-    ↓ clic "Générer 12 Plans"
-    ↓ génération via /api/nano/shot-variants
-    ↓ hover vignette → "Utiliser ce plan"
-handleNanoApply()
+// INTERDIT
+sequenceHistory={Object.values(sequenceVideoData)}  // ❌ Ordre aléatoire
 ```
 
 ---
 
-## Badges Preview (PromptConception)
+## Capacités Utilisées
 
-| Badge | Couleur | Condition |
-|-------|---------|-----------|
-| **OK** | vert | `storyboardByIndex[segmentIndex]` existe |
-| **⚠** | orange | `segmentIndex ≥ 1` et `dirtyExtensions.includes(segmentIndex)` |
-| **—** | gris | sinon (missing) |
+| Capacité | Nano Banana | Nano Banana Pro |
+|----------|-------------|-----------------|
+| Génération image | ✅ | ✅ |
+| Édition image | ✅ | ✅ |
+| Résolution max | 1024px | Élevée |
+| Images entrée max | 3 | 5-14 |
 
----
-
-## Backend Endpoints
-
-| Endpoint | Description | Status |
-|----------|-------------|--------|
-| `POST /api/nano/preview` | Génère preview depuis prompt | Mock ✅ |
-| `POST /api/nano/retouch` | Retouche image avec instruction | Mock ✅ |
-| `POST /api/nano/shot-variants` | Génère 12 variantes de plan | Mock ✅ |
-
-**Flag** : `USE_MOCK_PROVIDER = true` (api/nano/index.js)
+> **Note** : Capacités additionnelles (raisonnement, Google Search) documentées par Google mais non exploitées actuellement.
 
 ---
 
-## 12 Plans Standard (STANDARD_SHOT_LIST)
+## Fichiers Clés
 
-1. Plan d'ensemble
-2. Demi-ensemble
-3. Plan moyen
-4. Plan genoux
-5. Plan américain
-6. Plan taille
-7. Plan poitrine
-8. Plan épaule
-9. Gros plan
-10. Très gros plan
-11. Plongée
-12. Contre-plongée
-
----
-
-## Prochaines Étapes
-
-- [ ] Timeline I/O/X : keybinds I/O/X pour marqueurs EDL
-- [ ] Characters : couverture de plans + Nano
-
----
-
-## Tests d'Acceptance
-
-| Test | Expected |
-|------|----------|
-| Stylet root → Nano → Apply | Root MAJ, dirty=[1..N] |
-| Stylet ext2 → Nano → Apply | Ext2 MAJ, ext2 retiré du dirty |
-| Drift control ext2 | AIEditorModal avec keyframe, ext2 MAJ |
-| Timeline ordre | root→ext1→ext2... stable |
-| Thumbnail hover | Bouton "Nano" visible |
-| Badge dirty | ⚠ affiché si extension dirty |
-| 12 vignettes | Génération + "Utiliser" fonctionne |
+| Fichier | Rôle |
+|---------|------|
+| `api/nano/index.js` | Backend, providers, handlers |
+| `services/nanoService.ts` | Frontend service, BYOK, helpers |
+| `components/StoryboardPreviewModal.tsx` | Modal 12 vignettes |
+| `components/AIEditorModal.tsx` | Éditeur Nano, onApply |

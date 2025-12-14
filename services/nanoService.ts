@@ -21,7 +21,7 @@ export interface NanoPreviewRequest {
 }
 
 export interface NanoPreviewResponse {
-    previewImage: ImageFile | null;
+    previewImage: ImageFile;  // API guarantees image on success
     previewPrompt: string;
     cameraNotes?: string;
     movementNotes?: string;
@@ -64,10 +64,35 @@ export interface NanoShotVariantsResponse {
 
 const API_BASE = '/api/nano';
 
+// Dev-only logging (no logs in production)
+const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+const log = (...args: unknown[]) => isDev && console.log(...args);
+const warn = (...args: unknown[]) => isDev && console.warn(...args);
+
+/**
+ * Get API key from sessionStorage (BYOK mode)
+ * Security: Session-only, never persisted, never logged
+ */
+function getStoredApiKey(): string | null {
+    if (typeof window === 'undefined') return null;
+    // BYOK: Use sessionStorage (session-only, not persistent)
+    return window.sessionStorage.getItem('gemini_api_key');
+}
+
 async function apiCall<T>(endpoint: string, body: unknown): Promise<T> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+    };
+
+    // BYOK: Pass API key if available
+    const apiKey = getStoredApiKey();
+    if (apiKey) {
+        headers['x-gemini-api-key'] = apiKey;
+    }
+
     const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
     });
 
@@ -84,7 +109,7 @@ async function apiCall<T>(endpoint: string, body: unknown): Promise<T> {
  * Used for: initial storyboard visualization
  */
 export async function generatePreview(request: NanoPreviewRequest): Promise<NanoPreviewResponse> {
-    console.log('[NanoService] generatePreview', {
+    log('[NanoService] generatePreview', {
         hasImage: !!request.baseImage,
         promptLength: request.textPrompt?.length
     });
@@ -100,7 +125,7 @@ export async function generatePreview(request: NanoPreviewRequest): Promise<Nano
  * - segmentIndex=1..n means extension prompts
  */
 export async function retouchImage(request: NanoRetouchRequest): Promise<NanoRetouchResponse> {
-    console.log('[NanoService] retouchImage', {
+    log('[NanoService] retouchImage', {
         target: request.target,
         segmentIndex: request.segmentIndex,
         instructionLength: request.instruction?.length
@@ -108,7 +133,7 @@ export async function retouchImage(request: NanoRetouchRequest): Promise<NanoRet
 
     // Validate segmentIndex for extensions
     if (request.target === 'extension' && (request.segmentIndex === undefined || request.segmentIndex < 1)) {
-        console.warn('[NanoService] Extension retouch without valid segmentIndex!');
+        warn('[NanoService] Extension retouch without valid segmentIndex!');
     }
 
     return apiCall<NanoRetouchResponse>('/retouch', request);
@@ -119,7 +144,7 @@ export async function retouchImage(request: NanoRetouchRequest): Promise<NanoRet
  * Used for: "Couverture de plans" feature
  */
 export async function generateShotVariants(request: NanoShotVariantsRequest): Promise<NanoShotVariantsResponse> {
-    console.log('[NanoService] generateShotVariants', {
+    log('[NanoService] generateShotVariants', {
         numShots: request.shotList?.length
     });
     return apiCall<NanoShotVariantsResponse>('/shot-variants', request);
@@ -192,13 +217,18 @@ export function createStoryboardPreview(
     characterId?: string,
     baseImage?: ImageFile
 ): StoryboardPreview {
+    // Validate previewImage exists
+    if (!response.previewImage) {
+        throw new Error('[NanoService] Cannot create StoryboardPreview: previewImage is null');
+    }
+
     return {
         id: crypto.randomUUID(),
         owner,
         segmentIndex,
         characterId,
         baseImage,
-        previewImage: response.previewImage as ImageFile,
+        previewImage: response.previewImage,
         previewPrompt: response.previewPrompt,
         cameraNotes: response.cameraNotes,
         movementNotes: response.movementNotes,

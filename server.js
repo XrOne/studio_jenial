@@ -6,6 +6,7 @@ import bodyParser from 'body-parser';
 import { GoogleGenAI } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 import * as driveService from './services/googleDriveService.js';
+import nanoHandlers from './api/nano/index.js'; // Nano Banana Pro handlers
 
 // Load env files (optional - only for local dev convenience)
 dotenv.config({ path: '.env.local' });
@@ -204,6 +205,12 @@ app.post('/api/generate-content', async (req, res) => {
     });
   }
 });
+
+// 1.5 Nano Banana Pro Endpoints
+// Explicitly mounted here to be handled by the monolithic Vercel function
+app.post('/api/nano/preview', nanoHandlers.preview);
+app.post('/api/nano/retouch', nanoHandlers.retouch);
+app.post('/api/nano/shot-variants', nanoHandlers.shotVariants);
 
 // 2. Video Generation (Veo) - Start generation using predictLongRunning
 // Uses instances format required by Veo 3.1 models

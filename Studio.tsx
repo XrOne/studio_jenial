@@ -24,10 +24,13 @@ import PromptSequenceAssistant from './components/PromptSequenceAssistant';
 import SequenceManager from './components/SequenceManager';
 import ShotLibrary from './components/ShotLibrary';
 import StoryboardPreviewModal from './components/StoryboardPreviewModal';
+import { UserProfileModal } from './components/UserProfileModal'; // New
+import { SessionHistoryModal } from './components/SessionHistoryModal'; // New
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
 import useLocalStorage from './hooks/useLocalStorage';
-import { useShotLibrary } from './hooks/useShotLibrary'; // New Hook
+import { useShotLibrary } from './hooks/useShotLibrary';
+import { useSessionPersistence } from './hooks/useSessionPersistence'; // New // New Hook
 import {
   generateVideo,
   reviseFollowingPrompts,
@@ -378,6 +381,121 @@ const Studio: React.FC = () => {
   // === NANO BANANA PRO: Centralized editor context ===
   const [nanoEditorContext, setNanoEditorContext] = useState<NanoEditorContext | null>(null);
   const [storyboardByIndex, setStoryboardByIndex] = useState<Record<number, StoryboardPreview>>({});
+
+  // === SESSION PERSISTENCE ===
+  const {
+    profile,
+    sessionId,
+    isSaving,
+    login,
+    startNewSession,
+    restoreSession,
+    listHistory
+  } = useSessionPersistence(
+    promptSequence,
+    sequenceBoundDogma || activeDogma,
+    sequenceVideoData
+  );
+
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historySessions, setHistorySessions] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // Auto-open profile modal if no profile
+  useEffect(() => {
+    // Delay slightly to allow auto-login check in hook
+    const timer = setTimeout(() => {
+      if (!profile && !localStorage.getItem('studio_profile_id')) {
+        setIsProfileModalOpen(true);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [profile]);
+
+  // Start new session if profile exists but no session
+  useEffect(() => {
+    if (profile && !sessionId) {
+      startNewSession();
+    }
+  }, [profile, sessionId, startNewSession]);
+
+  const handleProfileConfirm = async (identifier: string) => {
+    setIsLoadingHistory(true);
+    try {
+      await login(identifier);
+      setIsProfileModalOpen(false);
+      // startNewSession will trigger via effect
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const handleOpenHistory = async () => {
+    setIsHistoryModalOpen(true);
+    setIsLoadingHistory(true);
+    try {
+      const sessions = await listHistory();
+      setHistorySessions(sessions);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const handleRestoreSession = async (session: any) => {
+    setIsLoadingHistory(true);
+    try {
+      const { session: restoredSession, storyboards } = await restoreSession(session.id);
+
+      // Restore State
+      // 1. Prompts
+      const restoredPromptSequence: PromptSequence = {
+        id: restoredSession.id,
+        dogmaId: restoredSession.dogma_id || null,
+        status: PromptSequenceStatus.CLEAN,
+        createdAt: restoredSession.created_at,
+        mainPrompt: restoredSession.main_prompt || '',
+        extensionPrompts: Array.isArray(restoredSession.extension_prompts)
+          ? restoredSession.extension_prompts
+          : [],
+        dirtyExtensions: Array.isArray(restoredSession.dirty_extensions)
+          ? restoredSession.dirty_extensions
+          : []
+      };
+      setPromptSequence(restoredPromptSequence);
+      setPromptSequence(restoredPromptSequence);
+
+      // 2. Dogma
+      if (restoredSession.dogma_snapshot) {
+        setSequenceBoundDogma(restoredSession.dogma_snapshot);
+      } else if (restoredSession.dogma_id) {
+        // Try to find in library
+        const d = dogmas.find((dg: Dogma) => dg.id === restoredSession.dogma_id);
+        if (d) setSequenceBoundDogma(d);
+      }
+
+      // 3. Videos
+      if (restoredSession.sequence_video_data) {
+        setSequenceVideoData(restoredSession.sequence_video_data);
+      }
+
+      // 4. Storyboards
+      if (storyboards) {
+        setStoryboardByIndex(storyboards);
+      }
+
+      // 5. Active Index
+      setActivePromptIndex(restoredSession.active_prompt_index ?? null);
+
+      setIsHistoryModalOpen(false);
+    } catch (e) {
+      console.error('Restore failed', e);
+      setErrorMessage('Failed to restore session');
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
 
   const [initialFormValues, setInitialFormValues] =
     useState<GenerateVideoParams | null>(null);
@@ -1320,6 +1438,19 @@ const Studio: React.FC = () => {
           providerToken={providerToken}
           errorMessage={apiKeyError || undefined}
         />}
+        {/* Persistence Modals */}
+        <UserProfileModal
+          isOpen={isProfileModalOpen}
+          onConfirm={handleProfileConfirm}
+          isLoading={isLoadingHistory}
+        />
+        <SessionHistoryModal
+          isOpen={isHistoryModalOpen}
+          onClose={() => setIsHistoryModalOpen(false)}
+          sessions={historySessions}
+          onRestore={handleRestoreSession}
+          isLoading={isLoadingHistory}
+        />
         {isShotLibraryOpen && (
           <ShotLibrary
             isOpen={isShotLibraryOpen}
@@ -1503,6 +1634,17 @@ const Studio: React.FC = () => {
               className="flex items-center gap-2 px-3 py-2 bg-gray-700/80 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors">
               <FilmIcon className="w-5 h-5" />
             </button>
+            <div className="w-px h-6 bg-gray-700 mx-1"></div>
+            <button
+              onClick={handleOpenHistory}
+              title="Session History"
+              className={`flex items-center gap-2 px-3 py-2 bg-gray-700/80 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors ${isSaving ? 'animate-pulse border border-green-500/50' : ''}`}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+
           </div>
         </header>
         <main className="flex-grow p-4 overflow-hidden">
