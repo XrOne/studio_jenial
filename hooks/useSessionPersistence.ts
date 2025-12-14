@@ -8,7 +8,7 @@ import {
     UserProfile,
     StudioSession
 } from '../services/sessionService';
-import { useLocalStorage } from './useLocalStorage';
+import useLocalStorage from './useLocalStorage';
 
 // Auto-save debounce delay (ms)
 const AUTO_SAVE_DELAY = 2000;
