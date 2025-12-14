@@ -1990,6 +1990,53 @@ const Studio: React.FC = () => {
                               }
                             }
                           }}
+                          // P2.4: Regenerate keyframe action
+                          onRegenerateKeyframe={async (segmentIndex) => {
+                            console.log(`[ImageFirst] Regenerating keyframe for segment ${segmentIndex}`);
+                            const prompt = segmentIndex === 0
+                              ? promptSequence.mainPrompt
+                              : promptSequence.extensionPrompts[segmentIndex - 1] || '';
+                            try {
+                              const result = await generateNanoPreview({
+                                textPrompt: prompt,
+                                dogma: sequenceBoundDogma,
+                              });
+                              if (result.previewImage) {
+                                setStoryboardByIndex(prev => ({
+                                  ...prev,
+                                  [segmentIndex]: {
+                                    id: crypto.randomUUID(),
+                                    owner: segmentIndex === 0 ? 'root' : 'extension',
+                                    previewImage: result.previewImage,
+                                    previewPrompt: result.previewPrompt || prompt,
+                                    segmentIndex,
+                                    cameraNotes: result.cameraNotes,
+                                    movementNotes: result.movementNotes,
+                                    createdAt: new Date().toISOString(),
+                                    updatedAt: new Date().toISOString(),
+                                  }
+                                }));
+                              }
+                            } catch (err) {
+                              console.error(`[ImageFirst] Regenerate failed:`, err);
+                              setErrorMessage('Failed to regenerate keyframe.');
+                            }
+                          }}
+                          // P2.4: Use keyframe as base image for video generation
+                          onUseKeyframeAsBase={(segmentIndex, image) => {
+                            console.log(`[ImageFirst] Using keyframe ${segmentIndex} as base`);
+                            const imageFile: ImageFile = {
+                              file: new File([], `keyframe_${segmentIndex}.png`, { type: 'image/png' }),
+                              base64: image.base64,
+                            };
+                            setAssistantImage(imageFile);
+                            // Set the prompt as active
+                            const prompt = segmentIndex === 0
+                              ? promptSequence.mainPrompt
+                              : promptSequence.extensionPrompts[segmentIndex - 1] || '';
+                            setActivePromptIndex(segmentIndex);
+                            setInitialFormValues(prev => prev ? { ...prev, prompt } : null);
+                          }}
                         />
                       ) : (
                         <PromptConception

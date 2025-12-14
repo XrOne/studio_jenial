@@ -48,6 +48,8 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
   onRegenerateExtensions,
   onThumbnailClick,
   storyboardByIndex = {},
+  onRegenerateKeyframe,
+  onUseKeyframeAsBase,
 }) => {
   const allPrompts = [sequence.mainPrompt, ...sequence.extensionPrompts];
 
@@ -189,9 +191,8 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
                 {/* IMAGE-FIRST: Show keyframe preview OR video thumbnail */}
                 {keyframePreview?.previewImage ? (
                   <div className="pl-8 mt-2">
-                    <button
-                      onClick={() => onThumbnailClick?.(keyframePreview.previewImage.base64, index)}
-                      className="relative w-full aspect-video rounded-md overflow-hidden border-2 border-indigo-500/50 shadow-lg group cursor-pointer hover:border-indigo-400 transition-colors">
+                    <div
+                      className="relative w-full aspect-video rounded-md overflow-hidden border-2 border-indigo-500/50 shadow-lg group">
                       <img
                         src={`data:image/png;base64,${keyframePreview.previewImage.base64}`}
                         alt={`Keyframe for prompt ${index + 1}`}
@@ -201,13 +202,41 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
                         <SparklesIcon className="w-2.5 h-2.5" />
                         KEYFRAME
                       </div>
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                        <span className="text-xs text-white font-semibold bg-orange-500/80 px-2 py-1 rounded flex items-center gap-1">
-                          <SparklesIcon className="w-3 h-3" />
-                          Retoucher (Nano)
-                        </span>
+                      {/* Hover Actions - 3 buttons */}
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2">
+                        {/* Regénérer */}
+                        {onRegenerateKeyframe && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onRegenerateKeyframe(index); }}
+                            className="flex flex-col items-center gap-1 px-2 py-1.5 bg-blue-600/80 hover:bg-blue-500 text-white rounded text-[10px] font-medium transition-colors"
+                            title="Régénérer ce keyframe"
+                          >
+                            <RefreshIcon className="w-4 h-4" />
+                            Regénérer
+                          </button>
+                        )}
+                        {/* Retoucher */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onThumbnailClick?.(keyframePreview.previewImage.base64, index); }}
+                          className="flex flex-col items-center gap-1 px-2 py-1.5 bg-orange-600/80 hover:bg-orange-500 text-white rounded text-[10px] font-medium transition-colors"
+                          title="Retoucher avec Nano"
+                        >
+                          <SparklesIcon className="w-4 h-4" />
+                          Retoucher
+                        </button>
+                        {/* Utiliser comme base */}
+                        {onUseKeyframeAsBase && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onUseKeyframeAsBase(index, keyframePreview.previewImage); }}
+                            className="flex flex-col items-center gap-1 px-2 py-1.5 bg-green-600/80 hover:bg-green-500 text-white rounded text-[10px] font-medium transition-colors"
+                            title="Utiliser comme image de base"
+                          >
+                            <CheckIcon className="w-4 h-4" />
+                            Utiliser
+                          </button>
+                        )}
                       </div>
-                    </button>
+                    </div>
                   </div>
                 ) : videoThumbnail ? (
                   <div className="pl-8 mt-2">
