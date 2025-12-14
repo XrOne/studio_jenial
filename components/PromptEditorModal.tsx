@@ -53,8 +53,8 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
       {
         role: 'assistant',
         content: `I'm ready to help you revise this prompt segment. I see the original prompt${visualContextBase64
-            ? ' and a frame from the previous video result'
-            : ''
+          ? ' and a frame from the previous video result'
+          : ''
           }. What would you like to change?`,
         image: initialImage,
       },
@@ -99,8 +99,7 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
           ...prev,
           {
             role: 'assistant',
-            content:
-              'This description this detailed, with passes and attention changes ("attention", "protusion", "non"), should allow the AI to generate a much more natural and believable animation. Does this new movement description suit you? Also, using an image, I note that the "PURE GRAPHIC CONTRAST" rule is not perfectly respected. The silhouettes are not a pure black absolute (#000000) and we can guess a slight ambient light on the wall. I also slightly reinforced the negative prompt to try to get a visually impeccable result, consistent with our dogma.',
+            content: `✅ I've revised the prompt based on your feedback. Here's the updated version:\n\n"${result.revisedPrompt.substring(0, 200)}..."\n\nClick "Confirm Revision" to apply this change, or continue the conversation if you'd like further adjustments.`,
             image: null,
           },
         ]);
@@ -156,8 +155,8 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
                     }`}>
                   <div
                     className={`max-w-[90%] p-3 rounded-2xl flex flex-col gap-2 ${msg.role === 'user'
-                        ? 'bg-indigo-600 text-white rounded-br-none'
-                        : 'bg-gray-700 text-gray-200 rounded-bl-none'
+                      ? 'bg-indigo-600 text-white rounded-br-none'
+                      : 'bg-gray-700 text-gray-200 rounded-bl-none'
                       }`}>
                     {msg.image && (
                       <img
