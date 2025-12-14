@@ -66,8 +66,8 @@ const API_BASE = '/api/nano';
 
 // Dev-only logging (no logs in production)
 const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
-const log = (...args: unknown[]) => isDev && console.log(...args);
-const warn = (...args: unknown[]) => isDev && console.warn(...args);
+const log = (...args: any[]) => isDev && console.log(...args);
+const warn = (...args: any[]) => isDev && console.warn(...args);
 
 /**
  * Get API key from sessionStorage (BYOK mode)

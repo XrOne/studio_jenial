@@ -29,7 +29,7 @@
         },
         {
           "key": "Access-Control-Allow-Headers",
-          "value": "Content-Type,x-api-key"
+          "value": "Content-Type,x-api-key,x-gemini-api-key"
         }
       ]
     }

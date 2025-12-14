@@ -212,6 +212,82 @@ app.post('/api/nano/preview', nanoHandlers.preview);
 app.post('/api/nano/retouch', nanoHandlers.retouch);
 app.post('/api/nano/shot-variants', nanoHandlers.shotVariants);
 
+// 1.6 File Upload Proxy (BYOK Security)
+// Proxies file uploads to Google Files API to avoid direct frontend calls/key exposure
+// LIMITATION: Vercel Serverless Functions have 4.5MB request body limit
+app.post('/api/files/upload', async (req, res) => {
+  try {
+    const apiKey = getApiKey(req);
+    const { displayName, mimeType, data } = req.body;
+
+    if (!data) {
+      return res.status(400).json({ error: 'File data required (base64)' });
+    }
+
+    // Check size (approximate from base64)
+    const sizeInBytes = Math.ceil((data.length * 3) / 4);
+    if (sizeInBytes > 4 * 1024 * 1024) {
+      console.warn('[Files] Upload warning: File size ~' + (sizeInBytes / 1024 / 1024).toFixed(2) + 'MB approaches Vercel limit');
+    }
+
+    console.log(`[Files] Proxying upload: ${displayName} (${mimeType})`);
+
+    // 1. Convert base64 to buffer
+    const buffer = Buffer.from(data, 'base64');
+
+    // 2. Initial Resumable Request to get Upload URL
+    const uploadUrlResponse = await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=resumable', {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': buffer.length.toString(),
+        'X-Goog-Upload-Header-Content-Type': mimeType,
+      },
+      body: JSON.stringify({
+        file: { display_name: displayName }
+      })
+    });
+
+    if (!uploadUrlResponse.ok) {
+      const err = await uploadUrlResponse.json().catch(() => ({}));
+      throw new Error(`Failed to initialize upload: ${err.error?.message || uploadUrlResponse.statusText}`);
+    }
+
+    const uploadUrl = uploadUrlResponse.headers.get('x-goog-upload-url');
+    if (!uploadUrl) {
+      throw new Error('No upload URL received from Google');
+    }
+
+    // 3. Upload file content to the Upload URL
+    const uploadFileResponse = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Length': buffer.length.toString(),
+        'X-Goog-Upload-Offset': '0',
+        'X-Goog-Upload-Command': 'upload, finalize',
+      },
+      body: buffer
+    });
+
+    if (!uploadFileResponse.ok) {
+      const err = await uploadFileResponse.text();
+      throw new Error(`Failed to upload content: ${err}`);
+    }
+
+    const result = await uploadFileResponse.json();
+    console.log(`[Files] Upload success: ${result.file?.uri}`);
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('[Files] Upload proxy error:', error);
+    handleError(res, error);
+  }
+});
+
 // 2. Video Generation (Veo) - Start generation using predictLongRunning
 // Uses instances format required by Veo 3.1 models
 // Spec endpoint: POST /api/video/generate -> { operationName }

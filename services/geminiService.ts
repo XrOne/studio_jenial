@@ -292,71 +292,38 @@ interface GoogleFileUploadResult {
  * @param displayName - Optional display name for the file
  * @returns fileUri that can be used with Gemini/Veo APIs
  */
+/**
+ * Upload a file to Google Files API via backend proxy
+ * SECURITY: All traffic goes through backend. No direct Google calls.
+ * LIMITATION: Max ~4MB file size due to Vercel Limits.
+ */
 export const uploadToGoogleFiles = async (
   file: File | Blob,
   displayName?: string
 ): Promise<GoogleFileUploadResult> => {
   const mimeType = file instanceof File ? file.type : 'application/octet-stream';
   const fileName = displayName || (file instanceof File ? file.name : `upload-${Date.now()}`);
-  const numBytes = file.size;
 
-  console.log(`[GoogleFiles] Starting upload: ${fileName} (${(numBytes / 1024 / 1024).toFixed(2)} MB)`);
-
-  // Step 1: Get pre-signed upload URL from our backend (API key handled server-side)
-  const config = await fetchGeminiConfig();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-
-  // Only add user key header if server doesn't have a key configured (BYOK mode)
-  if (!config.hasServerKey) {
-    const key = getLocalApiKey();
-    if (!key) {
-      throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
-    }
-    headers['x-api-key'] = key;
+  // Convert Blob/File to Base64
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
+  const base64 = btoa(binary);
 
-  const initResponse = await fetch('/api/files/upload', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      displayName: fileName,
-      mimeType,
-      fileSize: numBytes,
-    }),
+  console.log(`[GoogleFiles] Proxying upload via backend: ${fileName} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
+  // Call backend proxy
+  const result = await callVeoBackend('/api/files/upload', {
+    displayName: fileName,
+    mimeType,
+    data: base64
   });
-
-  if (!initResponse.ok) {
-    const errorData = await initResponse.json().catch(() => ({}));
-    throw new Error(`Failed to initialize upload: ${initResponse.status} - ${errorData.error || 'Unknown error'}`);
-  }
-
-  const { uploadUrl } = await initResponse.json();
-  if (!uploadUrl) {
-    throw new Error('No upload URL received from backend');
-  }
-
-  console.log('[GoogleFiles] Upload URL received (via backend), uploading file...');
-
-  // Step 2: Upload file directly to Google using pre-signed URL (no API key needed)
-  const uploadResponse = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Length': numBytes.toString(),
-      'X-Goog-Upload-Offset': '0',
-      'X-Goog-Upload-Command': 'upload, finalize',
-    },
-    body: file,
-  });
-
-  if (!uploadResponse.ok) {
-    const errorText = await uploadResponse.text();
-    throw new Error(`Failed to upload file: ${uploadResponse.status} - ${errorText}`);
-  }
-
-  const result = await uploadResponse.json();
 
   if (!result.file || !result.file.uri) {
-    throw new Error('No file URI in upload response');
+    throw new Error('Upload failed: No file URI received from backend');
   }
 
   console.log(`[GoogleFiles] Upload complete: ${result.file.uri}`);

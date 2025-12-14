@@ -20,7 +20,7 @@ import { GoogleGenAI } from '@google/genai';
 const USE_MOCK_PROVIDER = process.env.NANO_MOCK_MODE === 'true';
 
 // Model selection
-const NANO_BANANA_MODEL = 'gemini-2.5-flash-image';         // Fast, 1024px
+const NANO_BANANA_MODEL = 'gemini-3-pro-image-preview';         // Pro, up to 4K (Standard for Keyframes)
 const NANO_BANANA_PRO_MODEL = 'gemini-3-pro-image-preview'; // Pro, up to 4K
 
 // ============================================================================
