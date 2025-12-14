@@ -1275,8 +1275,9 @@ const Studio: React.FC = () => {
     setMainPromptConfig(null);
     setInitialFormValues(null);
 
-    // Dogma binding (scoped to sequence)
+    // Dogma binding (scoped to sequence + global selection)
     setSequenceBoundDogma(null);
+    setActiveDogmaId(null); // Also clear user's global dogma selection
 
     // Storyboard / Nano Banana state
     setStoryboardByIndex({});
