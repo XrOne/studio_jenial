@@ -1882,17 +1882,48 @@ const Studio: React.FC = () => {
                           }
                           videoData={sequenceVideoData}
                           storyboardByIndex={storyboardByIndex}
-                          onThumbnailClick={(thumbnailBase64, index) => {
-                            // Open Nano editor for this segment
+                          onThumbnailClick={async (thumbnailBase64, index) => {
+                            // Get prompt for this segment
                             const prompt = index === 0
                               ? promptSequence.mainPrompt
                               : promptSequence.extensionPrompts[index - 1] || '';
-                            const baseImage = thumbnailBase64 ? {
-                              file: new File([], `keyframe_${index}.png`, { type: 'image/png' }),
-                              base64: thumbnailBase64,
-                            } : storyboardByIndex[index]?.previewImage;
-                            if (baseImage) {
-                              openNanoEditor({ segmentIndex: index, baseImage, initialPrompt: prompt });
+
+                            // If we have an image, open Nano editor for retouching
+                            const existingImage = thumbnailBase64
+                              ? { file: new File([], `keyframe_${index}.png`, { type: 'image/png' }), base64: thumbnailBase64 }
+                              : storyboardByIndex[index]?.previewImage;
+
+                            if (existingImage) {
+                              openNanoEditor({ segmentIndex: index, baseImage: existingImage, initialPrompt: prompt });
+                            } else {
+                              // No image - generate a new preview
+                              console.log(`[ImageFirst] Generating preview for segment ${index}`);
+                              try {
+                                const result = await generateNanoPreview({
+                                  textPrompt: prompt,
+                                  dogma: sequenceBoundDogma,
+                                });
+                                if (result.previewImage) {
+                                  setStoryboardByIndex(prev => ({
+                                    ...prev,
+                                    [index]: {
+                                      id: crypto.randomUUID(),
+                                      owner: index === 0 ? 'root' : 'extension',
+                                      previewImage: result.previewImage,
+                                      previewPrompt: result.previewPrompt || prompt,
+                                      segmentIndex: index,
+                                      cameraNotes: result.cameraNotes,
+                                      movementNotes: result.movementNotes,
+                                      createdAt: new Date().toISOString(),
+                                      updatedAt: new Date().toISOString(),
+                                    }
+                                  }));
+                                  console.log(`[ImageFirst] Preview generated for segment ${index}`);
+                                }
+                              } catch (err) {
+                                console.error(`[ImageFirst] Failed to generate preview:`, err);
+                                setErrorMessage('Failed to generate preview. Check your API key.');
+                              }
                             }
                           }}
                         />
