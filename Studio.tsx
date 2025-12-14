@@ -41,6 +41,7 @@ import {
   ApiError,
   uploadToGoogleFiles,
 } from './services/geminiService';
+import { generatePreview as generateNanoPreview } from './services/nanoService';
 import { useAuth } from './contexts/AuthContext';
 import {
   AppState,
@@ -78,6 +79,8 @@ const PromptConception: React.FC<{
   onOpenNanoEditor?: (segmentIndex: number, baseImage: ImageFile, initialPrompt: string) => void;
   promptSequence?: PromptSequence | null;
   storyboardByIndex?: Record<number, StoryboardPreview>;
+  // === IMAGE-FIRST: Keyframe generation status ===
+  isGeneratingKeyframes?: boolean;
 }> = ({
   motionDescription,
   referenceImage,
@@ -87,6 +90,7 @@ const PromptConception: React.FC<{
   onOpenNanoEditor,
   promptSequence,
   storyboardByIndex = {},
+  isGeneratingKeyframes = false,
 }) => {
     const displayImage = activeChatImage || referenceImage;
     const hasContent =
@@ -204,6 +208,79 @@ const PromptConception: React.FC<{
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+
+              {/* === IMAGE-FIRST: Auto-Keyframes Panel === */}
+              {(storyboardByIndex[0] || storyboardByIndex[1]) && (
+                <div className="flex flex-col gap-2 bg-indigo-900/20 p-3 rounded-xl border border-indigo-600/30">
+                  <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex justify-between items-center">
+                    <span>🎬 Keyframes</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-800 text-indigo-200">Auto</span>
+                  </div>
+                  <div className="flex gap-3">
+                    {/* Root Keyframe */}
+                    {storyboardByIndex[0] && (
+                      <div className="flex-1 relative group">
+                        <div className="aspect-video rounded-lg overflow-hidden border-2 border-indigo-500/50 relative">
+                          <img
+                            src={`data:image/png;base64,${storyboardByIndex[0].previewImage.base64}`}
+                            className="w-full h-full object-cover"
+                            alt="Root Keyframe"
+                          />
+                          {/* Retoucher Button */}
+                          {onOpenNanoEditor && (
+                            <button
+                              onClick={() => {
+                                onOpenNanoEditor(0, storyboardByIndex[0].previewImage, getPromptForSegment(0));
+                              }}
+                              className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                            >
+                              <span className="px-2 py-1 bg-orange-500 text-white text-[10px] font-semibold rounded-md shadow-lg flex items-center gap-1">
+                                <SparklesIcon className="w-3 h-3" />
+                                Retoucher (Nano)
+                              </span>
+                            </button>
+                          )}
+                          {/* Badge */}
+                          <div className="absolute top-1 right-1 px-1.5 py-0.5 text-[8px] font-bold rounded bg-green-600/80 text-white">
+                            ROOT
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {/* Extension 1 Keyframe */}
+                    {storyboardByIndex[1] && (
+                      <div className="flex-1 relative group">
+                        <div className="aspect-video rounded-lg overflow-hidden border-2 border-purple-500/50 relative">
+                          <img
+                            src={`data:image/png;base64,${storyboardByIndex[1].previewImage.base64}`}
+                            className="w-full h-full object-cover"
+                            alt="Ext 1 Keyframe"
+                          />
+                          {/* Retoucher Button */}
+                          {onOpenNanoEditor && (
+                            <button
+                              onClick={() => {
+                                onOpenNanoEditor(1, storyboardByIndex[1].previewImage, getPromptForSegment(1));
+                              }}
+                              className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                            >
+                              <span className="px-2 py-1 bg-orange-500 text-white text-[10px] font-semibold rounded-md shadow-lg flex items-center gap-1">
+                                <SparklesIcon className="w-3 h-3" />
+                                Retoucher (Nano)
+                              </span>
+                            </button>
+                          )}
+                          {/* Badge */}
+                          <div className={`absolute top-1 right-1 px-1.5 py-0.5 text-[8px] font-bold rounded ${getPreviewStatus(1) === 'dirty' ? 'bg-orange-600/80' : 'bg-purple-600/80'
+                            } text-white`}>
+                            EXT 1 {getPreviewStatus(1) === 'dirty' && '⚠'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -381,6 +458,10 @@ const Studio: React.FC = () => {
   // === NANO BANANA PRO: Centralized editor context ===
   const [nanoEditorContext, setNanoEditorContext] = useState<NanoEditorContext | null>(null);
   const [storyboardByIndex, setStoryboardByIndex] = useState<Record<number, StoryboardPreview>>({});
+
+  // === IMAGE-FIRST WORKFLOW: Auto-generate keyframes ===
+  const [autoKeyframesEnabled, setAutoKeyframesEnabled] = useState(true);
+  const [isGeneratingKeyframes, setIsGeneratingKeyframes] = useState(false);
 
   // === SESSION PERSISTENCE ===
   const {
@@ -1171,6 +1252,52 @@ const Studio: React.FC = () => {
       createdAt: sequence.createdAt || new Date().toISOString(),
     };
     setPromptSequence(scopedSequence);
+
+    // === IMAGE-FIRST: Auto-generate keyframes ===
+    if (autoKeyframesEnabled) {
+      console.log('[ImageFirst] Auto-generating keyframes for sequence');
+      setIsGeneratingKeyframes(true);
+
+      // Generate keyframe for root (segmentIndex 0)
+      const generateKeyframe = async (segmentIndex: number, prompt: string) => {
+        try {
+          const result = await generateNanoPreview({
+            textPrompt: prompt,
+            dogma: boundDogma,
+          });
+          if (result.previewImage) {
+            setStoryboardByIndex(prev => ({
+              ...prev,
+              [segmentIndex]: {
+                id: crypto.randomUUID(),
+                owner: segmentIndex === 0 ? 'root' : 'extension',
+                previewImage: result.previewImage,
+                previewPrompt: result.previewPrompt || prompt,
+                segmentIndex,
+                cameraNotes: result.cameraNotes,
+                movementNotes: result.movementNotes,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }
+            }));
+            console.log(`[ImageFirst] Keyframe ${segmentIndex} generated`);
+          }
+        } catch (err) {
+          console.warn(`[ImageFirst] Failed to generate keyframe ${segmentIndex}:`, err);
+        }
+      };
+
+      // Generate root keyframe
+      generateKeyframe(0, scopedSequence.mainPrompt);
+
+      // Generate first extension keyframe if exists
+      if (scopedSequence.extensionPrompts && scopedSequence.extensionPrompts[0]) {
+        generateKeyframe(1, scopedSequence.extensionPrompts[0]);
+      }
+
+      // Mark generation complete after a delay
+      setTimeout(() => setIsGeneratingKeyframes(false), 3000);
+    }
 
     const firstPrompt = scopedSequence.mainPrompt;
     let configBase = lastConfig;
