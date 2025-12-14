@@ -1,24 +1,42 @@
 # Image-First Workflow - Documentation Technique
 
-> **Date:** 2025-12-14 | **Version:** 1.0
+> **Date:** 2025-12-14 | **Version:** 1.1 | **Status:** P0+P1 Complete
 
 ## Résumé
 
-Transformation du workflow Studio Jenial pour être **visual-first** : l'assistant génère automatiquement des keyframes dès la soumission d'un brief, affiche les images dans les vues Assistant et Studio, et permet la retouche Nano en un clic.
+Transformation du workflow Studio Jenial pour être **visual-first** : l'assistant génère automatiquement des keyframes dès la soumission d'un brief, et l'architecture "Init-Only Proxy" sécurise les uploads BYOK sans limites de taille.
+
+---
+
+## 🚨 P0 BLOQUANTS RÉSOLUS
+
+### 1. Sécurité BYOK & Uploads Larges ("Init-Only Proxy")
+**Architecture Modifiée** pour contourner la limite Vercel 4.5MB tout en sécurisant la clé API.
+
+**Flow:**
+1. **Frontend** appelle `POST /api/files/upload` (backend) avec métadonnées.
+2. **Backend** utilise la clé API (x-goog-api-key) pour initier l'upload via Google Resumable URL.
+3. **Frontend** reçoit l'URL signée et envoie les bytes bruts **directement à Google**.
+
+✅ Clé API masquée (reste sur le backend).
+✅ Limite de taille Vercel contournée (supporte 2GB+).
+
+### 2. CORS & Build
+- **Vercel Headers**: Ajout de `x-gemini-api-key` dans `Access-Control-Allow-Headers`.
+- **Build Fixes**: Correction des types (`any[]`) dans `nanoService.ts`.
 
 ---
 
 ## Fonctionnalités Implémentées
 
-### Phase 1: Auto-Keyframes dans l'Assistant
+### Phase 1: Auto-Keyframes (Nano Pro)
 
-| Feature | Fichier | Description |
-|---------|---------|-------------|
-| `autoKeyframesEnabled` | `Studio.tsx` | Toggle pour activer/désactiver (default: ON) |
-| `isGeneratingKeyframes` | `Studio.tsx` | État de chargement |
-| Génération auto root | `handleSequenceGenerated` | Appelle `nanoService.generatePreview` pour index 0 |
-| Génération auto ext1 | `handleSequenceGenerated` | Si `extensionPrompts[0]` existe, génère pour index 1 |
-| Panneau Keyframes | `PromptConception` | Affiche root + ext1 avec badges et bouton Retoucher |
+| Feature | Détail |
+|---------|--------|
+| **Modèle** | Bascule vers `gemini-3-pro-image-preview` (Qualité Pro) |
+| **Génération** | Auto pour Root + Ext1 (`handleSequenceGenerated`) |
+| **UI** | Panneau Assistant + Cards Studio via `storyboardByIndex` |
+| **Assistant** | Prompt système minimaliste (max 2 questions) |
 
 ### Phase 2: Keyframes dans le Studio
 
@@ -29,13 +47,6 @@ Transformation du workflow Studio Jenial pour être **visual-first** : l'assista
 | Badge KEYFRAME | UI | Indique que c'est une preview Nano |
 | Bouton Retoucher (Nano) | Hover | Ouvre `AIEditorModal` |
 | Bouton Generate Preview | Placeholder | Génère une nouvelle preview via API |
-
-### Phase 1.4: Assistant Visual-First
-
-| Feature | Fichier | Description |
-|---------|---------|-------------|
-| System instruction minimal | `geminiService.ts` | Max 1-2 phrases, 2 questions max |
-| Fin "🎬 Generating keyframes..." | Prompt Gemini | Indique l'action en cours |
 
 ---
 
