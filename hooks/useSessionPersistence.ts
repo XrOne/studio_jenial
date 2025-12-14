@@ -103,14 +103,14 @@ export const useSessionPersistence = (
         }
 
         // Only save if we have actual data
-        if (promptSequence.length === 0) return;
+        if (!promptSequence.mainPrompt) return;
 
         saveTimeoutRef.current = setTimeout(async () => {
             setIsSaving(true);
             try {
                 await updateSession(sessionId, {
-                    main_prompt: promptSequence[0]?.text || '',
-                    extension_prompts: promptSequence.slice(1).map((p: any) => p.text),
+                    main_prompt: promptSequence.mainPrompt || '',
+                    extension_prompts: promptSequence.extensionPrompts || [],
                     active_prompt_index: 0, // Should be passed as prop if we want to persist cursor
                     sequence_video_data: sequenceVideoData,
                     // Simplify dogma for storage (or full snapshot)
