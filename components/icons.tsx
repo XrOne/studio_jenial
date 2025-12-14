@@ -16,6 +16,7 @@ import {
   ChevronsRight,
   ChevronsUp,
   ChevronsDown,
+  Columns3,
   Download,
   Eraser,
   Expand,
@@ -137,6 +138,10 @@ export const TvIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 
 export const FilmIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <Film {...defaultProps} {...props} />
+);
+
+export const ViewColumnsIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <Columns3 {...defaultProps} {...props} />
 );
 
 // Manually implemented to avoid import errors with ArrowDown in some environments

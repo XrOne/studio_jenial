@@ -24,6 +24,7 @@ import PromptSequenceAssistant from './components/PromptSequenceAssistant';
 import SequenceManager from './components/SequenceManager';
 import ShotLibrary from './components/ShotLibrary';
 import StoryboardPreviewModal from './components/StoryboardPreviewModal';
+import ModeSelectionStep from './components/ModeSelectionStep';
 import { UserProfileModal } from './components/UserProfileModal'; // New
 import { SessionHistoryModal } from './components/SessionHistoryModal'; // New
 import VideoResult from './components/VideoResult';
@@ -81,6 +82,10 @@ const PromptConception: React.FC<{
   storyboardByIndex?: Record<number, StoryboardPreview>;
   // === IMAGE-FIRST: Keyframe generation status ===
   isGeneratingKeyframes?: boolean;
+  // === MODE SELECTION ===
+  sequenceMode?: 'pending' | 'plan-sequence' | 'decoupage';
+  onSelectPlanSequence?: () => void;
+  onSelectDecoupage?: () => void;
 }> = ({
   motionDescription,
   referenceImage,
@@ -91,6 +96,9 @@ const PromptConception: React.FC<{
   promptSequence,
   storyboardByIndex = {},
   isGeneratingKeyframes = false,
+  sequenceMode = 'pending',
+  onSelectPlanSequence,
+  onSelectDecoupage,
 }) => {
     const displayImage = activeChatImage || referenceImage;
     const hasContent =
@@ -285,6 +293,16 @@ const PromptConception: React.FC<{
                 </div>
               )}
 
+              {/* === MODE SELECTION: Plan-séquence vs Découpage === */}
+              {storyboardByIndex[0] && sequenceMode === 'pending' && onSelectPlanSequence && onSelectDecoupage && (
+                <ModeSelectionStep
+                  keyframeImage={storyboardByIndex[0].previewImage}
+                  onSelectPlanSequence={onSelectPlanSequence}
+                  onSelectDecoupage={onSelectDecoupage}
+                  isGenerating={isGeneratingKeyframes}
+                />
+              )}
+
               {motionDescription && (
                 <div className="bg-gray-800 p-4 rounded-xl border border-green-500/30 flex-shrink-0 shadow-md">
                   <div className="text-xs text-green-500 font-bold uppercase mb-1 tracking-wider">
@@ -462,6 +480,10 @@ const Studio: React.FC = () => {
   // === IMAGE-FIRST WORKFLOW: Auto-generate keyframes ===
   const [autoKeyframesEnabled, setAutoKeyframesEnabled] = useState(true);
   const [isGeneratingKeyframes, setIsGeneratingKeyframes] = useState(false);
+
+  // === MODE SELECTION: Plan-séquence vs Découpage ===
+  type SequenceMode = 'pending' | 'plan-sequence' | 'decoupage';
+  const [sequenceMode, setSequenceMode] = useState<SequenceMode>('pending');
 
   // === SESSION PERSISTENCE ===
   const {
@@ -1433,6 +1455,9 @@ const Studio: React.FC = () => {
     setEditingPromptDetails(null);
     setFrameToEdit(null);
 
+    // Mode selection reset
+    setSequenceMode('pending');
+
     // Return to initial stage
     setCurrentStage(AppStage.PROMPTING);
     setAppState(AppState.IDLE);
@@ -1941,6 +1966,24 @@ const Studio: React.FC = () => {
                           }}
                           promptSequence={promptSequence}
                           storyboardByIndex={storyboardByIndex}
+                          isGeneratingKeyframes={isGeneratingKeyframes}
+                          // Mode Selection
+                          sequenceMode={sequenceMode}
+                          onSelectPlanSequence={() => {
+                            setSequenceMode('plan-sequence');
+                            console.log('[Mode] Selected: Plan-séquence');
+                          }}
+                          onSelectDecoupage={() => {
+                            setSequenceMode('decoupage');
+                            console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
+                            // Open StoryboardPreviewModal for 12 vignettes
+                            if (storyboardByIndex[0]) {
+                              setStoryboardModalContext({
+                                segmentIndex: 0,
+                                baseImage: storyboardByIndex[0].previewImage,
+                              });
+                            }
+                          }}
                         />
                       )}
                     </div>
