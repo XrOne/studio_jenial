@@ -14,7 +14,7 @@
  * - gemini-3-pro-image-preview (Nano Banana Pro): Pro, up to 4K, reasoning, Google Search grounding
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 // Feature flag for mock mode
 const USE_MOCK_PROVIDER = process.env.NANO_MOCK_MODE === 'true';
@@ -106,7 +106,7 @@ function getApiKey(req) {
  * Create Gemini client
  */
 function createClient(apiKey) {
-    return new GoogleGenerativeAI(apiKey);
+    return new GoogleGenAI({ apiKey });
 }
 
 /**
@@ -181,12 +181,6 @@ const realProvider = {
         console.log('[NanoBanana] preview: Generating image from prompt');
 
         const client = createClient(apiKey);
-        const model = client.getGenerativeModel({
-            model: NANO_BANANA_MODEL,
-            generationConfig: {
-                responseModalities: ['TEXT', 'IMAGE'],
-            },
-        });
 
         // Build prompt with dogma context
         const fullPrompt = `${textPrompt}${buildDogmaContext(dogma)}`;
@@ -204,7 +198,13 @@ const realProvider = {
             contents = [{ text: fullPrompt }];
         }
 
-        const response = await model.generateContent(contents);
+        const response = await client.models.generateContent({
+            model: NANO_BANANA_MODEL,
+            contents,
+            config: {
+                responseModalities: ['TEXT', 'IMAGE'],
+            },
+        });
         const generatedImage = extractImageFromResponse(response);
         const generatedText = extractTextFromResponse(response);
 
@@ -228,12 +228,6 @@ const realProvider = {
         console.log('[NanoBanana] retouch: Editing image with instruction');
 
         const client = createClient(apiKey);
-        const model = client.getGenerativeModel({
-            model: NANO_BANANA_MODEL,
-            generationConfig: {
-                responseModalities: ['TEXT', 'IMAGE'],
-            },
-        });
 
         // Build instruction with dogma context
         const fullInstruction = `${instruction}${buildDogmaContext(dogma)}`;
@@ -248,7 +242,13 @@ const realProvider = {
             imagePart,
         ];
 
-        const response = await model.generateContent(contents);
+        const response = await client.models.generateContent({
+            model: NANO_BANANA_MODEL,
+            contents,
+            config: {
+                responseModalities: ['TEXT', 'IMAGE'],
+            },
+        });
         const generatedImage = extractImageFromResponse(response);
         const generatedText = extractTextFromResponse(response);
 
@@ -272,12 +272,6 @@ const realProvider = {
         console.log('[NanoBananaPro] shotVariants: Generating', shotList?.length, 'variants');
 
         const client = createClient(apiKey);
-        const model = client.getGenerativeModel({
-            model: NANO_BANANA_PRO_MODEL,
-            generationConfig: {
-                responseModalities: ['TEXT', 'IMAGE'],
-            },
-        });
 
         const imagePart = imageToGeminiPart(baseImage);
         if (!imagePart) {
@@ -298,7 +292,13 @@ const realProvider = {
                     imagePart,
                 ];
 
-                const response = await model.generateContent(contents);
+                const response = await client.models.generateContent({
+                    model: NANO_BANANA_PRO_MODEL,
+                    contents,
+                    config: {
+                        responseModalities: ['TEXT', 'IMAGE'],
+                    },
+                });
                 const generatedImage = extractImageFromResponse(response);
 
                 if (generatedImage) {
