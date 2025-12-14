@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import * as React from 'react';
-import { PromptSequence, PromptSequenceStatus, SequenceVideoData } from '../types';
-import { CheckIcon, PencilIcon, XMarkIcon } from './icons';
+import { PromptSequence, PromptSequenceStatus, SequenceVideoData, StoryboardPreview } from '../types';
+import { CheckIcon, PencilIcon, XMarkIcon, SparklesIcon } from './icons';
 
 // Refresh icon for regenerate action
 const RefreshIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -28,6 +28,8 @@ interface SequenceManagerProps {
   onRegenerateExtensions?: () => void;
   // NEW: Callback for Nano Banana Pro integration - click on thumbnail
   onThumbnailClick?: (thumbnailBase64: string, index: number) => void;
+  // IMAGE-FIRST: Storyboard keyframe previews
+  storyboardByIndex?: Record<number, StoryboardPreview>;
 }
 
 const SequenceManager: React.FC<SequenceManagerProps> = ({
@@ -42,6 +44,7 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
   generatingIndex = null,
   onRegenerateExtensions,
   onThumbnailClick,
+  storyboardByIndex = {},
 }) => {
   const allPrompts = [sequence.mainPrompt, ...sequence.extensionPrompts];
 
@@ -90,6 +93,7 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
             const isRevising =
               revisingFromIndex !== null && index > revisingFromIndex;
             const videoThumbnail = videoData[index]?.thumbnail;
+            const keyframePreview = storyboardByIndex[index];
 
             // NEW: Check if this extension is dirty
             const isDirty = !isMain && dirtyIndices.has(index - 1); // dirtyExtensions uses 0-indexed for extensions
@@ -179,7 +183,30 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
                     {prompt}
                   </p>
                 </div>
-                {videoThumbnail ? (
+                {/* IMAGE-FIRST: Show keyframe preview OR video thumbnail */}
+                {keyframePreview?.previewImage ? (
+                  <div className="pl-8 mt-2">
+                    <button
+                      onClick={() => onThumbnailClick?.(keyframePreview.previewImage.base64, index)}
+                      className="relative w-full aspect-video rounded-md overflow-hidden border-2 border-indigo-500/50 shadow-lg group cursor-pointer hover:border-indigo-400 transition-colors">
+                      <img
+                        src={`data:image/png;base64,${keyframePreview.previewImage.base64}`}
+                        alt={`Keyframe for prompt ${index + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[8px] font-bold rounded bg-indigo-600/80 text-white flex items-center gap-1">
+                        <SparklesIcon className="w-2.5 h-2.5" />
+                        KEYFRAME
+                      </div>
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <span className="text-xs text-white font-semibold bg-orange-500/80 px-2 py-1 rounded flex items-center gap-1">
+                          <SparklesIcon className="w-3 h-3" />
+                          Retoucher (Nano)
+                        </span>
+                      </div>
+                    </button>
+                  </div>
+                ) : videoThumbnail ? (
                   <div className="pl-8 mt-2">
                     <button
                       onClick={() => onThumbnailClick?.(videoThumbnail, index)}
@@ -195,14 +222,19 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
                     </button>
                   </div>
                 ) : (
-                  // Placeholder for missing thumbnail if expected
-                  isDone && (
-                    <div className="pl-8 mt-2">
-                      <div className="w-full aspect-video bg-gray-900 rounded-md flex items-center justify-center border border-gray-700 border-dashed">
-                        <span className="text-xs text-gray-600">No Thumbnail</span>
-                      </div>
+                  // Placeholder with Generate Preview button
+                  <div className="pl-8 mt-2">
+                    <div className="w-full aspect-video bg-gray-900 rounded-md flex flex-col items-center justify-center border border-gray-700 border-dashed gap-2">
+                      <span className="text-xs text-gray-500">{isDone ? 'No Preview' : 'Preview Missing'}</span>
+                      {onThumbnailClick && (
+                        <button
+                          onClick={() => onThumbnailClick?.('', index)}
+                          className="text-[10px] px-2 py-1 bg-indigo-600/50 hover:bg-indigo-600 text-white rounded transition-colors">
+                          Generate Preview
+                        </button>
+                      )}
                     </div>
-                  )
+                  </div>
                 )}
                 {isRevising && (
                   <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center rounded-lg backdrop-blur-sm z-10">

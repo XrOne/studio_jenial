@@ -1881,6 +1881,20 @@ const Studio: React.FC = () => {
                             isRevisingSequence?.fromIndex ?? null
                           }
                           videoData={sequenceVideoData}
+                          storyboardByIndex={storyboardByIndex}
+                          onThumbnailClick={(thumbnailBase64, index) => {
+                            // Open Nano editor for this segment
+                            const prompt = index === 0
+                              ? promptSequence.mainPrompt
+                              : promptSequence.extensionPrompts[index - 1] || '';
+                            const baseImage = thumbnailBase64 ? {
+                              file: new File([], `keyframe_${index}.png`, { type: 'image/png' }),
+                              base64: thumbnailBase64,
+                            } : storyboardByIndex[index]?.previewImage;
+                            if (baseImage) {
+                              openNanoEditor({ segmentIndex: index, baseImage, initialPrompt: prompt });
+                            }
+                          }}
                         />
                       ) : (
                         <PromptConception
