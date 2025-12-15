@@ -23,6 +23,7 @@ export interface NanoPreviewRequest {
     constraints?: Record<string, unknown>;
     quality?: NanoQuality;  // pro = gemini-3-pro, fast = gemini-2.5-flash
     target?: string;
+    apiKey?: string;
 }
 
 export interface NanoPreviewResponse {
@@ -41,6 +42,7 @@ export interface NanoRetouchRequest {
     target: 'root' | 'extension' | 'character';
     segmentIndex?: number;  // 0=root, 1..n=extensions
     quality?: NanoQuality;  // pro = gemini-3-pro, fast = gemini-2.5-flash
+    apiKey?: string;
 }
 
 export interface NanoRetouchResponse {
@@ -58,6 +60,7 @@ export interface NanoShotVariantsRequest {
     dogma?: Dogma | null;
     constraints?: Record<string, unknown>;
     quality?: NanoQuality;
+    apiKey?: string;
 }
 
 export interface NanoShotVariantsResponse {

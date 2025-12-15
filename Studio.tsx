@@ -377,8 +377,11 @@ const Studio: React.FC = () => {
   );
   const [lastVideoObject, setLastVideoObject] = useState<any | null>(null); // Changed from Video to any
   const [lastVideoBlob, setLastVideoBlob] = useState<Blob | null>(null);
+
+  // BYOK Strict: API Key is memory-only (React State). No localStorage.
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
-  const [hasCustomKey, setHasCustomKey] = useState(false);
+  const [hasCustomKey, setHasCustomKey] = useState(false); // UI flag
   const [isCurrentVideoSaved, setIsCurrentVideoSaved] = useState(false);
   const [frameToEdit, setFrameToEdit] = useState<ImageFile | null>(null);
 
@@ -616,28 +619,26 @@ const Studio: React.FC = () => {
         // If server has key configured, no dialog needed
         if (config.hasServerKey) {
           setShowApiKeyDialog(false);
-          setHasCustomKey(true); // Treat as "has key" for UI purposes
+          setHasCustomKey(true);
           return;
         }
 
-        // BYOK mode: check if user has a key in localStorage
-        const localKey = getLocalApiKey();
-        if (!localKey) {
+        // BYOK Strict: Never check localStorage. 
+        // Always prompt if we don't have a server key and no memory key is set.
+        if (!apiKey) {
           setShowApiKeyDialog(true);
-        } else {
-          setHasCustomKey(true);
+          setHasCustomKey(false);
         }
       } catch {
-        // Fallback to BYOK mode if config check fails
-        const localKey = getLocalApiKey();
-        if (!localKey) {
+        // Fallback: Assume BYOK needed if check fails
+        if (!apiKey) {
           setShowApiKeyDialog(true);
+          setHasCustomKey(false);
         }
-        setHasCustomKey(hasCustomApiKey());
       }
     };
     initCheck();
-  }, []);
+  }, [apiKey]); // Re-run if apiKey state changes (e.g. user entered it)
 
   // NOTE: No auto-injection of default dogmas. 
   // Users can import optional templates from data/dogmaTemplates.ts via DogmaManager
@@ -717,7 +718,7 @@ const Studio: React.FC = () => {
       const result = await generateNanoPreview({
         textPrompt: prompt,
         dogma: dogmaToUse,
-        quality,  // P0: Pro quality for root keyframes
+        quality: quality || 'pro',  // P0.5: Default to Pro for single keyframes
       });
 
       if (result.previewImage) {
@@ -1469,12 +1470,13 @@ const Studio: React.FC = () => {
     // Define async worker
     const generateProvisionalKeyframe = async () => {
       try {
-        // P0: Force quality='pro' for root provisional keyframe
+        // P0: Force quality='pro' for root provisional keyframe + pass apiKey
         const result = await generateNanoPreview({
           textPrompt: prompt,
           dogma: activeDogma,
           quality: 'pro', // Explicitly request pro quality
-          target: 'root'
+          target: 'root',
+          apiKey: apiKey || undefined
         });
 
         if (result.previewImage) {
@@ -2121,115 +2123,120 @@ const Studio: React.FC = () => {
                               // No image - generate a new preview
                               console.log(`[ImageFirst] Generating preview for segment ${index}`);
                               try {
-                                const result = await generateNanoPreview({
-                                  textPrompt: prompt,
+                                textPrompt: prompt,
                                   dogma: sequenceBoundDogma,
+                        quality: 'pro', // Single shot generation = Pro
+                      target: index === 0 ? 'root' : 'extension',
+                      apiKey: apiKey || undefined,
                                 });
-                                if (result.previewImage) {
-                                  setStoryboardByIndex(prev => ({
-                                    ...prev,
-                                    [index]: {
-                                      id: crypto.randomUUID(),
-                                      owner: index === 0 ? 'root' : 'extension',
-                                      previewImage: result.previewImage,
-                                      previewPrompt: result.previewPrompt || prompt,
-                                      segmentIndex: index,
-                                      cameraNotes: result.cameraNotes,
-                                      movementNotes: result.movementNotes,
-                                      createdAt: new Date().toISOString(),
-                                      updatedAt: new Date().toISOString(),
-                                    }
-                                  }));
-                                  console.log(`[ImageFirst] Preview generated for segment ${index}`);
+                      if (result.previewImage) {
+                        setStoryboardByIndex(prev => ({
+                          ...prev,
+                          [index]: {
+                            id: crypto.randomUUID(),
+                            owner: index === 0 ? 'root' : 'extension',
+                            previewImage: result.previewImage,
+                            previewPrompt: result.previewPrompt || prompt,
+                            segmentIndex: index,
+                            cameraNotes: result.cameraNotes,
+                            movementNotes: result.movementNotes,
+                            createdAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString(),
+                          }
+                        }));
+                      console.log(`[ImageFirst] Preview generated for segment ${index}`);
                                 }
                               } catch (err) {
-                                console.error(`[ImageFirst] Failed to generate preview:`, err);
-                                setErrorMessage(err instanceof Error ? err.message : 'Failed to generate preview.');
+                        console.error(`[ImageFirst] Failed to generate preview:`, err);
+                      setErrorMessage(err instanceof Error ? err.message : 'Failed to generate preview.');
                               }
                             }
                           }}
-                          // P2.4: Regenerate keyframe action
-                          onRegenerateKeyframe={async (segmentIndex) => {
-                            console.log(`[ImageFirst] Regenerating keyframe for segment ${segmentIndex}`);
-                            const prompt = segmentIndex === 0
-                              ? promptSequence.mainPrompt
-                              : promptSequence.extensionPrompts[segmentIndex - 1] || '';
-                            try {
-                              const result = await generateNanoPreview({
-                                textPrompt: prompt,
-                                dogma: sequenceBoundDogma,
-                              });
-                              if (result.previewImage) {
-                                setStoryboardByIndex(prev => ({
-                                  ...prev,
-                                  [segmentIndex]: {
-                                    id: crypto.randomUUID(),
-                                    owner: segmentIndex === 0 ? 'root' : 'extension',
-                                    previewImage: result.previewImage,
-                                    previewPrompt: result.previewPrompt || prompt,
-                                    segmentIndex,
-                                    cameraNotes: result.cameraNotes,
-                                    movementNotes: result.movementNotes,
-                                    createdAt: new Date().toISOString(),
-                                    updatedAt: new Date().toISOString(),
-                                  }
-                                }));
+                      // P2.4: Regenerate keyframe action
+                      onRegenerateKeyframe={async (segmentIndex) => {
+                        console.log(`[ImageFirst] Regenerating keyframe for segment ${segmentIndex}`);
+                        const prompt = segmentIndex === 0
+                          ? promptSequence.mainPrompt
+                          : promptSequence.extensionPrompts[segmentIndex - 1] || '';
+                        try {
+                          const result = await generateNanoPreview({
+                            textPrompt: prompt,
+                            dogma: sequenceBoundDogma,
+                            quality: 'pro', // Single shot regeneration = Pro
+                            target: segmentIndex === 0 ? 'root' : 'extension',
+                            apiKey: apiKey || undefined,
+                          });
+                          if (result.previewImage) {
+                            setStoryboardByIndex(prev => ({
+                              ...prev,
+                              [segmentIndex]: {
+                                id: crypto.randomUUID(),
+                                owner: segmentIndex === 0 ? 'root' : 'extension',
+                                previewImage: result.previewImage,
+                                previewPrompt: result.previewPrompt || prompt,
+                                segmentIndex,
+                                cameraNotes: result.cameraNotes,
+                                movementNotes: result.movementNotes,
+                                createdAt: new Date().toISOString(),
+                                updatedAt: new Date().toISOString(),
                               }
-                            } catch (err) {
-                              console.error(`[ImageFirst] Regenerate failed:`, err);
-                              setErrorMessage(err instanceof Error ? err.message : 'Failed to regenerate keyframe.');
-                            }
-                          }}
+                            }));
+                          }
+                        } catch (err) {
+                          console.error(`[ImageFirst] Regenerate failed:`, err);
+                          setErrorMessage(err instanceof Error ? err.message : 'Failed to regenerate keyframe.');
+                        }
+                      }}
                           // P2.4: Use keyframe as base image for video generation
-                          onUseKeyframeAsBase={(segmentIndex, image) => {
-                            console.log(`[ImageFirst] Using keyframe ${segmentIndex} as base`);
-                            const imageFile: ImageFile = {
-                              file: new File([], `keyframe_${segmentIndex}.png`, { type: 'image/png' }),
-                              base64: image.base64,
-                            };
-                            setAssistantImage(imageFile);
-                            // Set the prompt as active
-                            const prompt = segmentIndex === 0
-                              ? promptSequence.mainPrompt
-                              : promptSequence.extensionPrompts[segmentIndex - 1] || '';
-                            setActivePromptIndex(segmentIndex);
-                            setInitialFormValues(prev => prev ? { ...prev, prompt } : null);
-                          }}
+                      onUseKeyframeAsBase={(segmentIndex, image) => {
+                        console.log(`[ImageFirst] Using keyframe ${segmentIndex} as base`);
+                        const imageFile: ImageFile = {
+                          file: new File([], `keyframe_${segmentIndex}.png`, { type: 'image/png' }),
+                          base64: image.base64,
+                        };
+                        setAssistantImage(imageFile);
+                        // Set the prompt as active
+                        const prompt = segmentIndex === 0
+                          ? promptSequence.mainPrompt
+                          : promptSequence.extensionPrompts[segmentIndex - 1] || '';
+                        setActivePromptIndex(segmentIndex);
+                        setInitialFormValues(prev => prev ? { ...prev, prompt } : null);
+                      }}
                         />
                       ) : (
-                        <PromptConception
-                          key={resetKey} // Force remount on new project to clear assistant context
-                          motionDescription={assistantMotionDescription}
-                          referenceImage={assistantExtensionContext}
-                          activeChatImage={assistantImage}
-                          mentionedCharacters={mentionedCharacters}
-                          // Sequence history must be numerically sorted by segment index
-                          sequenceHistory={sortedSequenceHistory}
-                          // Nano Banana Pro: Thumbnail Retouche
-                          onOpenNanoEditor={(segmentIndex, baseImage, initialPrompt) => {
-                            openNanoEditor({ segmentIndex, baseImage, initialPrompt });
-                          }}
-                          promptSequence={promptSequence}
-                          storyboardByIndex={storyboardByIndex}
-                          isGeneratingKeyframes={isGeneratingKeyframes}
-                          // Mode Selection
-                          sequenceMode={sequenceMode}
-                          onSelectPlanSequence={() => {
-                            setSequenceMode('plan-sequence');
-                            console.log('[Mode] Selected: Plan-séquence');
-                          }}
-                          onSelectDecoupage={() => {
-                            setSequenceMode('decoupage');
-                            console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
-                            // Open StoryboardPreviewModal for 12 vignettes
-                            if (storyboardByIndex[0]) {
-                              setStoryboardModalContext({
-                                segmentIndex: 0,
-                                baseImage: storyboardByIndex[0].previewImage,
-                              });
-                            }
-                          }}
-                        />
+                      <PromptConception
+                        key={resetKey} // Force remount on new project to clear assistant context
+                        motionDescription={assistantMotionDescription}
+                        referenceImage={assistantExtensionContext}
+                        activeChatImage={assistantImage}
+                        mentionedCharacters={mentionedCharacters}
+                        // Sequence history must be numerically sorted by segment index
+                        sequenceHistory={sortedSequenceHistory}
+                        // Nano Banana Pro: Thumbnail Retouche
+                        onOpenNanoEditor={(segmentIndex, baseImage, initialPrompt) => {
+                          openNanoEditor({ segmentIndex, baseImage, initialPrompt });
+                        }}
+                        promptSequence={promptSequence}
+                        storyboardByIndex={storyboardByIndex}
+                        isGeneratingKeyframes={isGeneratingKeyframes}
+                        // Mode Selection
+                        sequenceMode={sequenceMode}
+                        onSelectPlanSequence={() => {
+                          setSequenceMode('plan-sequence');
+                          console.log('[Mode] Selected: Plan-séquence');
+                        }}
+                        onSelectDecoupage={() => {
+                          setSequenceMode('decoupage');
+                          console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
+                          // Open StoryboardPreviewModal for 12 vignettes
+                          if (storyboardByIndex[0]) {
+                            setStoryboardModalContext({
+                              segmentIndex: 0,
+                              baseImage: storyboardByIndex[0].previewImage,
+                            });
+                          }
+                        }}
+                      />
                       )}
                     </div>
                   </div>

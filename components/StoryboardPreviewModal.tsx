@@ -36,6 +36,7 @@ interface StoryboardPreviewModalProps {
   // === MODE SELECTION ===
   mode?: 'single-select' | 'ordered-select';
   onBuildTimeline?: (shots: OrderedShot[]) => void;
+  apiKey?: string;
 }
 
 interface VariantGridItem {
@@ -56,6 +57,7 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
   dogma,
   mode = 'single-select',
   onBuildTimeline,
+  apiKey,
 }) => {
   const [variants, setVariants] = useState<VariantGridItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);

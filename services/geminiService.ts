@@ -140,10 +140,9 @@ export const resetConfigCache = () => {
  * Returns null if not set or invalid
  */
 export const getLocalApiKey = (): string | null => {
-  if (typeof window === 'undefined') return null;
-  // BYOK Strict: Memory/Session only
-  const key = window.sessionStorage.getItem('gemini_api_key');
-  return key && key.trim().length >= 20 ? key.trim() : null;
+  // BYOK Strict: Never read from storage.
+  // The key must be passed from React State (Memory).
+  return null;
 };
 
 /**
@@ -152,22 +151,21 @@ export const getLocalApiKey = (): string | null => {
  * sessionStorage = available for Nano service within session
  */
 export const setLocalApiKey = (key: string): void => {
-  if (typeof window === 'undefined') return;
-  const trimmedKey = key.trim();
-  // BYOK Strict: Clear localStorage if it existed, only use sessionStorage
-  window.localStorage.removeItem('gemini_api_key');
-  window.sessionStorage.setItem('gemini_api_key', trimmedKey);
-  console.log('[BYOK] API key saved to sessionStorage (Memory only)');
+  // BYOK Strict: Do not write to storage.
+  // Just log for debugging (don't log the key).
+  console.log('[BYOK] Key received in memory (not persisted).');
 };
 
 /**
  * Remove API key from BOTH localStorage and sessionStorage
  */
 export const clearLocalApiKey = (): void => {
-  if (typeof window === 'undefined') return;
-  window.localStorage.removeItem('gemini_api_key'); // Cleanup old
-  window.sessionStorage.removeItem('gemini_api_key');
-  console.log('[BYOK] API key cleared from memory');
+  // BYOK Strict: Nothing to clear from storage using this function.
+  // React State clearing is handled by the UI component.
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem('gemini_api_key');
+    window.sessionStorage.removeItem('gemini_api_key');
+  }
 };
 
 /**
