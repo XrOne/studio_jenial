@@ -7,6 +7,10 @@ import { GoogleGenAI } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 import * as driveService from './services/googleDriveService.js';
 import nanoHandlers from './api/nano/index.js'; // Nano Banana Pro handlers
+import { requestIdMiddleware, errorHandlerMiddleware } from './api/middleware.js';
+import projectsRouter from './api/projects/index.js';
+import segmentsRouter from './api/segments/index.js';
+import timelineRouter from './api/timeline/index.js';
 
 // Load env files (optional - only for local dev convenience)
 dotenv.config({ path: '.env.local' });
@@ -22,8 +26,14 @@ import { SupabaseVideoStorage } from './services/storage/providers/SupabaseStora
 VideoStorageFactory.register(new SupabaseVideoStorage());
 
 // Allow large payloads for base64 images/videos
-app.use(bodyParser.json({ limit: '100mb' }));
+app.use(express.json({ limit: '100mb' }));
 app.use(cors());
+app.use(requestIdMiddleware);
+
+// === ROUTERS ===
+app.use('/api/projects', projectsRouter);
+app.use('/api/segments', segmentsRouter);
+app.use('/api/projects/:id', timelineRouter); // Mount timeline ops under projects
 
 // Veo API Configuration
 const VEO_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -593,9 +603,9 @@ app.post('/api/generate-videos', async (req, res) => {
   }
 });
 
-// Legacy poll endpoint
-app.post('/api/get-video-operation', async (req, res) => {
-  console.log('[Veo] Legacy /api/get-video-operation called');
+// Legacy & Veo Logic starts here...
+app.post('/api/generate-videos', async (req, res) => {
+  console.log('[Veo] Legacy /api/generate-videos called');
   try {
     const apiKey = getApiKey(req);
     const { operationName } = req.body;
@@ -834,6 +844,9 @@ app.post('/api/storage/save-from-uri', async (req, res) => {
 });
 
 const port = process.env.PORT || 3001;
+
+// Catch-all Error Handler
+app.use(errorHandlerMiddleware);
 
 // Check if we're being imported by Vercel or run directly
 const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
