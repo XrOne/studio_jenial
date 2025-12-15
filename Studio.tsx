@@ -756,8 +756,8 @@ const Studio: React.FC = () => {
 
   const handleGenerate = useCallback(
     async (params: GenerateVideoParams) => {
-      // Strict check for Beta Tester Key
-      if (!getApiKey()) {
+      // BYOK Strict: Check React State
+      if (!apiKey && !hasCustomKey) {
         setShowApiKeyDialog(true);
         return;
       }
