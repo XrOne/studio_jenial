@@ -116,6 +116,7 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
         baseImage: baseImage,
         shotList: [...STANDARD_SHOT_LIST],
         dogma: dogma,
+        quality: 'fast',
       });
 
       // Update variants with results

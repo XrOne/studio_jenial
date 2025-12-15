@@ -57,6 +57,7 @@ export interface NanoShotVariantsRequest {
     shotList: string[];
     dogma?: Dogma | null;
     constraints?: Record<string, unknown>;
+    quality?: NanoQuality;
 }
 
 export interface NanoShotVariantsResponse {
@@ -129,10 +130,17 @@ async function apiCall<T>(endpoint: string, body: unknown): Promise<T> {
             // Throw a special error that the UI can detect
             const keyError = new Error('API_KEY_ERROR: ' + errorMessage);
             (keyError as any).isApiKeyError = true;
+            (keyError as any).requestId = errorData.requestId;
             throw keyError;
         }
 
-        throw new Error(errorMessage);
+        const errorWithId = new Error(errorMessage);
+        if (errorData.requestId) {
+            (errorWithId as any).requestId = errorData.requestId;
+            // Append to message for visibility if not handled by UI specially
+            errorWithId.message = `${errorMessage} (ReqID: ${errorData.requestId})`;
+        }
+        throw errorWithId;
     }
 
     return response.json();

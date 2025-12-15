@@ -317,8 +317,9 @@ const realProvider = {
                     imagePart,
                 ];
 
+                const modelName = getModelForQuality(quality);
                 const response = await client.models.generateContent({
-                    model: NANO_BANANA_PRO_MODEL,
+                    model: modelName,
                     contents,
                     config: {
                         responseModalities: ['TEXT', 'IMAGE'],
@@ -452,7 +453,7 @@ export async function handleShotVariants(req, res) {
     console.log(`[Nano:${requestId}] /api/nano/shot-variants request (mock=${USE_MOCK_PROVIDER})`);
 
     try {
-        const { baseImage, shotList, dogma, constraints } = req.body;
+        const { baseImage, shotList, dogma, constraints, quality } = req.body;
 
         if (!baseImage) {
             return res.status(400).json({ error: 'baseImage is required' });
@@ -464,16 +465,16 @@ export async function handleShotVariants(req, res) {
         const provider = selectProvider(USE_MOCK_PROVIDER);
 
         if (USE_MOCK_PROVIDER) {
-            const result = await provider.shotVariants({ baseImage, shotList, dogma, constraints });
+            const result = await provider.shotVariants({ baseImage, shotList, dogma, constraints, quality });
             return res.status(200).json({ ...result, requestId });
         } else {
             const { key: apiKey, mode } = getApiKey(req);
             if (!apiKey) {
                 return res.status(401).json({ error: 'API key required' });
             }
-            console.log(`[Nano:${requestId}] Using ${mode} API key`);
+            console.log(`[Nano:${requestId}] Using ${mode} API key, quality=${quality || 'default'}`);
 
-            const result = await provider.shotVariants({ baseImage, shotList, dogma, constraints }, apiKey);
+            const result = await provider.shotVariants({ baseImage, shotList, dogma, constraints, quality }, apiKey);
             return res.status(200).json({ ...result, requestId });
         }
     } catch (error) {

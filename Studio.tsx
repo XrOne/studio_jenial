@@ -369,6 +369,7 @@ const PromptConception: React.FC<{
 const Studio: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [currentStage, setCurrentStage] = useState<AppStage>(AppStage.PROMPTING);
+  const [resetKey, setResetKey] = useState(0); // For forcing component remounts on reset
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastConfig, setLastConfig] = useState<GenerateVideoParams | null>(
@@ -750,7 +751,7 @@ const Studio: React.FC = () => {
         setShowApiKeyDialog(true);
         setErrorMessage('API key required or invalid. Please enter a valid Gemini API key.');
       } else {
-        setErrorMessage('Failed to generate preview. Check your API key or try again.');
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to generate preview.');
       }
     }
   }, [sequenceBoundDogma, activeDogma]);
@@ -1075,6 +1076,7 @@ const Studio: React.FC = () => {
 
     // NOTE: activeDogma (global library selection) is preserved - user may want same dogma for new project
     console.log('[StateTransition] Reset complete. Global activeDogma preserved:', activeDogmaId);
+    setResetKey(prev => prev + 1);
   }, [confirmUnsavedVideo, activeDogmaId]);
 
   // =========================================================================
@@ -1465,7 +1467,7 @@ const Studio: React.FC = () => {
         }
       } catch (e) {
         console.error('[ImageFirst] Failed to generate provisional keyframe:', e);
-        setErrorMessage('Failed to generate preview. Check settings.');
+        setErrorMessage(e instanceof Error ? e.message : 'Failed to generate preview.');
       }
     };
 
@@ -2113,7 +2115,7 @@ const Studio: React.FC = () => {
                                 }
                               } catch (err) {
                                 console.error(`[ImageFirst] Failed to generate preview:`, err);
-                                setErrorMessage('Failed to generate preview. Check your API key.');
+                                setErrorMessage(err instanceof Error ? err.message : 'Failed to generate preview.');
                               }
                             }
                           }}
@@ -2146,7 +2148,7 @@ const Studio: React.FC = () => {
                               }
                             } catch (err) {
                               console.error(`[ImageFirst] Regenerate failed:`, err);
-                              setErrorMessage('Failed to regenerate keyframe.');
+                              setErrorMessage(err instanceof Error ? err.message : 'Failed to regenerate keyframe.');
                             }
                           }}
                           // P2.4: Use keyframe as base image for video generation
@@ -2167,6 +2169,7 @@ const Studio: React.FC = () => {
                         />
                       ) : (
                         <PromptConception
+                          key={resetKey} // Force remount on new project to clear assistant context
                           motionDescription={assistantMotionDescription}
                           referenceImage={assistantExtensionContext}
                           activeChatImage={assistantImage}
