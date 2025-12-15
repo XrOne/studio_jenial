@@ -251,13 +251,13 @@ const apiCall = async (endpoint: string, body: any, apiKey?: string) => {
     // P0.7: Use explicit apiKey param, fallback to getLocalApiKey (which returns null in Strict mode)
     const key = apiKey || getLocalApiKey();
     if (!key) {
-      console.debug('[BYOK] apiKey length:', apiKey?.length ?? 'undefined');
+      console.warn('[BYOK] Missing API Key! apiKey length:', apiKey?.length ?? 'undefined');
       const error = new Error('API_KEY_MISSING: Please enter your Gemini API key first') as any;
       error.code = 'API_KEY_MISSING';
       throw error;
     }
     headers['x-api-key'] = key;
-    console.debug('[BYOK] Using explicit apiKey, length:', key.length);
+    console.warn('[BYOK] Using explicit apiKey, length:', key.length);
   }
 
   const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -458,6 +458,7 @@ export const generateVideo = async (
   params: GenerateVideoParams,
   signal: AbortSignal,
   onProgress?: (status: string) => void,
+  apiKey?: string
 ): Promise<{ objectUrl: string; blob: Blob; uri: string; video: any; supabaseUrl?: string }> => {
   // Determine if this is an extension with a valid video reference
   const videoUri = params.mode === GenerationMode.EXTEND_VIDEO && params.inputVideoObject?.uri
@@ -474,8 +475,9 @@ export const generateVideo = async (
   }
   console.log('[Veo] Starting video generation...', params);
 
-  const apiKey = getApiKey();
-  if (!apiKey) {
+  // P0.7: Check apiKey param first
+  const key = apiKey || getApiKey();
+  if (!key) {
     throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
   }
 
@@ -544,7 +546,7 @@ export const generateVideo = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        'x-api-key': key,
       },
       body: JSON.stringify({
         model: params.model,
@@ -590,7 +592,7 @@ export const generateVideo = async (
         {
           method: 'GET',
           headers: {
-            'x-api-key': apiKey,
+            'x-api-key': key,
           },
           signal,
         }
@@ -688,7 +690,7 @@ export const generateVideo = async (
 // TEXT / CHAT GENERATION
 // ===========================================
 
-export const generatePromptFromImage = async (image: ImageFile): Promise<string> => {
+export const generatePromptFromImage = async (image: ImageFile, apiKey?: string): Promise<string> => {
   // Use smart upload for large images
   const imagePart = await createImagePart(image);
 
@@ -700,7 +702,7 @@ export const generatePromptFromImage = async (image: ImageFile): Promise<string>
         { text: 'Describe this image in a creative and detailed way to be used as a prompt for a video generation model. Focus on action, mood, and visual details. The description should be a single, cohesive paragraph.' }
       ]
     }
-  });
+  }, apiKey);
   return extractText(response).trim();
 };
 
@@ -708,6 +710,7 @@ export const generatePromptSequence = async (
   sceneDescription: string,
   totalDuration: number,
   dogma: Dogma | null,
+  apiKey?: string
 ): Promise<PromptSequence> => {
   const remainingDuration = totalDuration - 8;
   const averageExtensionDuration = 5.5;
@@ -737,7 +740,7 @@ export const generatePromptSequence = async (
       systemInstruction: systemPrompt,
       responseMimeType: 'application/json'
     }
-  });
+  }, apiKey);
 
   const text = extractText(response);
   try {
@@ -782,6 +785,7 @@ export const generatePromptSequence = async (
 export const analyzeMotionBetweenFrames = async (
   firstFrame: ImageFile,
   lastFrame: ImageFile,
+  apiKey?: string
 ): Promise<string> => {
   console.log('[MotionAnalysis] Analyzing motion between frames...');
 
@@ -818,7 +822,7 @@ Be specific and concise. Use cinematic terminology. Respond in the same language
         ]
       }],
       config: { systemInstruction: systemPrompt }
-    });
+    }, apiKey);
 
     const analysis = extractText(response);
     console.log('[MotionAnalysis] Result:', analysis);
@@ -992,7 +996,8 @@ export const editImage = async (
   images: ImageFile[],
   prompt: string,
   dogma: Dogma | null,
-  modelName: string = MODELS.IMAGE_FLASH
+  modelName: string = MODELS.IMAGE_FLASH,
+  apiKey?: string
 ): Promise<ImageFile> => {
   // Use smart upload for large images
   const imageParts = await createImageParts(images);
@@ -1005,7 +1010,7 @@ export const editImage = async (
     contents: {
       parts: [...imageParts, { text: finalPrompt }]
     }
-  });
+  }, apiKey);
 
   const content = response.candidates?.[0]?.content;
   if (!content?.parts) throw new Error('No content');
@@ -1033,13 +1038,13 @@ export const editImage = async (
   throw new Error('No image in response');
 };
 
-export const generateImageFromText = async (prompt: string, dogma: Dogma | null): Promise<ImageFile> => {
+export const generateImageFromText = async (prompt: string, dogma: Dogma | null, apiKey?: string): Promise<ImageFile> => {
   const dogmaInstruction = dogma?.text ? `\nStyle: ${dogma.text}` : '';
 
   const response = await apiCall('/generate-content', {
     model: MODELS.IMAGE_PRO,
     contents: { parts: [{ text: prompt + dogmaInstruction }] }
-  });
+  }, apiKey);
 
   const content = response.candidates?.[0]?.content;
   for (const part of content.parts) {
@@ -1067,7 +1072,8 @@ export const generateImageFromText = async (prompt: string, dogma: Dogma | null)
 export const generateCharacterImage = async (
   prompt: string,
   contextImages: { file: File; base64: string }[],
-  styleImage: ImageFile | null
+  styleImage: ImageFile | null,
+  apiKey?: string
 ): Promise<ImageFile> => {
   const parts: any[] = [];
 
@@ -1089,7 +1095,7 @@ export const generateCharacterImage = async (
   const response = await apiCall('/generate-content', {
     model: MODELS.IMAGE_PRO,
     contents: { parts }
-  });
+  }, apiKey);
 
   const content = response.candidates?.[0]?.content;
   for (const part of content.parts) {
@@ -1118,7 +1124,7 @@ export const generateCharacterImage = async (
 // SPEECH (TTS)
 // ===========================================
 
-export const generateSpeech = async (text: string, voiceName: string): Promise<string> => {
+export const generateSpeech = async (text: string, voiceName: string, apiKey?: string): Promise<string> => {
   const response = await apiCall('/generate-content', {
     model: MODELS.TTS,
     contents: { parts: [{ text }] },
@@ -1128,7 +1134,7 @@ export const generateSpeech = async (text: string, voiceName: string): Promise<s
         voiceConfig: { prebuiltVoiceConfig: { voiceName } }
       }
     }
-  });
+  }, apiKey);
 
   const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!audioData) throw new Error("No audio data received");
@@ -1144,7 +1150,8 @@ export const generateStoryboard = async (
   dogma: Dogma | null,
   referenceImages: ImageFile[],
   startFrame: ImageFile | null,
-  endFrame: ImageFile | null
+  endFrame: ImageFile | null,
+  apiKey?: string
 ): Promise<Storyboard> => {
   const parts: any[] = [];
 
@@ -1171,7 +1178,7 @@ export const generateStoryboard = async (
     model: MODELS.PRO,
     contents: { parts },
     config: { responseMimeType: 'application/json' }
-  });
+  }, apiKey);
 
   const text = extractText(response);
   const storyboard = JSON.parse(text);
@@ -1179,7 +1186,7 @@ export const generateStoryboard = async (
   // Parallel generation for images
   const imagePromises = storyboard.keyframes.map(async (kf: any) => {
     try {
-      const img = await generateImageFromText(kf.description, dogma);
+      const img = await generateImageFromText(kf.description, dogma, apiKey);
       return { ...kf, imageBase64: img.base64 };
     } catch (e) {
       return kf;
@@ -1194,11 +1201,11 @@ export const generateStoryboard = async (
 // UTILITIES
 // ===========================================
 
-export const toggleTranslateText = async (text: string): Promise<string> => {
+export const toggleTranslateText = async (text: string, apiKey?: string): Promise<string> => {
   const response = await apiCall('/generate-content', {
     model: MODELS.FLASH,
     contents: `Translate to English if French, or French if English: "${text}"`
-  });
+  }, apiKey);
   const result = extractText(response);
   return result.trim();
 };
@@ -1209,6 +1216,7 @@ export const regenerateSinglePrompt = async (
     promptBefore?: string;
     promptAfter?: string;
   },
+  apiKey?: string
 ): Promise<string> => {
   const { instruction, promptToRevise, dogma, promptBefore, promptAfter } = params;
 
@@ -1239,6 +1247,7 @@ export const regenerateSinglePrompt = async (
 
 export const reviseFollowingPrompts = async (
   params: ReviseFollowingPromptsParams,
+  apiKey?: string
 ): Promise<string[]> => {
   const { dogma, promptBefore, editedPrompt, promptsToRevise } = params;
   const systemInstruction = `Continuity Editor. Dogma: ${dogma?.text}.

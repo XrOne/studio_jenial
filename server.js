@@ -882,6 +882,21 @@ if (!isVercel) {
   });
 }
 
+// 1.8 Config Endpoint (BYOK Check)
+app.get('/api/config', (req, res) => {
+  try {
+    const hasServerKey = !!process.env.GEMINI_API_KEY;
+    res.json({
+      hasServerKey,
+      requiresUserKey: !hasServerKey
+    });
+  } catch (error) {
+    console.error('Config endpoint error:', error);
+    // Fallback safe response
+    res.status(200).json({ hasServerKey: false, requiresUserKey: true });
+  }
+});
+
 // Export for Vercel serverless
 export default app;
 

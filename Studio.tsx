@@ -717,7 +717,8 @@ const Studio: React.FC = () => {
       const result = await generateNanoPreview({
         textPrompt: prompt,
         dogma: dogmaToUse,
-        quality: quality || 'pro',  // P0.5: Default to Pro for single keyframes
+        quality: quality || 'pro',
+        apiKey: apiKey || undefined, // P0.7: BYOK
       });
 
       if (result.previewImage) {
@@ -927,6 +928,8 @@ const Studio: React.FC = () => {
         const res = await generateVideo(
           effectiveParams,
           abortControllerRef.current.signal,
+          undefined,
+          apiKey || undefined // P0.7: BYOK
         );
         const { objectUrl, blob, video } = res;
 
@@ -1309,11 +1312,22 @@ const Studio: React.FC = () => {
     handleContinueFromFrame(newImage);
   };
 
-  const handleApiKeyContinue = (key: string) => {
+  const handleApiKeySet = (key: string) => {
     const clean = key.trim();
-    setApiKey(clean || null);
-    setHasCustomKey(!!clean);
-    setShowApiKeyDialog(!clean);
+    if (clean) {
+      setApiKey(clean);
+      setHasCustomKey(true);
+      setShowApiKeyDialog(false);
+      // Clear error on success
+      setApiKeyError(null);
+    }
+  };
+
+  const handleApiKeyClear = () => {
+    setApiKey(null);
+    setHasCustomKey(false);
+    // Keep dialog open or re-open it to force key entry if needed
+    // But for "Remove", we just clear state.
   };
 
   const handleSaveShot = (thumbnailBase64: string) => {
@@ -1698,7 +1712,7 @@ const Studio: React.FC = () => {
           promptBefore: allPrompts[index - 1],
           editedPrompt: newPrompt,
           promptsToRevise,
-        });
+        }, apiKey || undefined); // P0.7: BYOK as 2nd arg
         const finalPrompts = [
           ...allPrompts.slice(0, index + 1),
           ...revisedFollowing,
@@ -1781,7 +1795,9 @@ const Studio: React.FC = () => {
     <ErrorBoundary>
       <div className="w-screen h-screen bg-gray-900 font-sans flex flex-col">
         {showApiKeyDialog && <ApiKeyDialog
-          onContinue={handleApiKeyContinue}
+          onSetKey={handleApiKeySet}
+          onClearKey={handleApiKeyClear}
+          onClose={() => setShowApiKeyDialog(false)}
           hasCustomKey={hasCustomKey}
           providerToken={providerToken}
           errorMessage={apiKeyError || undefined}

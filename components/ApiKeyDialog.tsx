@@ -8,14 +8,18 @@ import { KeyIcon, Trash2Icon, ShieldCheckIcon, ExternalLinkIcon } from './icons'
 // Removed storage imports for Strict BYOK
 
 interface ApiKeyDialogProps {
-  onContinue: (key: string) => void;
+  onSetKey: (key: string) => void;
+  onClearKey: () => void;
+  onClose: () => void;
   hasCustomKey: boolean;
   providerToken?: string | null;
-  errorMessage?: string; // Error message from parent (e.g., "Invalid key", "Key missing")
+  errorMessage?: string;
 }
 
 const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
-  onContinue,
+  onSetKey,
+  onClearKey,
+  onClose,
   hasCustomKey,
   providerToken,
   errorMessage
@@ -69,12 +73,15 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
     // P0.7: Do NOT store vertex_token in localStorage (security risk)
     // Token is memory-only, used only for current session if Google Login provides it
 
-    if (trimmedKey && validateKey(trimmedKey)) {
-      // BYOK Strict: Pass key to parent (React State), no storage
-      onContinue(trimmedKey);
-    } else if (hasCustomKey && !trimmedKey) {
-      // Allow continuing with existing key
-      onContinue('');
+    if (trimmedKey) {
+      if (validateKey(trimmedKey)) {
+        onSetKey(trimmedKey);
+      }
+    } else if (hasCustomKey) {
+      // If user clicks save but field is empty, and they ALREADY have a key, just close dialog (no change)
+      onClose();
+    } else {
+      setError('Please enter an API Key to continue.');
     }
   };
 
@@ -86,7 +93,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
     setApiKeyInput('');
     setVertexProjectId('');
     setVertexToken('');
-    onContinue(''); // Signal empty key to parent
+    onClearKey();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -279,7 +286,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
 
         {hasCustomKey && (
           <button
-            onClick={() => onContinue('')}
+            onClick={() => onClose()}
             className="mt-4 text-gray-500 hover:text-gray-300 text-xs hover:underline transition-colors"
           >
             Continue with current key →
