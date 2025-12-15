@@ -2123,120 +2123,121 @@ const Studio: React.FC = () => {
                               // No image - generate a new preview
                               console.log(`[ImageFirst] Generating preview for segment ${index}`);
                               try {
-                                textPrompt: prompt,
+                                const result = await generateNanoPreview({
+                                  textPrompt: prompt,
                                   dogma: sequenceBoundDogma,
-                        quality: 'pro', // Single shot generation = Pro
-                      target: index === 0 ? 'root' : 'extension',
-                      apiKey: apiKey || undefined,
+                                  quality: 'pro', // Single shot generation = Pro
+                                  target: index === 0 ? 'root' : 'extension',
+                                  apiKey: apiKey || undefined,
                                 });
-                      if (result.previewImage) {
-                        setStoryboardByIndex(prev => ({
-                          ...prev,
-                          [index]: {
-                            id: crypto.randomUUID(),
-                            owner: index === 0 ? 'root' : 'extension',
-                            previewImage: result.previewImage,
-                            previewPrompt: result.previewPrompt || prompt,
-                            segmentIndex: index,
-                            cameraNotes: result.cameraNotes,
-                            movementNotes: result.movementNotes,
-                            createdAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString(),
-                          }
-                        }));
-                      console.log(`[ImageFirst] Preview generated for segment ${index}`);
+                                if (result.previewImage) {
+                                  setStoryboardByIndex(prev => ({
+                                    ...prev,
+                                    [index]: {
+                                      id: crypto.randomUUID(),
+                                      owner: index === 0 ? 'root' : 'extension',
+                                      previewImage: result.previewImage,
+                                      previewPrompt: result.previewPrompt || prompt,
+                                      segmentIndex: index,
+                                      cameraNotes: result.cameraNotes,
+                                      movementNotes: result.movementNotes,
+                                      createdAt: new Date().toISOString(),
+                                      updatedAt: new Date().toISOString(),
+                                    }
+                                  }));
+                                  console.log(`[ImageFirst] Preview generated for segment ${index}`);
                                 }
                               } catch (err) {
-                        console.error(`[ImageFirst] Failed to generate preview:`, err);
-                      setErrorMessage(err instanceof Error ? err.message : 'Failed to generate preview.');
+                                console.error(`[ImageFirst] Failed to generate preview:`, err);
+                                setErrorMessage(err instanceof Error ? err.message : 'Failed to generate preview.');
                               }
                             }
                           }}
-                      // P2.4: Regenerate keyframe action
-                      onRegenerateKeyframe={async (segmentIndex) => {
-                        console.log(`[ImageFirst] Regenerating keyframe for segment ${segmentIndex}`);
-                        const prompt = segmentIndex === 0
-                          ? promptSequence.mainPrompt
-                          : promptSequence.extensionPrompts[segmentIndex - 1] || '';
-                        try {
-                          const result = await generateNanoPreview({
-                            textPrompt: prompt,
-                            dogma: sequenceBoundDogma,
-                            quality: 'pro', // Single shot regeneration = Pro
-                            target: segmentIndex === 0 ? 'root' : 'extension',
-                            apiKey: apiKey || undefined,
-                          });
-                          if (result.previewImage) {
-                            setStoryboardByIndex(prev => ({
-                              ...prev,
-                              [segmentIndex]: {
-                                id: crypto.randomUUID(),
-                                owner: segmentIndex === 0 ? 'root' : 'extension',
-                                previewImage: result.previewImage,
-                                previewPrompt: result.previewPrompt || prompt,
-                                segmentIndex,
-                                cameraNotes: result.cameraNotes,
-                                movementNotes: result.movementNotes,
-                                createdAt: new Date().toISOString(),
-                                updatedAt: new Date().toISOString(),
+                          // P2.4: Regenerate keyframe action
+                          onRegenerateKeyframe={async (segmentIndex) => {
+                            console.log(`[ImageFirst] Regenerating keyframe for segment ${segmentIndex}`);
+                            const prompt = segmentIndex === 0
+                              ? promptSequence.mainPrompt
+                              : promptSequence.extensionPrompts[segmentIndex - 1] || '';
+                            try {
+                              const result = await generateNanoPreview({
+                                textPrompt: prompt,
+                                dogma: sequenceBoundDogma,
+                                quality: 'pro', // Single shot regeneration = Pro
+                                target: segmentIndex === 0 ? 'root' : 'extension',
+                                apiKey: apiKey || undefined,
+                              });
+                              if (result.previewImage) {
+                                setStoryboardByIndex(prev => ({
+                                  ...prev,
+                                  [segmentIndex]: {
+                                    id: crypto.randomUUID(),
+                                    owner: segmentIndex === 0 ? 'root' : 'extension',
+                                    previewImage: result.previewImage,
+                                    previewPrompt: result.previewPrompt || prompt,
+                                    segmentIndex,
+                                    cameraNotes: result.cameraNotes,
+                                    movementNotes: result.movementNotes,
+                                    createdAt: new Date().toISOString(),
+                                    updatedAt: new Date().toISOString(),
+                                  }
+                                }));
                               }
-                            }));
-                          }
-                        } catch (err) {
-                          console.error(`[ImageFirst] Regenerate failed:`, err);
-                          setErrorMessage(err instanceof Error ? err.message : 'Failed to regenerate keyframe.');
-                        }
-                      }}
+                            } catch (err) {
+                              console.error(`[ImageFirst] Regenerate failed:`, err);
+                              setErrorMessage(err instanceof Error ? err.message : 'Failed to regenerate keyframe.');
+                            }
+                          }}
                           // P2.4: Use keyframe as base image for video generation
-                      onUseKeyframeAsBase={(segmentIndex, image) => {
-                        console.log(`[ImageFirst] Using keyframe ${segmentIndex} as base`);
-                        const imageFile: ImageFile = {
-                          file: new File([], `keyframe_${segmentIndex}.png`, { type: 'image/png' }),
-                          base64: image.base64,
-                        };
-                        setAssistantImage(imageFile);
-                        // Set the prompt as active
-                        const prompt = segmentIndex === 0
-                          ? promptSequence.mainPrompt
-                          : promptSequence.extensionPrompts[segmentIndex - 1] || '';
-                        setActivePromptIndex(segmentIndex);
-                        setInitialFormValues(prev => prev ? { ...prev, prompt } : null);
-                      }}
+                          onUseKeyframeAsBase={(segmentIndex, image) => {
+                            console.log(`[ImageFirst] Using keyframe ${segmentIndex} as base`);
+                            const imageFile: ImageFile = {
+                              file: new File([], `keyframe_${segmentIndex}.png`, { type: 'image/png' }),
+                              base64: image.base64,
+                            };
+                            setAssistantImage(imageFile);
+                            // Set the prompt as active
+                            const prompt = segmentIndex === 0
+                              ? promptSequence.mainPrompt
+                              : promptSequence.extensionPrompts[segmentIndex - 1] || '';
+                            setActivePromptIndex(segmentIndex);
+                            setInitialFormValues(prev => prev ? { ...prev, prompt } : null);
+                          }}
                         />
                       ) : (
-                      <PromptConception
-                        key={resetKey} // Force remount on new project to clear assistant context
-                        motionDescription={assistantMotionDescription}
-                        referenceImage={assistantExtensionContext}
-                        activeChatImage={assistantImage}
-                        mentionedCharacters={mentionedCharacters}
-                        // Sequence history must be numerically sorted by segment index
-                        sequenceHistory={sortedSequenceHistory}
-                        // Nano Banana Pro: Thumbnail Retouche
-                        onOpenNanoEditor={(segmentIndex, baseImage, initialPrompt) => {
-                          openNanoEditor({ segmentIndex, baseImage, initialPrompt });
-                        }}
-                        promptSequence={promptSequence}
-                        storyboardByIndex={storyboardByIndex}
-                        isGeneratingKeyframes={isGeneratingKeyframes}
-                        // Mode Selection
-                        sequenceMode={sequenceMode}
-                        onSelectPlanSequence={() => {
-                          setSequenceMode('plan-sequence');
-                          console.log('[Mode] Selected: Plan-séquence');
-                        }}
-                        onSelectDecoupage={() => {
-                          setSequenceMode('decoupage');
-                          console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
-                          // Open StoryboardPreviewModal for 12 vignettes
-                          if (storyboardByIndex[0]) {
-                            setStoryboardModalContext({
-                              segmentIndex: 0,
-                              baseImage: storyboardByIndex[0].previewImage,
-                            });
-                          }
-                        }}
-                      />
+                        <PromptConception
+                          key={resetKey} // Force remount on new project to clear assistant context
+                          motionDescription={assistantMotionDescription}
+                          referenceImage={assistantExtensionContext}
+                          activeChatImage={assistantImage}
+                          mentionedCharacters={mentionedCharacters}
+                          // Sequence history must be numerically sorted by segment index
+                          sequenceHistory={sortedSequenceHistory}
+                          // Nano Banana Pro: Thumbnail Retouche
+                          onOpenNanoEditor={(segmentIndex, baseImage, initialPrompt) => {
+                            openNanoEditor({ segmentIndex, baseImage, initialPrompt });
+                          }}
+                          promptSequence={promptSequence}
+                          storyboardByIndex={storyboardByIndex}
+                          isGeneratingKeyframes={isGeneratingKeyframes}
+                          // Mode Selection
+                          sequenceMode={sequenceMode}
+                          onSelectPlanSequence={() => {
+                            setSequenceMode('plan-sequence');
+                            console.log('[Mode] Selected: Plan-séquence');
+                          }}
+                          onSelectDecoupage={() => {
+                            setSequenceMode('decoupage');
+                            console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
+                            // Open StoryboardPreviewModal for 12 vignettes
+                            if (storyboardByIndex[0]) {
+                              setStoryboardModalContext({
+                                segmentIndex: 0,
+                                baseImage: storyboardByIndex[0].previewImage,
+                              });
+                            }
+                          }}
+                        />
                       )}
                     </div>
                   </div>
