@@ -242,16 +242,22 @@ export const callVeoBackend = async (path: string, body: any): Promise<any> => {
 };
 
 // Legacy apiCall function for backward compatibility
-const apiCall = async (endpoint: string, body: any) => {
+// P0.7: Now accepts explicit apiKey parameter for BYOK Strict mode
+const apiCall = async (endpoint: string, body: any, apiKey?: string) => {
   const config = await fetchGeminiConfig();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
   if (!config.hasServerKey) {
-    const apiKey = getLocalApiKey();
-    if (!apiKey) {
-      throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
+    // P0.7: Use explicit apiKey param, fallback to getLocalApiKey (which returns null in Strict mode)
+    const key = apiKey || getLocalApiKey();
+    if (!key) {
+      console.debug('[BYOK] apiKey length:', apiKey?.length ?? 'undefined');
+      const error = new Error('API_KEY_MISSING: Please enter your Gemini API key first') as any;
+      error.code = 'API_KEY_MISSING';
+      throw error;
     }
-    headers['x-api-key'] = apiKey;
+    headers['x-api-key'] = key;
+    console.debug('[BYOK] Using explicit apiKey, length:', key.length);
   }
 
   const res = await fetch(`${API_BASE}${endpoint}`, {

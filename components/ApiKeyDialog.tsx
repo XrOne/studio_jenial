@@ -26,7 +26,8 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
   // Vertex AI State
   const [vertexProjectId, setVertexProjectId] = useState(window.localStorage.getItem('vertex_project_id') || '');
   const [vertexLocation, setVertexLocation] = useState(window.localStorage.getItem('vertex_location') || 'us-central1');
-  const [vertexToken, setVertexToken] = useState(window.localStorage.getItem('vertex_token') || '');
+  // P0.7: vertex_token is now memory-only (session-scoped, NOT persisted)
+  const [vertexToken, setVertexToken] = useState('');
   const [showVertexConfig, setShowVertexConfig] = useState(false);
 
   // Show parent error message if provided
@@ -65,8 +66,8 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
     if (vertexLocation) window.localStorage.setItem('vertex_location', vertexLocation.trim());
 
     // Prioritize providerToken if available, otherwise use manual input
-    const tokenToSave = providerToken || vertexToken;
-    if (tokenToSave) window.localStorage.setItem('vertex_token', tokenToSave.trim());
+    // P0.7: Do NOT store vertex_token in localStorage (security risk)
+    // Token is memory-only, used only for current session if Google Login provides it
 
     if (trimmedKey && validateKey(trimmedKey)) {
       // BYOK Strict: Pass key to parent (React State), no storage
