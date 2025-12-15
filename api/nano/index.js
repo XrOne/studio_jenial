@@ -19,9 +19,26 @@ import { GoogleGenAI } from '@google/genai';
 // Feature flag for mock mode
 const USE_MOCK_PROVIDER = process.env.NANO_MOCK_MODE === 'true';
 
-// Model selection
-const NANO_BANANA_MODEL = 'gemini-3-pro-image-preview';         // Pro, up to 4K (Standard for Keyframes)
-const NANO_BANANA_PRO_MODEL = 'gemini-3-pro-image-preview'; // Pro, up to 4K
+// Model selection - quality-aware
+const NANO_PRO_MODEL = 'gemini-3-pro-image-preview';   // Pro, up to 4K (for root keyframes)
+const NANO_FAST_MODEL = 'gemini-2.5-flash-image';      // Fast, 1024px (for 12 thumbnails)
+
+/**
+ * Get model based on quality param
+ * @param {string} quality - 'pro' | 'fast'
+ * @param {string} target - 'root' | 'extension' | 'character'
+ * @returns {string} Model name
+ */
+function getModelForQuality(quality, target) {
+    // Fail-safe: Root always uses pro by default if quality not specified
+    if (!quality && target === 'root') {
+        quality = 'pro';
+    }
+
+    const model = quality === 'fast' ? NANO_FAST_MODEL : NANO_PRO_MODEL;
+    console.log(`[Nano] quality=${quality || 'default'} model=${model}`);
+    return model;
+}
 
 // ============================================================================
 // MOCK PROVIDER (Development / Testing)
@@ -179,10 +196,11 @@ function buildDogmaContext(dogma) {
 const realProvider = {
     /**
      * Generate a preview image from text prompt
-     * Uses Nano Banana (gemini-2.5-flash-image) for speed
+     * Uses quality-aware model selection
      */
-    async preview({ baseImage, textPrompt, dogma, constraints }, apiKey) {
-        console.log('[NanoBanana] preview: Generating image from prompt');
+    async preview({ baseImage, textPrompt, dogma, constraints, quality, target }, apiKey) {
+        const model = getModelForQuality(quality, target || 'root');
+        console.log(`[NanoBanana] preview: Generating image from prompt (model=${model})`);
 
         const client = createClient(apiKey);
 
@@ -203,7 +221,7 @@ const realProvider = {
         }
 
         const response = await client.models.generateContent({
-            model: NANO_BANANA_MODEL,
+            model,
             contents,
             config: {
                 responseModalities: ['TEXT', 'IMAGE'],
@@ -226,10 +244,11 @@ const realProvider = {
 
     /**
      * Retouch an existing image with specific instruction
-     * Uses Nano Banana for fast iteration
+     * Uses quality-aware model selection
      */
-    async retouch({ baseImage, instruction, dogma, constraints, target }, apiKey) {
-        console.log('[NanoBanana] retouch: Editing image with instruction');
+    async retouch({ baseImage, instruction, dogma, constraints, target, quality }, apiKey) {
+        const model = getModelForQuality(quality, target);
+        console.log(`[NanoBanana] retouch: Editing image with instruction (model=${model})`);
 
         const client = createClient(apiKey);
 
@@ -247,7 +266,7 @@ const realProvider = {
         ];
 
         const response = await client.models.generateContent({
-            model: NANO_BANANA_MODEL,
+            model,
             contents,
             config: {
                 responseModalities: ['TEXT', 'IMAGE'],
@@ -270,10 +289,12 @@ const realProvider = {
 
     /**
      * Generate multiple shot variants (camera angles/framings)
-     * Uses Nano Banana Pro for professional quality
+     * Uses fast model for bulk generation (12 thumbnails)
      */
-    async shotVariants({ baseImage, shotList, dogma, constraints }, apiKey) {
-        console.log('[NanoBananaPro] shotVariants: Generating', shotList?.length, 'variants');
+    async shotVariants({ baseImage, shotList, dogma, constraints, quality }, apiKey) {
+        // Default to fast for shot variants (12 thumbnails)
+        const model = getModelForQuality(quality || 'fast', 'extension');
+        console.log(`[NanoBananaPro] shotVariants: Generating ${shotList?.length} variants (model=${model})`);
 
         const client = createClient(apiKey);
 
@@ -347,36 +368,36 @@ const selectProvider = (useMock) => useMock ? mockProvider : realProvider;
  * POST /api/nano/preview
  * Generate a preview image from prompt
  */
-export async function handlePreview(req) {
+export async function handlePreview(req, res) {
     const requestId = `nano-prev-${Date.now()}`;
     console.log(`[Nano:${requestId}] /api/nano/preview request (mock=${USE_MOCK_PROVIDER})`);
 
     try {
-        const { baseImage, textPrompt, dogma, constraints } = req.body || req;
+        const { baseImage, textPrompt, dogma, constraints, quality, target } = req.body;
 
         if (!textPrompt) {
-            return { error: 'textPrompt is required', status: 400 };
+            return res.status(400).json({ error: 'textPrompt is required' });
         }
 
         const provider = selectProvider(USE_MOCK_PROVIDER);
 
         if (USE_MOCK_PROVIDER) {
-            const result = await provider.preview({ baseImage, textPrompt, dogma, constraints });
-            return { ...result, requestId, status: 200 };
+            const result = await provider.preview({ baseImage, textPrompt, dogma, constraints, quality, target });
+            return res.status(200).json({ ...result, requestId });
         } else {
             // Real provider needs API key
             const { key: apiKey, mode } = getApiKey(req);
             if (!apiKey) {
-                return { error: 'API key required (BYOK or server)', status: 401 };
+                return res.status(401).json({ error: 'API key required (BYOK or server)' });
             }
-            console.log(`[Nano:${requestId}] Using ${mode} API key`);
+            console.log(`[Nano:${requestId}] Using ${mode} API key, quality=${quality || 'default'}`);
 
-            const result = await provider.preview({ baseImage, textPrompt, dogma, constraints }, apiKey);
-            return { ...result, requestId, status: 200 };
+            const result = await provider.preview({ baseImage, textPrompt, dogma, constraints, quality, target }, apiKey);
+            return res.status(200).json({ ...result, requestId });
         }
     } catch (error) {
         console.error(`[Nano:${requestId}] Preview error:`, error.message);
-        return { error: error.message, requestId, status: 500 };
+        return res.status(500).json({ error: error.message, requestId });
     }
 }
 
@@ -384,41 +405,41 @@ export async function handlePreview(req) {
  * POST /api/nano/retouch
  * Retouch an existing image with an instruction
  */
-export async function handleRetouch(req) {
+export async function handleRetouch(req, res) {
     const requestId = `nano-ret-${Date.now()}`;
     console.log(`[Nano:${requestId}] /api/nano/retouch request (mock=${USE_MOCK_PROVIDER})`);
 
     try {
-        const { baseImage, instruction, dogma, constraints, target } = req.body || req;
+        const { baseImage, instruction, dogma, constraints, target, quality } = req.body;
 
         if (!baseImage) {
-            return { error: 'baseImage is required', status: 400 };
+            return res.status(400).json({ error: 'baseImage is required' });
         }
         if (!instruction) {
-            return { error: 'instruction is required', status: 400 };
+            return res.status(400).json({ error: 'instruction is required' });
         }
         if (!target || !['root', 'extension', 'character'].includes(target)) {
-            return { error: 'target must be root|extension|character', status: 400 };
+            return res.status(400).json({ error: 'target must be root|extension|character' });
         }
 
         const provider = selectProvider(USE_MOCK_PROVIDER);
 
         if (USE_MOCK_PROVIDER) {
-            const result = await provider.retouch({ baseImage, instruction, dogma, constraints, target });
-            return { ...result, requestId, target, status: 200 };
+            const result = await provider.retouch({ baseImage, instruction, dogma, constraints, target, quality });
+            return res.status(200).json({ ...result, requestId, target });
         } else {
             const { key: apiKey, mode } = getApiKey(req);
             if (!apiKey) {
-                return { error: 'API key required', status: 401 };
+                return res.status(401).json({ error: 'API key required' });
             }
-            console.log(`[Nano:${requestId}] Using ${mode} API key`);
+            console.log(`[Nano:${requestId}] Using ${mode} API key, quality=${quality || 'default'}`);
 
-            const result = await provider.retouch({ baseImage, instruction, dogma, constraints, target }, apiKey);
-            return { ...result, requestId, target, status: 200 };
+            const result = await provider.retouch({ baseImage, instruction, dogma, constraints, target, quality }, apiKey);
+            return res.status(200).json({ ...result, requestId, target });
         }
     } catch (error) {
         console.error(`[Nano:${requestId}] Retouch error:`, error.message);
-        return { error: error.message, requestId, status: 500 };
+        return res.status(500).json({ error: error.message, requestId });
     }
 }
 
@@ -426,38 +447,38 @@ export async function handleRetouch(req) {
  * POST /api/nano/shot-variants
  * Generate multiple shot variants (camera angles/framings)
  */
-export async function handleShotVariants(req) {
+export async function handleShotVariants(req, res) {
     const requestId = `nano-var-${Date.now()}`;
     console.log(`[Nano:${requestId}] /api/nano/shot-variants request (mock=${USE_MOCK_PROVIDER})`);
 
     try {
-        const { baseImage, shotList, dogma, constraints } = req.body || req;
+        const { baseImage, shotList, dogma, constraints } = req.body;
 
         if (!baseImage) {
-            return { error: 'baseImage is required', status: 400 };
+            return res.status(400).json({ error: 'baseImage is required' });
         }
         if (!shotList || !Array.isArray(shotList) || shotList.length === 0) {
-            return { error: 'shotList must be a non-empty array', status: 400 };
+            return res.status(400).json({ error: 'shotList must be a non-empty array' });
         }
 
         const provider = selectProvider(USE_MOCK_PROVIDER);
 
         if (USE_MOCK_PROVIDER) {
             const result = await provider.shotVariants({ baseImage, shotList, dogma, constraints });
-            return { ...result, requestId, status: 200 };
+            return res.status(200).json({ ...result, requestId });
         } else {
             const { key: apiKey, mode } = getApiKey(req);
             if (!apiKey) {
-                return { error: 'API key required', status: 401 };
+                return res.status(401).json({ error: 'API key required' });
             }
             console.log(`[Nano:${requestId}] Using ${mode} API key`);
 
             const result = await provider.shotVariants({ baseImage, shotList, dogma, constraints }, apiKey);
-            return { ...result, requestId, status: 200 };
+            return res.status(200).json({ ...result, requestId });
         }
     } catch (error) {
         console.error(`[Nano:${requestId}] Shot variants error:`, error.message);
-        return { error: error.message, requestId, status: 500 };
+        return res.status(500).json({ error: error.message, requestId });
     }
 }
 

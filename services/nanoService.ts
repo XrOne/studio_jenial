@@ -12,12 +12,16 @@
 
 import { Dogma, ImageFile, ShotVariant, StoryboardPreview } from '../types';
 
+// Quality mode for model selection
+export type NanoQuality = 'pro' | 'fast';
+
 // Types for API requests/responses
 export interface NanoPreviewRequest {
     baseImage?: ImageFile | null;
     textPrompt: string;
     dogma?: Dogma | null;
     constraints?: Record<string, unknown>;
+    quality?: NanoQuality;  // pro = gemini-3-pro, fast = gemini-2.5-flash
 }
 
 export interface NanoPreviewResponse {
@@ -35,6 +39,7 @@ export interface NanoRetouchRequest {
     constraints?: Record<string, unknown>;
     target: 'root' | 'extension' | 'character';
     segmentIndex?: number;  // 0=root, 1..n=extensions
+    quality?: NanoQuality;  // pro = gemini-3-pro, fast = gemini-2.5-flash
 }
 
 export interface NanoRetouchResponse {
@@ -70,13 +75,25 @@ const log = (...args: any[]) => isDev && console.log(...args);
 const warn = (...args: any[]) => isDev && console.warn(...args);
 
 /**
- * Get API key from sessionStorage (BYOK mode)
- * Security: Session-only, never persisted, never logged
+ * Get API key for Nano (BYOK mode)
+ * Priority: sessionStorage → localStorage (fallback for boot sync)
  */
 function getStoredApiKey(): string | null {
     if (typeof window === 'undefined') return null;
-    // BYOK: Use sessionStorage (session-only, not persistent)
-    return window.sessionStorage.getItem('gemini_api_key');
+    // Check sessionStorage first (set during session)
+    const sessionKey = window.sessionStorage.getItem('gemini_api_key');
+    if (sessionKey) return sessionKey;
+
+    // Fallback to localStorage (from previous session, will be synced)
+    const localKey = window.localStorage.getItem('gemini_api_key');
+    if (localKey) {
+        // Auto-sync to sessionStorage for future calls
+        window.sessionStorage.setItem('gemini_api_key', localKey);
+        console.log('[NanoService] Auto-synced API key from localStorage');
+        return localKey;
+    }
+
+    return null;
 }
 
 async function apiCall<T>(endpoint: string, body: unknown): Promise<T> {
@@ -88,6 +105,9 @@ async function apiCall<T>(endpoint: string, body: unknown): Promise<T> {
     const apiKey = getStoredApiKey();
     if (apiKey) {
         headers['x-gemini-api-key'] = apiKey;
+        log('[NanoService] API key present, sending with request');
+    } else {
+        warn('[NanoService] No API key found in sessionStorage or localStorage');
     }
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -97,8 +117,21 @@ async function apiCall<T>(endpoint: string, body: unknown): Promise<T> {
     });
 
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `API error: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        const errorMessage = errorData.error || `API error: ${response.status}`;
+
+        // Special handling for API key errors
+        if (response.status === 401 ||
+            errorMessage.includes('API key required') ||
+            errorMessage.includes('API_KEY_MISSING') ||
+            errorMessage.includes('API_KEY_INVALID')) {
+            // Throw a special error that the UI can detect
+            const keyError = new Error('API_KEY_ERROR: ' + errorMessage);
+            (keyError as any).isApiKeyError = true;
+            throw keyError;
+        }
+
+        throw new Error(errorMessage);
     }
 
     return response.json();

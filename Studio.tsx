@@ -702,6 +702,59 @@ const Studio: React.FC = () => {
     });
   };
 
+  // === HELPER: Generate Keyframe (Nano) ===
+  const generateKeyframe = useCallback(async (segmentIndex: number, prompt: string) => {
+    try {
+      // Use bound dogma if available, otherwise active
+      const dogmaToUse = sequenceBoundDogma ?? activeDogma;
+      console.log(`[ImageFirst] Generating keyframe for segment ${segmentIndex} with dogma:`, dogmaToUse?.title);
+
+      // P0: Use quality:'pro' for root keyframes (segment 0)
+      const quality = segmentIndex === 0 ? 'pro' : undefined;
+      console.log(`[ImageFirst] Using quality=${quality || 'default'} for segment ${segmentIndex}`);
+
+      const result = await generateNanoPreview({
+        textPrompt: prompt,
+        dogma: dogmaToUse,
+        quality,  // P0: Pro quality for root keyframes
+      });
+
+      if (result.previewImage) {
+        setStoryboardByIndex(prev => ({
+          ...prev,
+          [segmentIndex]: {
+            id: crypto.randomUUID(),
+            owner: segmentIndex === 0 ? 'root' : 'extension',
+            previewImage: result.previewImage,
+            previewPrompt: result.previewPrompt || prompt,
+            segmentIndex,
+            cameraNotes: result.cameraNotes,
+            movementNotes: result.movementNotes,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }
+        }));
+        console.log(`[ImageFirst] Keyframe ${segmentIndex} generated successfully`);
+
+        // If Root, we can now show the Mode Selection UI
+        if (segmentIndex === 0) {
+          setSequenceMode('pending');
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[ImageFirst] Failed to generate keyframe ${segmentIndex}:`, err);
+
+      // P0: Detect API key errors and show dialog
+      if (err?.isApiKeyError || err?.message?.includes('API_KEY_ERROR')) {
+        console.log('[ImageFirst] API key error detected, showing dialog');
+        setShowApiKeyDialog(true);
+        setErrorMessage('API key required or invalid. Please enter a valid Gemini API key.');
+      } else {
+        setErrorMessage('Failed to generate preview. Check your API key or try again.');
+      }
+    }
+  }, [sequenceBoundDogma, activeDogma]);
+
   const handleGenerate = useCallback(
     async (params: GenerateVideoParams) => {
       // Strict check for Beta Tester Key
@@ -753,6 +806,19 @@ const Studio: React.FC = () => {
         if (currentPromptIndex === 0) {
           // ROOT SHOT: Must be TEXT_TO_VIDEO, no base video
           console.log('[Sequence] Root shot index=0 → mode=TEXT_TO_VIDEO (no base video)');
+
+          // IMAGE-FIRST ENFORCEMENT
+          // If no keyframe exists for the root shot, we MUST generate one first via Nano
+          if (!storyboardByIndex[0]) {
+            console.log('[ImageFirst] No keyframe found for root shot. Enforcing Nano preview.');
+            // Generate keyframe using the prompt
+            generateKeyframe(0, effectiveParams.prompt);
+            // Optionally set state to indicate we are in preview mode
+            // Inform user via temporary message (using error message slot for visibility, or console)
+            console.log('[ImageFirst] Preview generation triggered. Pausing video generation.');
+            // Abort video generation
+            return;
+          }
 
           // Force TEXT_TO_VIDEO for root shot (unless using frames/references mode)
           if (effectiveParams.mode === GenerationMode.EXTEND_VIDEO) {

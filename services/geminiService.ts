@@ -146,19 +146,43 @@ export const getLocalApiKey = (): string | null => {
 };
 
 /**
- * Save API key to localStorage (BYOK mode)
+ * Save API key to BOTH localStorage and sessionStorage (unified BYOK mode)
+ * localStorage = persistent across sessions
+ * sessionStorage = available for Nano service within session
  */
 export const setLocalApiKey = (key: string): void => {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem('gemini_api_key', key.trim());
+  const trimmedKey = key.trim();
+  window.localStorage.setItem('gemini_api_key', trimmedKey);
+  window.sessionStorage.setItem('gemini_api_key', trimmedKey);  // Sync for Nano
+  console.log('[BYOK] API key saved to localStorage and sessionStorage');
 };
 
 /**
- * Remove API key from localStorage
+ * Remove API key from BOTH localStorage and sessionStorage
  */
 export const clearLocalApiKey = (): void => {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem('gemini_api_key');
+  window.sessionStorage.removeItem('gemini_api_key');  // Sync for Nano
+  console.log('[BYOK] API key cleared from localStorage and sessionStorage');
+};
+
+/**
+ * Sync API key from localStorage to sessionStorage at boot
+ * Called once during app initialization
+ */
+export const syncApiKeyToSession = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const localKey = window.localStorage.getItem('gemini_api_key');
+  const sessionKey = window.sessionStorage.getItem('gemini_api_key');
+
+  if (localKey && !sessionKey) {
+    window.sessionStorage.setItem('gemini_api_key', localKey);
+    console.log('[BYOK] Synced API key from localStorage to sessionStorage');
+    return true;
+  }
+  return false;
 };
 
 // Legacy exports for backward compatibility
