@@ -98,6 +98,23 @@ const MODELS = {
 };
 
 // ===========================================
+// IN-MEMORY KEY VAULT (Strict BYOK)
+// ===========================================
+let runtimeApiKey: string | null = null;
+
+export const setRuntimeApiKey = (key: string | null) => {
+  if (key) {
+    runtimeApiKey = key.trim();
+    console.log('[GeminiService] Runtime API key set, length:', runtimeApiKey.length);
+  } else {
+    runtimeApiKey = null;
+    console.log('[GeminiService] Runtime API key cleared');
+  }
+};
+
+export const getRuntimeApiKey = (): string | null => runtimeApiKey;
+
+// ===========================================
 // API KEY MANAGEMENT (Dual Mode: Server-Managed + BYOK)
 // ===========================================
 
@@ -215,7 +232,8 @@ export const callVeoBackend = async (path: string, body: any): Promise<any> => {
 
   // Only add user key header if server doesn't have a key configured
   if (!config.hasServerKey) {
-    const key = getLocalApiKey();
+    // Priority: Runtime Vault -> Legacy (null in Strict Mode)
+    const key = getRuntimeApiKey() || getLocalApiKey();
     if (key) {
       headers['x-api-key'] = key;
     }
@@ -237,479 +255,483 @@ export const callVeoBackend = async (path: string, body: any): Promise<any> => {
     };
     throw apiError;
   }
-  // Centralized API call with Strict BYOK logic
-  export const apiCall = async (endpoint: string, body: any, apiKey?: string) => {
-    const config = await fetchGeminiConfig();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-    if (!config.hasServerKey) {
-      // Priority: Explicit -> Runtime -> Local (Legacy)
-      const key = apiKey || getRuntimeApiKey() || getLocalApiKey();
-      if (!key) {
-        console.warn('[BYOK] Missing API Key! Runtime key present:', !!runtimeApiKey);
-        const error = new Error('API_KEY_MISSING: Please enter your Gemini API key first') as any;
-        error.code = 'API_KEY_MISSING';
-        throw error;
-      }
-      headers['x-api-key'] = key;
-    }
+  return data;
+};
 
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+// Centralized API call with Strict BYOK logic
+export const apiCall = async (endpoint: string, body: any, apiKey?: string) => {
+  const config = await fetchGeminiConfig();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-    if (!res.ok) {
-      // Try to parse JSON error, fallback to text
-      let errorInfo;
-      try {
-        errorInfo = await res.json();
-      } catch {
-        errorInfo = { error: res.statusText };
-      }
-
-      // Check for "debug" field from our defensive backend
-      const debugInfo = errorInfo.debug ? ` (Backend Status: ${errorInfo.debug.status}, Code: ${errorInfo.debug.code})` : '';
-
-      const error = new Error(`API Request Failed: ${res.status}${debugInfo}`) as any;
-      error.status = res.status;
+  if (!config.hasServerKey) {
+    // Priority: Explicit -> Runtime -> Local (Legacy)
+    const key = apiKey || getRuntimeApiKey() || getLocalApiKey();
+    if (!key) {
+      console.warn('[BYOK] Missing API Key! Runtime key present:', !!runtimeApiKey);
+      const error = new Error('API_KEY_MISSING: Please enter your Gemini API key first') as any;
+      error.code = 'API_KEY_MISSING';
       throw error;
     }
-    return res.json();
-  };
-
-  // Helper to extract text from various response formats
-  const extractText = (response: any): string => {
-    if (typeof response === 'string') return response;
-    if (response.text) return response.text;
-    if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return response.candidates[0].content.parts[0].text;
-    }
-    return '';
-  };
-
-  // ===========================================
-  // GOOGLE FILES API - Upload large files directly to Google
-  // Bypasses Vercel 4.5MB limit - supports up to 2GB per file
-  // ===========================================
-
-  interface GoogleFileUploadResult {
-    fileUri: string;
-    mimeType: string;
-    displayName: string;
+    headers['x-api-key'] = key;
   }
 
-  /**
-   * Upload a file to Google Files API via backend proxy
-   * SECURITY: API key is handled server-side, never sent from browser
-   * @param file - File or Blob to upload
-   * @param displayName - Optional display name for the file
-   * @returns fileUri that can be used with Gemini/Veo APIs
-   */
-  /**
-   * Upload a file to Google Files API via backend proxy
-   * SECURITY: Backend initiates upload (API key hidden). Frontend uploads bytes directly.
-   * LIMITATION: Bypasses Vercel 4.5MB limit (supports up to 2GB).
-   */
-  export const uploadToGoogleFiles = async (
-    file: File | Blob,
-    displayName?: string
-  ): Promise<GoogleFileUploadResult> => {
-    const mimeType = file instanceof File ? file.type : 'application/octet-stream';
-    const fileName = displayName || (file instanceof File ? file.name : `upload-${Date.now()}`);
-    const numBytes = file.size;
-
-    console.log(`[GoogleFiles] Starting secure direct upload: ${fileName} (${(numBytes / 1024 / 1024).toFixed(2)} MB)`);
-
-    // Step 1: Get Upload URL from backend (Secure Init)
-    // We send only metadata, not the file itself
-    const initResult = await callVeoBackend('/api/files/upload', {
-      displayName: fileName,
-      mimeType,
-      fileSize: numBytes
-    });
-
-    if (!initResult.uploadUrl) {
-      throw new Error('Upload init failed: No URL received');
-    }
-
-    console.log('[GoogleFiles] Got upload URL, uploading bytes directly to Google...');
-
-    // Step 2: Upload bytes directly to Google (Bypass Vercel Limit)
-    // No API key needed here, the URL is pre-signed/session-bound
-    const uploadResponse = await fetch(initResult.uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Length': numBytes.toString(),
-        'X-Goog-Upload-Offset': '0',
-        'X-Goog-Upload-Command': 'upload, finalize',
-      },
-      body: file,
-    });
-
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text();
-      throw new Error(`Failed to upload content to Google: ${uploadResponse.status} - ${errorText}`);
-    }
-
-    const result = await uploadResponse.json();
-
-    if (!result.file || !result.file.uri) {
-      throw new Error('Upload failed: No file URI in final response');
-    }
-
-    console.log(`[GoogleFiles] Upload complete: ${result.file.uri}`);
-
-    return {
-      fileUri: result.file.uri,
-      mimeType: mimeType,
-      displayName: fileName,
-    };
-  };
-
-  /**
-   * Convert an ImageFile (with base64) to a Google Files URI
-   * Use this for large images that would exceed Vercel's limit
-   */
-  export const uploadImageFileToGoogle = async (
-    imageFile: ImageFile
-  ): Promise<GoogleFileUploadResult> => {
-    // Convert base64 to Blob
-    const response = await fetch(`data:${imageFile.file.type};base64,${imageFile.base64}`);
-    const blob = await response.blob();
-
-    return uploadToGoogleFiles(blob, imageFile.file.name);
-  };
-
-  /**
-   * Helper to create a fileData part for API calls (instead of inlineData)
-   */
-  export const createFileDataPart = (fileUri: string, mimeType: string) => ({
-    fileData: {
-      fileUri,
-      mimeType,
-    }
+  const res = await fetch(`${API_BASE}${endpoint}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
   });
 
-  // Threshold for using Google Files API instead of inline base64
-  // Vercel has 4.5MB limit, we use 3MB threshold for safety margin
-  const LARGE_FILE_THRESHOLD = 3 * 1024 * 1024; // 3MB
-
-  /**
-   * Smart image part creator - uses fileUri for large images, inlineData for small ones
-   * This automatically handles the Vercel 4.5MB limit
-   */
-  const createImagePart = async (imageFile: ImageFile): Promise<any> => {
-    // Estimate base64 size (roughly 1.37x the binary size)
-    const estimatedSize = imageFile.base64.length * 0.75;
-
-    if (estimatedSize > LARGE_FILE_THRESHOLD) {
-      // Large file: Upload to Google Files API first
-      console.log(`[SmartUpload] Image ${imageFile.file.name} is large (${(estimatedSize / 1024 / 1024).toFixed(2)}MB), using Google Files API`);
-      const uploadResult = await uploadImageFileToGoogle(imageFile);
-      return {
-        fileData: {
-          fileUri: uploadResult.fileUri,
-          mimeType: uploadResult.mimeType,
-        }
-      };
-    } else {
-      // Small file: Use inline base64
-      return {
-        inlineData: {
-          data: imageFile.base64,
-          mimeType: imageFile.file.type || 'image/jpeg'
-        }
-      };
-    }
-  };
-
-  /**
-   * Process multiple images, uploading large ones to Google Files API
-   */
-  const createImageParts = async (images: ImageFile[]): Promise<any[]> => {
-    return Promise.all(images.map(img => createImagePart(img)));
-  };
-
-  // ===========================================
-  // VIDEO GENERATION (VEO) - Using predictLongRunning API
-  // ===========================================
-
-  interface VeoStartResponse {
-    operationName: string;
-  }
-
-  interface VeoStatusResponse {
-    done: boolean;
-    videoUri?: string;
-    error?: string;
-  }
-
-  export const generateVideo = async (
-    params: GenerateVideoParams,
-    signal: AbortSignal,
-    onProgress?: (status: string) => void,
-    apiKey?: string
-  ): Promise<{ objectUrl: string; blob: Blob; uri: string; video: any; supabaseUrl?: string }> => {
-    // Determine if this is an extension with a valid video reference
-    const videoUri = params.mode === GenerationMode.EXTEND_VIDEO && params.inputVideoObject?.uri
-      ? params.inputVideoObject.uri
-      : undefined;
-
-    // Clear logging for sequence debugging
-    if (videoUri) {
-      console.log(`[Sequence/Extend] Generating extension with baseVideo=${videoUri}`);
-    } else if (params.mode === GenerationMode.EXTEND_VIDEO) {
-      console.warn('[Sequence/Extend] WARNING: EXTEND_VIDEO mode but no baseVideo URI! Will generate as text-to-video instead of true extension.');
-    } else {
-      console.log(`[Sequence] Generating root shot with mode=${params.mode}`);
-    }
-    console.log('[Veo] Starting video generation...', params);
-
-    // P0.7: Check apiKey param first
-    const key = apiKey || getApiKey();
-    if (!key) {
-      throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
-    }
-
+  if (!res.ok) {
+    // Try to parse JSON error, fallback to text
+    let errorInfo;
     try {
-      // Build parameters for the API
-      const parameters: Record<string, any> = {};
+      errorInfo = await res.json();
+    } catch {
+      errorInfo = { error: res.statusText };
+    }
 
-      if (params.mode !== GenerationMode.REFERENCES_TO_VIDEO) {
-        if (params.resolution) {
-          parameters.resolution = params.resolution;
-        }
+    // Check for "debug" field from our defensive backend
+    const debugInfo = errorInfo.debug ? ` (Backend Status: ${errorInfo.debug.status}, Code: ${errorInfo.debug.code})` : '';
+
+    const error = new Error(`API Request Failed: ${res.status}${debugInfo}`) as any;
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+};
+
+// Helper to extract text from various response formats
+const extractText = (response: any): string => {
+  if (typeof response === 'string') return response;
+  if (response.text) return response.text;
+  if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
+    return response.candidates[0].content.parts[0].text;
+  }
+  return '';
+};
+
+// ===========================================
+// GOOGLE FILES API - Upload large files directly to Google
+// Bypasses Vercel 4.5MB limit - supports up to 2GB per file
+// ===========================================
+
+interface GoogleFileUploadResult {
+  fileUri: string;
+  mimeType: string;
+  displayName: string;
+}
+
+/**
+ * Upload a file to Google Files API via backend proxy
+ * SECURITY: API key is handled server-side, never sent from browser
+ * @param file - File or Blob to upload
+ * @param displayName - Optional display name for the file
+ * @returns fileUri that can be used with Gemini/Veo APIs
+ */
+/**
+ * Upload a file to Google Files API via backend proxy
+ * SECURITY: Backend initiates upload (API key hidden). Frontend uploads bytes directly.
+ * LIMITATION: Bypasses Vercel 4.5MB limit (supports up to 2GB).
+ */
+export const uploadToGoogleFiles = async (
+  file: File | Blob,
+  displayName?: string
+): Promise<GoogleFileUploadResult> => {
+  const mimeType = file instanceof File ? file.type : 'application/octet-stream';
+  const fileName = displayName || (file instanceof File ? file.name : `upload-${Date.now()}`);
+  const numBytes = file.size;
+
+  console.log(`[GoogleFiles] Starting secure direct upload: ${fileName} (${(numBytes / 1024 / 1024).toFixed(2)} MB)`);
+
+  // Step 1: Get Upload URL from backend (Secure Init)
+  // We send only metadata, not the file itself
+  const initResult = await callVeoBackend('/api/files/upload', {
+    displayName: fileName,
+    mimeType,
+    fileSize: numBytes
+  });
+
+  if (!initResult.uploadUrl) {
+    throw new Error('Upload init failed: No URL received');
+  }
+
+  console.log('[GoogleFiles] Got upload URL, uploading bytes directly to Google...');
+
+  // Step 2: Upload bytes directly to Google (Bypass Vercel Limit)
+  // No API key needed here, the URL is pre-signed/session-bound
+  const uploadResponse = await fetch(initResult.uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Length': numBytes.toString(),
+      'X-Goog-Upload-Offset': '0',
+      'X-Goog-Upload-Command': 'upload, finalize',
+    },
+    body: file,
+  });
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(`Failed to upload content to Google: ${uploadResponse.status} - ${errorText}`);
+  }
+
+  const result = await uploadResponse.json();
+
+  if (!result.file || !result.file.uri) {
+    throw new Error('Upload failed: No file URI in final response');
+  }
+
+  console.log(`[GoogleFiles] Upload complete: ${result.file.uri}`);
+
+  return {
+    fileUri: result.file.uri,
+    mimeType: mimeType,
+    displayName: fileName,
+  };
+};
+
+/**
+ * Convert an ImageFile (with base64) to a Google Files URI
+ * Use this for large images that would exceed Vercel's limit
+ */
+export const uploadImageFileToGoogle = async (
+  imageFile: ImageFile
+): Promise<GoogleFileUploadResult> => {
+  // Convert base64 to Blob
+  const response = await fetch(`data:${imageFile.file.type};base64,${imageFile.base64}`);
+  const blob = await response.blob();
+
+  return uploadToGoogleFiles(blob, imageFile.file.name);
+};
+
+/**
+ * Helper to create a fileData part for API calls (instead of inlineData)
+ */
+export const createFileDataPart = (fileUri: string, mimeType: string) => ({
+  fileData: {
+    fileUri,
+    mimeType,
+  }
+});
+
+// Threshold for using Google Files API instead of inline base64
+// Vercel has 4.5MB limit, we use 3MB threshold for safety margin
+const LARGE_FILE_THRESHOLD = 3 * 1024 * 1024; // 3MB
+
+/**
+ * Smart image part creator - uses fileUri for large images, inlineData for small ones
+ * This automatically handles the Vercel 4.5MB limit
+ */
+const createImagePart = async (imageFile: ImageFile): Promise<any> => {
+  // Estimate base64 size (roughly 1.37x the binary size)
+  const estimatedSize = imageFile.base64.length * 0.75;
+
+  if (estimatedSize > LARGE_FILE_THRESHOLD) {
+    // Large file: Upload to Google Files API first
+    console.log(`[SmartUpload] Image ${imageFile.file.name} is large (${(estimatedSize / 1024 / 1024).toFixed(2)}MB), using Google Files API`);
+    const uploadResult = await uploadImageFileToGoogle(imageFile);
+    return {
+      fileData: {
+        fileUri: uploadResult.fileUri,
+        mimeType: uploadResult.mimeType,
+      }
+    };
+  } else {
+    // Small file: Use inline base64
+    return {
+      inlineData: {
+        data: imageFile.base64,
+        mimeType: imageFile.file.type || 'image/jpeg'
+      }
+    };
+  }
+};
+
+/**
+ * Process multiple images, uploading large ones to Google Files API
+ */
+const createImageParts = async (images: ImageFile[]): Promise<any[]> => {
+  return Promise.all(images.map(img => createImagePart(img)));
+};
+
+// ===========================================
+// VIDEO GENERATION (VEO) - Using predictLongRunning API
+// ===========================================
+
+interface VeoStartResponse {
+  operationName: string;
+}
+
+interface VeoStatusResponse {
+  done: boolean;
+  videoUri?: string;
+  error?: string;
+}
+
+export const generateVideo = async (
+  params: GenerateVideoParams,
+  signal: AbortSignal,
+  onProgress?: (status: string) => void,
+  apiKey?: string
+): Promise<{ objectUrl: string; blob: Blob; uri: string; video: any; supabaseUrl?: string }> => {
+  // Determine if this is an extension with a valid video reference
+  const videoUri = params.mode === GenerationMode.EXTEND_VIDEO && params.inputVideoObject?.uri
+    ? params.inputVideoObject.uri
+    : undefined;
+
+  // Clear logging for sequence debugging
+  if (videoUri) {
+    console.log(`[Sequence/Extend] Generating extension with baseVideo=${videoUri}`);
+  } else if (params.mode === GenerationMode.EXTEND_VIDEO) {
+    console.warn('[Sequence/Extend] WARNING: EXTEND_VIDEO mode but no baseVideo URI! Will generate as text-to-video instead of true extension.');
+  } else {
+    console.log(`[Sequence] Generating root shot with mode=${params.mode}`);
+  }
+  console.log('[Veo] Starting video generation...', params);
+
+  // P0.7: Check apiKey param first
+  const key = apiKey || getApiKey();
+  if (!key) {
+    throw new Error('API_KEY_MISSING: Please enter your Gemini API key first');
+  }
+
+  try {
+    // Build parameters for the API
+    const parameters: Record<string, any> = {};
+
+    if (params.mode !== GenerationMode.REFERENCES_TO_VIDEO) {
+      if (params.resolution) {
+        parameters.resolution = params.resolution;
+      }
+    }
+
+    if (params.mode !== GenerationMode.EXTEND_VIDEO &&
+      params.mode !== GenerationMode.REFERENCES_TO_VIDEO) {
+      if (params.aspectRatio) {
+        parameters.aspectRatio = params.aspectRatio;
+      }
+    }
+
+    // Build prompt with any necessary instructions
+    let finalPrompt = params.prompt;
+
+    if (params.mode === GenerationMode.FRAMES_TO_VIDEO && params.startFrame) {
+      const instruction =
+        'CRITICAL INSTRUCTION: You are to animate the provided image, NOT reinterpret it. The very first frame of the video MUST be pixel-perfect identical to the provided start image. DO NOT add, remove, or change any characters, objects, or environmental elements present in the image. The composition is fixed. Your only task is to create motion, animating ONLY what is already there.\n\n';
+      finalPrompt = instruction + finalPrompt;
+    }
+
+    if (!finalPrompt.trim()) {
+      if (params.mode === GenerationMode.EXTEND_VIDEO) {
+        finalPrompt = 'Continue the scene.';
+      } else {
+        throw new Error('A prompt description is required.');
+      }
+    }
+
+    // 1. Start Generation using /api/video/generate endpoint
+    onProgress?.('Starting video generation...');
+    console.log('[Veo] Calling /api/video/generate...', {
+      hasVideoUri: !!videoUri,
+      hasStartFrame: !!params.startFrame,
+      mode: params.mode
+    });
+
+    // Compress startFrame if present to avoid 413 Payload Too Large (Vercel limit ~4.5MB)
+    let startFrameBase64 = params.startFrame?.base64;
+    if (startFrameBase64) {
+      try {
+        const originalSize = startFrameBase64.length;
+        console.log('[Veo] Compressing startFrame...', { originalSize: `${(originalSize / 1024).toFixed(0)}KB` });
+
+        // compressImageBase64 is defined at the top of this file
+        startFrameBase64 = await compressImageBase64(startFrameBase64, 1024, 0.7);
+
+        console.log('[Veo] Compression result:', {
+          newSize: `${(startFrameBase64.length / 1024).toFixed(0)}KB`,
+          ratio: `${((startFrameBase64.length / originalSize) * 100).toFixed(1)}%`
+        });
+      } catch (e) {
+        console.warn('[Veo] Failed to compress startFrame, sending original (risks 413):', e);
+      }
+    }
+
+    const startResponse = await fetch(`${API_BASE}/video/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+      },
+      body: JSON.stringify({
+        model: params.model,
+        prompt: finalPrompt.trim(),
+        parameters: Object.keys(parameters).length > 0 ? parameters : undefined,
+        // Pass video URI for extend mode (Veo-generated videos)
+        videoUri: videoUri,
+        // Pass compressed startFrame for external video continuation
+        startFrame: startFrameBase64,
+      }),
+      signal,
+    });
+
+    if (!startResponse.ok) {
+      const errorData = await startResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || `Failed to start video generation: ${startResponse.statusText}`);
+    }
+
+    const startData: VeoStartResponse = await startResponse.json();
+    const operationName = startData.operationName;
+    console.log('[Veo] Operation started:', operationName);
+
+    // 2. Poll until done
+    let status: VeoStatusResponse = { done: false };
+    let pollCount = 0;
+    const maxPolls = 120; // 10 minutes max (5s * 120)
+
+    while (!status.done && pollCount < maxPolls) {
+      // Check if aborted
+      if (signal.aborted) {
+        throw new DOMException('Video generation cancelled', 'AbortError');
       }
 
-      if (params.mode !== GenerationMode.EXTEND_VIDEO &&
-        params.mode !== GenerationMode.REFERENCES_TO_VIDEO) {
-        if (params.aspectRatio) {
-          parameters.aspectRatio = params.aspectRatio;
-        }
-      }
+      // Wait 5 seconds between polls
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
-      // Build prompt with any necessary instructions
-      let finalPrompt = params.prompt;
+      pollCount++;
+      onProgress?.(`Generating video... (${pollCount * 5}s elapsed)`);
+      console.log(`[Veo] Polling... (${pollCount * 5}s elapsed)`);
 
-      if (params.mode === GenerationMode.FRAMES_TO_VIDEO && params.startFrame) {
-        const instruction =
-          'CRITICAL INSTRUCTION: You are to animate the provided image, NOT reinterpret it. The very first frame of the video MUST be pixel-perfect identical to the provided start image. DO NOT add, remove, or change any characters, objects, or environmental elements present in the image. The composition is fixed. Your only task is to create motion, animating ONLY what is already there.\n\n';
-        finalPrompt = instruction + finalPrompt;
-      }
-
-      if (!finalPrompt.trim()) {
-        if (params.mode === GenerationMode.EXTEND_VIDEO) {
-          finalPrompt = 'Continue the scene.';
-        } else {
-          throw new Error('A prompt description is required.');
-        }
-      }
-
-      // 1. Start Generation using /api/video/generate endpoint
-      onProgress?.('Starting video generation...');
-      console.log('[Veo] Calling /api/video/generate...', {
-        hasVideoUri: !!videoUri,
-        hasStartFrame: !!params.startFrame,
-        mode: params.mode
-      });
-
-      // Compress startFrame if present to avoid 413 Payload Too Large (Vercel limit ~4.5MB)
-      let startFrameBase64 = params.startFrame?.base64;
-      if (startFrameBase64) {
-        try {
-          const originalSize = startFrameBase64.length;
-          console.log('[Veo] Compressing startFrame...', { originalSize: `${(originalSize / 1024).toFixed(0)}KB` });
-
-          // compressImageBase64 is defined at the top of this file
-          startFrameBase64 = await compressImageBase64(startFrameBase64, 1024, 0.7);
-
-          console.log('[Veo] Compression result:', {
-            newSize: `${(startFrameBase64.length / 1024).toFixed(0)}KB`,
-            ratio: `${((startFrameBase64.length / originalSize) * 100).toFixed(1)}%`
-          });
-        } catch (e) {
-          console.warn('[Veo] Failed to compress startFrame, sending original (risks 413):', e);
-        }
-      }
-
-      const startResponse = await fetch(`${API_BASE}/video/generate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': key,
-        },
-        body: JSON.stringify({
-          model: params.model,
-          prompt: finalPrompt.trim(),
-          parameters: Object.keys(parameters).length > 0 ? parameters : undefined,
-          // Pass video URI for extend mode (Veo-generated videos)
-          videoUri: videoUri,
-          // Pass compressed startFrame for external video continuation
-          startFrame: startFrameBase64,
-        }),
-        signal,
-      });
-
-      if (!startResponse.ok) {
-        const errorData = await startResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to start video generation: ${startResponse.statusText}`);
-      }
-
-      const startData: VeoStartResponse = await startResponse.json();
-      const operationName = startData.operationName;
-      console.log('[Veo] Operation started:', operationName);
-
-      // 2. Poll until done
-      let status: VeoStatusResponse = { done: false };
-      let pollCount = 0;
-      const maxPolls = 120; // 10 minutes max (5s * 120)
-
-      while (!status.done && pollCount < maxPolls) {
-        // Check if aborted
-        if (signal.aborted) {
-          throw new DOMException('Video generation cancelled', 'AbortError');
-        }
-
-        // Wait 5 seconds between polls
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        pollCount++;
-        onProgress?.(`Generating video... (${pollCount * 5}s elapsed)`);
-        console.log(`[Veo] Polling... (${pollCount * 5}s elapsed)`);
-
-        const statusResponse = await fetch(
-          `${API_BASE}/video/status?name=${encodeURIComponent(operationName)}`,
-          {
-            method: 'GET',
-            headers: {
-              'x-api-key': key,
-            },
-            signal,
-          }
-        );
-
-        if (!statusResponse.ok) {
-          const errorData = await statusResponse.json().catch(() => ({}));
-          throw new Error(errorData.error || `Failed to poll video status: ${statusResponse.statusText}`);
-        }
-
-        status = await statusResponse.json();
-
-        if (status.error) {
-          throw new Error(status.error);
-        }
-      }
-
-      if (!status.done) {
-        throw new Error('Video generation timed out after 10 minutes');
-      }
-
-      if (!status.videoUri) {
-        throw new Error('No video URI in response');
-      }
-
-      console.log('[Veo] Video ready:', status.videoUri);
-
-      // 3. Download video via proxy
-      onProgress?.('Downloading video...');
-      console.log('[Veo] Downloading video via proxy...');
-
-      const downloadResponse = await fetch(
-        `${API_BASE}/proxy-video?uri=${encodeURIComponent(status.videoUri)}`,
+      const statusResponse = await fetch(
+        `${API_BASE}/video/status?name=${encodeURIComponent(operationName)}`,
         {
           method: 'GET',
           headers: {
-            'x-api-key': apiKey,
+            'x-api-key': key,
           },
           signal,
         }
       );
 
-      if (!downloadResponse.ok) {
-        throw new Error(`Failed to download video: ${downloadResponse.statusText}`);
+      if (!statusResponse.ok) {
+        const errorData = await statusResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to poll video status: ${statusResponse.statusText}`);
       }
 
-      const videoBlob = await downloadResponse.blob();
-      const objectUrl = URL.createObjectURL(videoBlob);
+      status = await statusResponse.json();
 
-      console.log('[Veo] Video downloaded:', videoBlob.size, 'bytes');
-
-      // 4. Optional: Upload to Supabase if configured (via Provider)
-      let supabaseUrl: string | undefined;
-
-      // Use the Storage Factory to get the best available provider
-      const storageProvider = await VideoStorageFactory.getAvailableProvider();
-
-      if (storageProvider) {
-        try {
-          onProgress?.(`Uploading to storage (${storageProvider.name})...`);
-          console.log(`[Veo] Uploading to ${storageProvider.name}...`);
-
-          const filename = `veo-${params.model}-${Date.now()}.mp4`;
-          const result = await storageProvider.upload(videoBlob, filename, {
-            contentType: 'video/mp4',
-            public: true
-          });
-
-          supabaseUrl = result.publicUrl;
-          console.log(`[Veo] Video uploaded to ${storageProvider.name}:`, supabaseUrl);
-        } catch (uploadError) {
-          console.warn('[Veo] Failed to upload to storage provider:', uploadError);
-          // Don't crash the generation if upload fails, just log it
-        }
-      } else {
-        console.log('[Veo] No storage provider available, skipping upload.');
+      if (status.error) {
+        throw new Error(status.error);
       }
-
-      return {
-        objectUrl,
-        blob: videoBlob,
-        uri: status.videoUri,
-        video: { uri: status.videoUri },
-        supabaseUrl,
-      };
-
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') throw error;
-      console.error('[Veo] Video Generation Error:', error);
-      throw error;
     }
-  };
 
-  // ===========================================
-  // TEXT / CHAT GENERATION
-  // ===========================================
+    if (!status.done) {
+      throw new Error('Video generation timed out after 10 minutes');
+    }
 
-  export const generatePromptFromImage = async (image: ImageFile, apiKey?: string): Promise<string> => {
-    // Use smart upload for large images
-    const imagePart = await createImagePart(image);
+    if (!status.videoUri) {
+      throw new Error('No video URI in response');
+    }
 
-    const response = await apiCall('/generate-content', {
-      model: MODELS.PRO,
-      contents: {
-        parts: [
-          imagePart,
-          { text: 'Describe this image in a creative and detailed way to be used as a prompt for a video generation model. Focus on action, mood, and visual details. The description should be a single, cohesive paragraph.' }
-        ]
+    console.log('[Veo] Video ready:', status.videoUri);
+
+    // 3. Download video via proxy
+    onProgress?.('Downloading video...');
+    console.log('[Veo] Downloading video via proxy...');
+
+    const downloadResponse = await fetch(
+      `${API_BASE}/proxy-video?uri=${encodeURIComponent(status.videoUri)}`,
+      {
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey,
+        },
+        signal,
       }
-    }, apiKey);
-    return extractText(response).trim();
-  };
+    );
 
-  export const generatePromptSequence = async (
-    sceneDescription: string,
-    totalDuration: number,
-    dogma: Dogma | null,
-    apiKey?: string
-  ): Promise<PromptSequence> => {
-    const remainingDuration = totalDuration - 8;
-    const averageExtensionDuration = 5.5;
-    const numExtensions = remainingDuration > 0 ? Math.ceil(remainingDuration / averageExtensionDuration) : 0;
-    const dogmaText = dogma?.text ?? '';
+    if (!downloadResponse.ok) {
+      throw new Error(`Failed to download video: ${downloadResponse.statusText}`);
+    }
 
-    const systemPrompt = `You are a master cinematic shot planner. Your task is to take a user's detailed, VEO-optimized prompt for a continuous scene and break it down into a sequence of smaller prompts for the Veo video generation model.
+    const videoBlob = await downloadResponse.blob();
+    const objectUrl = URL.createObjectURL(videoBlob);
+
+    console.log('[Veo] Video downloaded:', videoBlob.size, 'bytes');
+
+    // 4. Optional: Upload to Supabase if configured (via Provider)
+    let supabaseUrl: string | undefined;
+
+    // Use the Storage Factory to get the best available provider
+    const storageProvider = await VideoStorageFactory.getAvailableProvider();
+
+    if (storageProvider) {
+      try {
+        onProgress?.(`Uploading to storage (${storageProvider.name})...`);
+        console.log(`[Veo] Uploading to ${storageProvider.name}...`);
+
+        const filename = `veo-${params.model}-${Date.now()}.mp4`;
+        const result = await storageProvider.upload(videoBlob, filename, {
+          contentType: 'video/mp4',
+          public: true
+        });
+
+        supabaseUrl = result.publicUrl;
+        console.log(`[Veo] Video uploaded to ${storageProvider.name}:`, supabaseUrl);
+      } catch (uploadError) {
+        console.warn('[Veo] Failed to upload to storage provider:', uploadError);
+        // Don't crash the generation if upload fails, just log it
+      }
+    } else {
+      console.log('[Veo] No storage provider available, skipping upload.');
+    }
+
+    return {
+      objectUrl,
+      blob: videoBlob,
+      uri: status.videoUri,
+      video: { uri: status.videoUri },
+      supabaseUrl,
+    };
+
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    console.error('[Veo] Video Generation Error:', error);
+    throw error;
+  }
+};
+
+// ===========================================
+// TEXT / CHAT GENERATION
+// ===========================================
+
+export const generatePromptFromImage = async (image: ImageFile, apiKey?: string): Promise<string> => {
+  // Use smart upload for large images
+  const imagePart = await createImagePart(image);
+
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO,
+    contents: {
+      parts: [
+        imagePart,
+        { text: 'Describe this image in a creative and detailed way to be used as a prompt for a video generation model. Focus on action, mood, and visual details. The description should be a single, cohesive paragraph.' }
+      ]
+    }
+  }, apiKey);
+  return extractText(response).trim();
+};
+
+export const generatePromptSequence = async (
+  sceneDescription: string,
+  totalDuration: number,
+  dogma: Dogma | null,
+  apiKey?: string
+): Promise<PromptSequence> => {
+  const remainingDuration = totalDuration - 8;
+  const averageExtensionDuration = 5.5;
+  const numExtensions = remainingDuration > 0 ? Math.ceil(remainingDuration / averageExtensionDuration) : 0;
+  const dogmaText = dogma?.text ?? '';
+
+  const systemPrompt = `You are a master cinematic shot planner. Your task is to take a user's detailed, VEO-optimized prompt for a continuous scene and break it down into a sequence of smaller prompts for the Veo video generation model.
   Rules:
   1. Create a "mainPrompt" (8s).
   2. Create exactly ${numExtensions} "extensionPrompts" (4-7s each).
@@ -717,28 +739,42 @@ export const callVeoBackend = async (path: string, body: any): Promise<any> => {
   4. Follow Dogma: ${dogmaText}
   5. JSON OUTPUT ONLY: { "mainPrompt": "string", "extensionPrompts": ["string"] }`;
 
-    const parts: any[] = [];
-    if (dogma?.referenceImages) {
-      for (const img of dogma.referenceImages) {
-        parts.push({ inlineData: { data: img.base64, mimeType: img.type } });
-      }
+  const parts: any[] = [];
+  if (dogma?.referenceImages) {
+    for (const img of dogma.referenceImages) {
+      parts.push({ inlineData: { data: img.base64, mimeType: img.type } });
     }
-    parts.push({ text: `Scene: "${sceneDescription}". Duration: ${totalDuration}s.` });
+  }
+  parts.push({ text: `Scene: "${sceneDescription}". Duration: ${totalDuration}s.` });
 
-    const response = await apiCall('/generate-content', {
-      model: MODELS.PRO,
-      contents: { parts },
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json'
-      }
-    }, apiKey);
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO,
+    contents: { parts },
+    config: {
+      systemInstruction: systemPrompt,
+      responseMimeType: 'application/json'
+    }
+  }, apiKey);
 
-    const text = extractText(response);
-    try {
-      const parsed = JSON.parse(text);
-      // Return full PromptSequence structure with defaults for new fields
-      const sequence: PromptSequence = {
+  const text = extractText(response);
+  try {
+    const parsed = JSON.parse(text);
+    // Return full PromptSequence structure with defaults for new fields
+    const sequence: PromptSequence = {
+      id: crypto.randomUUID(),
+      dogmaId: dogma?.id ?? null,
+      mainPrompt: parsed.mainPrompt,
+      extensionPrompts: parsed.extensionPrompts || [],
+      status: PromptSequenceStatus.CLEAN,
+      dirtyExtensions: [],
+      createdAt: new Date().toISOString(),
+    };
+    return sequence;
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return {
         id: crypto.randomUUID(),
         dogmaId: dogma?.id ?? null,
         mainPrompt: parsed.mainPrompt,
@@ -747,41 +783,27 @@ export const callVeoBackend = async (path: string, body: any): Promise<any> => {
         dirtyExtensions: [],
         createdAt: new Date().toISOString(),
       };
-      return sequence;
-    } catch {
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        return {
-          id: crypto.randomUUID(),
-          dogmaId: dogma?.id ?? null,
-          mainPrompt: parsed.mainPrompt,
-          extensionPrompts: parsed.extensionPrompts || [],
-          status: PromptSequenceStatus.CLEAN,
-          dirtyExtensions: [],
-          createdAt: new Date().toISOString(),
-        };
-      }
-      throw new Error('Failed to parse sequence response');
     }
-  };
+    throw new Error('Failed to parse sequence response');
+  }
+};
 
-  // ===========================================
-  // AUTOMATIC MOTION ANALYSIS (Gemini Vision)
-  // ===========================================
+// ===========================================
+// AUTOMATIC MOTION ANALYSIS (Gemini Vision)
+// ===========================================
 
-  /**
-   * Automatically analyze motion/movement between two video frames using Gemini Vision.
-   * Returns a concise description of direction, speed, and trajectory.
-   */
-  export const analyzeMotionBetweenFrames = async (
-    firstFrame: ImageFile,
-    lastFrame: ImageFile,
-    apiKey?: string
-  ): Promise<string> => {
-    console.log('[MotionAnalysis] Analyzing motion between frames...');
+/**
+ * Automatically analyze motion/movement between two video frames using Gemini Vision.
+ * Returns a concise description of direction, speed, and trajectory.
+ */
+export const analyzeMotionBetweenFrames = async (
+  firstFrame: ImageFile,
+  lastFrame: ImageFile,
+  apiKey?: string
+): Promise<string> => {
+  console.log('[MotionAnalysis] Analyzing motion between frames...');
 
-    const systemPrompt = `You are a video continuity expert. Analyze the motion/movement between these two video frames (first frame and last frame of an 8-second clip).
+  const systemPrompt = `You are a video continuity expert. Analyze the motion/movement between these two video frames (first frame and last frame of an 8-second clip).
 
 Describe in 2-3 sentences:
 1. The DIRECTION of movement (left-to-right, upward, toward camera, etc.)
@@ -790,75 +812,75 @@ Describe in 2-3 sentences:
 
 Be specific and concise. Use cinematic terminology. Respond in the same language as any visible text, or French by default.`;
 
-    try {
-      // Compress images if needed to reduce payload
-      let firstBase64 = firstFrame.base64;
-      let lastBase64 = lastFrame.base64;
+  try {
+    // Compress images if needed to reduce payload
+    let firstBase64 = firstFrame.base64;
+    let lastBase64 = lastFrame.base64;
 
-      if (firstBase64.length > 300 * 1024) {
-        firstBase64 = await compressImageBase64(firstBase64, 512, 0.6);
-      }
-      if (lastBase64.length > 300 * 1024) {
-        lastBase64 = await compressImageBase64(lastBase64, 512, 0.6);
-      }
-
-      const response = await apiCall('/generate-content', {
-        model: MODELS.FLASH, // Use faster model for quick analysis
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: 'First frame (start of video):' },
-            { inlineData: { data: firstBase64, mimeType: 'image/jpeg' } },
-            { text: 'Last frame (end of video):' },
-            { inlineData: { data: lastBase64, mimeType: 'image/jpeg' } },
-          ]
-        }],
-        config: { systemInstruction: systemPrompt }
-      }, apiKey);
-
-      const analysis = extractText(response);
-      console.log('[MotionAnalysis] Result:', analysis);
-      return analysis;
-    } catch (error) {
-      console.error('[MotionAnalysis] Failed:', error);
-      return ''; // Return empty on error - user can still describe manually
+    if (firstBase64.length > 300 * 1024) {
+      firstBase64 = await compressImageBase64(firstBase64, 512, 0.6);
     }
-  };
+    if (lastBase64.length > 300 * 1024) {
+      lastBase64 = await compressImageBase64(lastBase64, 512, 0.6);
+    }
 
-  export const generateSequenceFromConversation = async (
-    messages: ChatMessage[],
-    dogma: Dogma | null,
-    duration: number,
-    extensionContext?: ImageFile | null,
-    motionDescription?: string | null,
-    apiKey?: string
-  ): Promise<string | { creativePrompt: string; veoOptimizedPrompt: string }> => {
+    const response = await apiCall('/generate-content', {
+      model: MODELS.FLASH, // Use faster model for quick analysis
+      contents: [{
+        role: 'user',
+        parts: [
+          { text: 'First frame (start of video):' },
+          { inlineData: { data: firstBase64, mimeType: 'image/jpeg' } },
+          { text: 'Last frame (end of video):' },
+          { inlineData: { data: lastBase64, mimeType: 'image/jpeg' } },
+        ]
+      }],
+      config: { systemInstruction: systemPrompt }
+    }, apiKey);
 
-    // Build context instruction based on whether this is an extension
-    let contextInstruction = '';
-    if (extensionContext) {
-      contextInstruction = `User wants to EXTEND a video. Last frame provided as visual anchor.`;
-      if (motionDescription) {
-        contextInstruction += `\nCONTINUITY CONTEXT (from video analysis): "${motionDescription}"
+    const analysis = extractText(response);
+    console.log('[MotionAnalysis] Result:', analysis);
+    return analysis;
+  } catch (error) {
+    console.error('[MotionAnalysis] Failed:', error);
+    return ''; // Return empty on error - user can still describe manually
+  }
+};
+
+export const generateSequenceFromConversation = async (
+  messages: ChatMessage[],
+  dogma: Dogma | null,
+  duration: number,
+  extensionContext?: ImageFile | null,
+  motionDescription?: string | null,
+  apiKey?: string
+): Promise<string | { creativePrompt: string; veoOptimizedPrompt: string }> => {
+
+  // Build context instruction based on whether this is an extension
+  let contextInstruction = '';
+  if (extensionContext) {
+    contextInstruction = `User wants to EXTEND a video. Last frame provided as visual anchor.`;
+    if (motionDescription) {
+      contextInstruction += `\nCONTINUITY CONTEXT (from video analysis): "${motionDescription}"
 This describes the movement/direction from the original video that the extension should continue.`;
-      }
-    } else {
-      contextInstruction = `User wants a NEW video. Duration: ${duration}s.`;
     }
+  } else {
+    contextInstruction = `User wants a NEW video. Duration: ${duration}s.`;
+  }
 
-    // DEBUG: Log dogma being used
-    console.log('[DogmaDebug] generateSequenceFromConversation called with dogma:', {
-      id: dogma?.id || 'none',
-      title: dogma?.title || 'none',
-      textPreview: dogma?.text?.substring(0, 100) + '...' || 'none'
-    });
+  // DEBUG: Log dogma being used
+  console.log('[DogmaDebug] generateSequenceFromConversation called with dogma:', {
+    id: dogma?.id || 'none',
+    title: dogma?.title || 'none',
+    textPreview: dogma?.text?.substring(0, 100) + '...' || 'none'
+  });
 
-    // Count turning to enforce strict limit
-    const userMessageCount = messages.filter(m => m.role === 'user').length;
-    const isFinalTurn = userMessageCount >= 4;
+  // Count turning to enforce strict limit
+  const userMessageCount = messages.filter(m => m.role === 'user').length;
+  const isFinalTurn = userMessageCount >= 4;
 
-    // === VISUAL-FIRST: Minimal assistant, action-oriented ===
-    const systemInstruction = `You are a VISUAL-FIRST video director. Be EXTREMELY concise.
+  // === VISUAL-FIRST: Minimal assistant, action-oriented ===
+  const systemInstruction = `You are a VISUAL-FIRST video director. Be EXTREMELY concise.
 
 CRITICAL RULES:
 1. QUESTION LIMIT: MAX 4 questions total. Current turn: ${userMessageCount}/4.
@@ -883,414 +905,414 @@ CONTEXT:
 - ${contextInstruction}`;
 
 
-    // ═══════════════════════════════════════════════════════════════════
-    // SANITIZE MESSAGES: Keep only text from history, use ONE visual anchor
-    // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════
+  // SANITIZE MESSAGES: Keep only text from history, use ONE visual anchor
+  // ═══════════════════════════════════════════════════════════════════
 
-    // Find the visual anchor: prefer extensionContext, else the last image in messages
-    let visualAnchor: ImageFile | null = extensionContext || null;
-    if (!visualAnchor) {
-      // Find the most recent image in the conversation
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].image) {
-          visualAnchor = messages[i].image;
-          break;
-        }
+  // Find the visual anchor: prefer extensionContext, else the last image in messages
+  let visualAnchor: ImageFile | null = extensionContext || null;
+  if (!visualAnchor) {
+    // Find the most recent image in the conversation
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].image) {
+        visualAnchor = messages[i].image;
+        break;
       }
     }
+  }
 
-    // Build sanitized API contents: text only from history, anchor image once at the end
-    const apiContents: any[] = [];
+  // Build sanitized API contents: text only from history, anchor image once at the end
+  const apiContents: any[] = [];
 
-    // Add text-only versions of all messages (no images in history)
-    for (const msg of messages) {
-      if (msg.content) {
-        apiContents.push({
-          role: msg.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: msg.content }]
-        });
-      }
-    }
-
-    // Add visual anchor as a dedicated context message if available
-    if (visualAnchor) {
-      // Compress image to reduce payload size (Vercel has 4.5MB limit)
-      let anchorBase64 = visualAnchor.base64;
-      let anchorMimeType = visualAnchor.file.type || 'image/jpeg';
-
-      // If image is larger than 500KB, compress it
-      if (anchorBase64.length > 500 * 1024) {
-        try {
-          console.log('[GenContent] Compressing large anchor image:', `${(anchorBase64.length / 1024).toFixed(1)}KB`);
-          const compressed = await compressImageBase64(anchorBase64, 1024, 0.7);
-          anchorBase64 = compressed;
-          anchorMimeType = 'image/jpeg';
-          console.log('[GenContent] Compressed to:', `${(anchorBase64.length / 1024).toFixed(1)}KB`);
-        } catch (e) {
-          console.warn('[GenContent] Image compression failed, using original:', e);
-        }
-      }
-
+  // Add text-only versions of all messages (no images in history)
+  for (const msg of messages) {
+    if (msg.content) {
       apiContents.push({
-        role: 'user',
-        parts: [
-          { text: '[Visual Anchor - Last frame for continuity reference]' },
-          {
-            inlineData: {
-              data: anchorBase64,
-              mimeType: anchorMimeType
-            }
-          }
-        ]
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }]
       });
     }
+  }
 
-    // Log sanitized message summary for debugging
-    const totalTextLength = apiContents.reduce((sum, msg) =>
-      sum + msg.parts.reduce((s: number, p: any) => s + (p.text?.length || 0), 0), 0);
-    const hasAnchorImage = !!visualAnchor;
+  // Add visual anchor as a dedicated context message if available
+  if (visualAnchor) {
+    // Compress image to reduce payload size (Vercel has 4.5MB limit)
+    let anchorBase64 = visualAnchor.base64;
+    let anchorMimeType = visualAnchor.file.type || 'image/jpeg';
 
-    console.log('[GenContent] Sanitized messages:', {
-      totalMessages: apiContents.length,
-      textLength: totalTextLength,
-      hasVisualAnchor: hasAnchorImage,
-      anchorImageSize: visualAnchor ? `${(visualAnchor.base64.length / 1024).toFixed(1)}KB` : 'none'
-    });
-
-    const response = await apiCall('/generate-content', {
-      model: MODELS.PRO, // Ensure PRO model is used
-      contents: apiContents,
-      config: { systemInstruction }
-    }, apiKey); // P0.6: Pass Local API Key
-
-    const text = extractText(response);
-
-    try {
-      const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/);
-      const jsonStr = jsonMatch ? jsonMatch[1] : text;
-
-      if (jsonStr.trim().startsWith('{')) {
-        const parsed = JSON.parse(jsonStr);
-        if (parsed.creativePrompt && parsed.veoOptimizedPrompt) return parsed;
-      }
-    } catch (e) {
-      console.log("Parsing JSON failed, returning raw text", e);
-    }
-
-    return text;
-  };
-
-  // ===========================================
-  // IMAGE EDITING / GENERATION
-  // ===========================================
-
-  export const editImage = async (
-    images: ImageFile[],
-    prompt: string,
-    dogma: Dogma | null,
-    modelName: string = MODELS.IMAGE_FLASH,
-    apiKey?: string
-  ): Promise<ImageFile> => {
-    // Use smart upload for large images
-    const imageParts = await createImageParts(images);
-
-    const dogmaInstruction = dogma?.text ? `\nDogma: ${dogma.text}` : '';
-    const finalPrompt = `Task: Edit image based on prompt. @image1 is target. Prompt: ${prompt}${dogmaInstruction}`;
-
-    const response = await apiCall('/generate-content', {
-      model: modelName,
-      contents: {
-        parts: [...imageParts, { text: finalPrompt }]
-      }
-    }, apiKey);
-
-    const content = response.candidates?.[0]?.content;
-    if (!content?.parts) throw new Error('No content');
-
-    for (const part of content.parts) {
-      if (part.inlineData) {
-        const base64 = part.inlineData.data;
-        const res = await fetch(`data:image/png;base64,${base64}`);
-        const blob = await res.blob();
-        const file = new File([blob], 'edited.png', { type: 'image/png' });
-
-        // Optional: Upload to Supabase if configured
-        if (isSupabaseConfigured()) {
-          try {
-            const supabaseUrl = await uploadImageToSupabase(blob, 'edited-image.png');
-            console.log('Edited image uploaded to Supabase:', supabaseUrl);
-          } catch (uploadError) {
-            console.warn('Failed to upload image to Supabase:', uploadError);
-          }
-        }
-
-        return { file, base64 };
-      }
-    }
-    throw new Error('No image in response');
-  };
-
-  export const generateImageFromText = async (prompt: string, dogma: Dogma | null, apiKey?: string): Promise<ImageFile> => {
-    const dogmaInstruction = dogma?.text ? `\nStyle: ${dogma.text}` : '';
-
-    const response = await apiCall('/generate-content', {
-      model: MODELS.IMAGE_PRO,
-      contents: { parts: [{ text: prompt + dogmaInstruction }] }
-    }, apiKey);
-
-    const content = response.candidates?.[0]?.content;
-    for (const part of content.parts) {
-      if (part.inlineData) {
-        const base64 = part.inlineData.data;
-        const res = await fetch(`data:image/png;base64,${base64}`);
-        const blob = await res.blob();
-
-        // Optional: Upload to Supabase if configured
-        if (isSupabaseConfigured()) {
-          try {
-            const supabaseUrl = await uploadImageToSupabase(blob, 'generated-image.png');
-            console.log('Generated image uploaded to Supabase:', supabaseUrl);
-          } catch (uploadError) {
-            console.warn('Failed to upload image to Supabase:', uploadError);
-          }
-        }
-
-        return { file: new File([blob], 'gen.png', { type: 'image/png' }), base64 };
-      }
-    }
-    throw new Error('No image generated');
-  };
-
-  export const generateCharacterImage = async (
-    prompt: string,
-    contextImages: { file: File; base64: string }[],
-    styleImage: ImageFile | null,
-    apiKey?: string
-  ): Promise<ImageFile> => {
-    const parts: any[] = [];
-
-    // Use smart upload for large context images
-    for (const img of contextImages) {
-      const imageFile: ImageFile = { file: img.file, base64: img.base64 };
-      const imagePart = await createImagePart(imageFile);
-      parts.push(imagePart);
-    }
-
-    // Use smart upload for style image if provided
-    if (styleImage) {
-      const stylePart = await createImagePart(styleImage);
-      parts.push(stylePart);
-    }
-
-    parts.push({ text: prompt });
-
-    const response = await apiCall('/generate-content', {
-      model: MODELS.IMAGE_PRO,
-      contents: { parts }
-    }, apiKey);
-
-    const content = response.candidates?.[0]?.content;
-    for (const part of content.parts) {
-      if (part.inlineData) {
-        const base64 = part.inlineData.data;
-        const res = await fetch(`data:image/png;base64,${base64}`);
-        const blob = await res.blob();
-
-        // Optional: Upload to Supabase if configured
-        if (isSupabaseConfigured()) {
-          try {
-            const supabaseUrl = await uploadImageToSupabase(blob, 'character-image.png');
-            console.log('Character image uploaded to Supabase:', supabaseUrl);
-          } catch (uploadError) {
-            console.warn('Failed to upload image to Supabase:', uploadError);
-          }
-        }
-
-        return { file: new File([blob], 'char.png', { type: 'image/png' }), base64 };
-      }
-    }
-    throw new Error('No image generated');
-  };
-
-  // ===========================================
-  // SPEECH (TTS)
-  // ===========================================
-
-  export const generateSpeech = async (text: string, voiceName: string, apiKey?: string): Promise<string> => {
-    const response = await apiCall('/generate-content', {
-      model: MODELS.TTS,
-      contents: { parts: [{ text }] },
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName } }
-        }
-      }
-    }, apiKey);
-
-    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!audioData) throw new Error("No audio data received");
-    return audioData;
-  };
-
-  // ===========================================
-  // STORYBOARD GENERATION
-  // ===========================================
-
-  export const generateStoryboard = async (
-    prompt: string,
-    dogma: Dogma | null,
-    referenceImages: ImageFile[],
-    startFrame: ImageFile | null,
-    endFrame: ImageFile | null,
-    apiKey?: string
-  ): Promise<Storyboard> => {
-    const parts: any[] = [];
-
-    // Use smart upload for large images
-    if (startFrame) {
-      const startPart = await createImagePart(startFrame);
-      parts.push(startPart);
-      parts.push({ text: "Start Frame" });
-    }
-    if (endFrame) {
-      const endPart = await createImagePart(endFrame);
-      parts.push(endPart);
-      parts.push({ text: "End Frame" });
-    }
-    for (const img of referenceImages) {
-      const refPart = await createImagePart(img);
-      parts.push(refPart);
-    }
-
-    const systemPrompt = `Create 5-keyframe storyboard JSON for: "${prompt}". Dogma: ${dogma?.text}. Return JSON { "prompt": "", "keyframes": [{ "timestamp": "", "description": "", "imageBase64": "PLACEHOLDER" }] }`;
-    parts.push({ text: systemPrompt });
-
-    const response = await apiCall('/generate-content', {
-      model: MODELS.PRO,
-      contents: { parts },
-      config: { responseMimeType: 'application/json' }
-    }, apiKey);
-
-    const text = extractText(response);
-    const storyboard = JSON.parse(text);
-
-    // Parallel generation for images
-    const imagePromises = storyboard.keyframes.map(async (kf: any) => {
+    // If image is larger than 500KB, compress it
+    if (anchorBase64.length > 500 * 1024) {
       try {
-        const img = await generateImageFromText(kf.description, dogma, apiKey);
-        return { ...kf, imageBase64: img.base64 };
+        console.log('[GenContent] Compressing large anchor image:', `${(anchorBase64.length / 1024).toFixed(1)}KB`);
+        const compressed = await compressImageBase64(anchorBase64, 1024, 0.7);
+        anchorBase64 = compressed;
+        anchorMimeType = 'image/jpeg';
+        console.log('[GenContent] Compressed to:', `${(anchorBase64.length / 1024).toFixed(1)}KB`);
       } catch (e) {
-        return kf;
+        console.warn('[GenContent] Image compression failed, using original:', e);
       }
+    }
+
+    apiContents.push({
+      role: 'user',
+      parts: [
+        { text: '[Visual Anchor - Last frame for continuity reference]' },
+        {
+          inlineData: {
+            data: anchorBase64,
+            mimeType: anchorMimeType
+          }
+        }
+      ]
     });
+  }
 
-    storyboard.keyframes = await Promise.all(imagePromises);
-    return storyboard;
-  };
+  // Log sanitized message summary for debugging
+  const totalTextLength = apiContents.reduce((sum, msg) =>
+    sum + msg.parts.reduce((s: number, p: any) => s + (p.text?.length || 0), 0), 0);
+  const hasAnchorImage = !!visualAnchor;
 
-  // ===========================================
-  // UTILITIES
-  // ===========================================
+  console.log('[GenContent] Sanitized messages:', {
+    totalMessages: apiContents.length,
+    textLength: totalTextLength,
+    hasVisualAnchor: hasAnchorImage,
+    anchorImageSize: visualAnchor ? `${(visualAnchor.base64.length / 1024).toFixed(1)}KB` : 'none'
+  });
 
-  export const toggleTranslateText = async (text: string, apiKey?: string): Promise<string> => {
-    const response = await apiCall('/generate-content', {
-      model: MODELS.FLASH,
-      contents: `Translate to English if French, or French if English: "${text}"`
-    }, apiKey);
-    const result = extractText(response);
-    return result.trim();
-  };
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO, // Ensure PRO model is used
+    contents: apiContents,
+    config: { systemInstruction }
+  }, apiKey); // P0.6: Pass Local API Key
 
-  export const regenerateSinglePrompt = async (
-    params: RegeneratePromptParams & {
-      dogma: Dogma | null;
-      promptBefore?: string;
-      promptAfter?: string;
-    },
-    apiKey?: string
-  ): Promise<string> => {
-    const { instruction, promptToRevise, dogma, promptBefore, promptAfter } = params;
+  const text = extractText(response);
 
-    // DEBUG: Log which dogma is being used
-    console.log('[DogmaDebug] regenerateSinglePrompt called with dogma:', {
-      id: dogma?.id || 'none',
-      title: dogma?.title || 'none',
-      textPreview: dogma?.text?.substring(0, 100) + '...' || 'none'
-    });
+  try {
+    const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : text;
 
-    const systemInstruction = `Revise ONE prompt in a sequence. Dogma: ${dogma?.text}.
+    if (jsonStr.trim().startsWith('{')) {
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.creativePrompt && parsed.veoOptimizedPrompt) return parsed;
+    }
+  } catch (e) {
+    console.log("Parsing JSON failed, returning raw text", e);
+  }
+
+  return text;
+};
+
+// ===========================================
+// IMAGE EDITING / GENERATION
+// ===========================================
+
+export const editImage = async (
+  images: ImageFile[],
+  prompt: string,
+  dogma: Dogma | null,
+  modelName: string = MODELS.IMAGE_FLASH,
+  apiKey?: string
+): Promise<ImageFile> => {
+  // Use smart upload for large images
+  const imageParts = await createImageParts(images);
+
+  const dogmaInstruction = dogma?.text ? `\nDogma: ${dogma.text}` : '';
+  const finalPrompt = `Task: Edit image based on prompt. @image1 is target. Prompt: ${prompt}${dogmaInstruction}`;
+
+  const response = await apiCall('/generate-content', {
+    model: modelName,
+    contents: {
+      parts: [...imageParts, { text: finalPrompt }]
+    }
+  }, apiKey);
+
+  const content = response.candidates?.[0]?.content;
+  if (!content?.parts) throw new Error('No content');
+
+  for (const part of content.parts) {
+    if (part.inlineData) {
+      const base64 = part.inlineData.data;
+      const res = await fetch(`data:image/png;base64,${base64}`);
+      const blob = await res.blob();
+      const file = new File([blob], 'edited.png', { type: 'image/png' });
+
+      // Optional: Upload to Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const supabaseUrl = await uploadImageToSupabase(blob, 'edited-image.png');
+          console.log('Edited image uploaded to Supabase:', supabaseUrl);
+        } catch (uploadError) {
+          console.warn('Failed to upload image to Supabase:', uploadError);
+        }
+      }
+
+      return { file, base64 };
+    }
+  }
+  throw new Error('No image in response');
+};
+
+export const generateImageFromText = async (prompt: string, dogma: Dogma | null, apiKey?: string): Promise<ImageFile> => {
+  const dogmaInstruction = dogma?.text ? `\nStyle: ${dogma.text}` : '';
+
+  const response = await apiCall('/generate-content', {
+    model: MODELS.IMAGE_PRO,
+    contents: { parts: [{ text: prompt + dogmaInstruction }] }
+  }, apiKey);
+
+  const content = response.candidates?.[0]?.content;
+  for (const part of content.parts) {
+    if (part.inlineData) {
+      const base64 = part.inlineData.data;
+      const res = await fetch(`data:image/png;base64,${base64}`);
+      const blob = await res.blob();
+
+      // Optional: Upload to Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const supabaseUrl = await uploadImageToSupabase(blob, 'generated-image.png');
+          console.log('Generated image uploaded to Supabase:', supabaseUrl);
+        } catch (uploadError) {
+          console.warn('Failed to upload image to Supabase:', uploadError);
+        }
+      }
+
+      return { file: new File([blob], 'gen.png', { type: 'image/png' }), base64 };
+    }
+  }
+  throw new Error('No image generated');
+};
+
+export const generateCharacterImage = async (
+  prompt: string,
+  contextImages: { file: File; base64: string }[],
+  styleImage: ImageFile | null,
+  apiKey?: string
+): Promise<ImageFile> => {
+  const parts: any[] = [];
+
+  // Use smart upload for large context images
+  for (const img of contextImages) {
+    const imageFile: ImageFile = { file: img.file, base64: img.base64 };
+    const imagePart = await createImagePart(imageFile);
+    parts.push(imagePart);
+  }
+
+  // Use smart upload for style image if provided
+  if (styleImage) {
+    const stylePart = await createImagePart(styleImage);
+    parts.push(stylePart);
+  }
+
+  parts.push({ text: prompt });
+
+  const response = await apiCall('/generate-content', {
+    model: MODELS.IMAGE_PRO,
+    contents: { parts }
+  }, apiKey);
+
+  const content = response.candidates?.[0]?.content;
+  for (const part of content.parts) {
+    if (part.inlineData) {
+      const base64 = part.inlineData.data;
+      const res = await fetch(`data:image/png;base64,${base64}`);
+      const blob = await res.blob();
+
+      // Optional: Upload to Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const supabaseUrl = await uploadImageToSupabase(blob, 'character-image.png');
+          console.log('Character image uploaded to Supabase:', supabaseUrl);
+        } catch (uploadError) {
+          console.warn('Failed to upload image to Supabase:', uploadError);
+        }
+      }
+
+      return { file: new File([blob], 'char.png', { type: 'image/png' }), base64 };
+    }
+  }
+  throw new Error('No image generated');
+};
+
+// ===========================================
+// SPEECH (TTS)
+// ===========================================
+
+export const generateSpeech = async (text: string, voiceName: string, apiKey?: string): Promise<string> => {
+  const response = await apiCall('/generate-content', {
+    model: MODELS.TTS,
+    contents: { parts: [{ text }] },
+    config: {
+      responseModalities: ['AUDIO'],
+      speechConfig: {
+        voiceConfig: { prebuiltVoiceConfig: { voiceName } }
+      }
+    }
+  }, apiKey);
+
+  const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!audioData) throw new Error("No audio data received");
+  return audioData;
+};
+
+// ===========================================
+// STORYBOARD GENERATION
+// ===========================================
+
+export const generateStoryboard = async (
+  prompt: string,
+  dogma: Dogma | null,
+  referenceImages: ImageFile[],
+  startFrame: ImageFile | null,
+  endFrame: ImageFile | null,
+  apiKey?: string
+): Promise<Storyboard> => {
+  const parts: any[] = [];
+
+  // Use smart upload for large images
+  if (startFrame) {
+    const startPart = await createImagePart(startFrame);
+    parts.push(startPart);
+    parts.push({ text: "Start Frame" });
+  }
+  if (endFrame) {
+    const endPart = await createImagePart(endFrame);
+    parts.push(endPart);
+    parts.push({ text: "End Frame" });
+  }
+  for (const img of referenceImages) {
+    const refPart = await createImagePart(img);
+    parts.push(refPart);
+  }
+
+  const systemPrompt = `Create 5-keyframe storyboard JSON for: "${prompt}". Dogma: ${dogma?.text}. Return JSON { "prompt": "", "keyframes": [{ "timestamp": "", "description": "", "imageBase64": "PLACEHOLDER" }] }`;
+  parts.push({ text: systemPrompt });
+
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO,
+    contents: { parts },
+    config: { responseMimeType: 'application/json' }
+  }, apiKey);
+
+  const text = extractText(response);
+  const storyboard = JSON.parse(text);
+
+  // Parallel generation for images
+  const imagePromises = storyboard.keyframes.map(async (kf: any) => {
+    try {
+      const img = await generateImageFromText(kf.description, dogma, apiKey);
+      return { ...kf, imageBase64: img.base64 };
+    } catch (e) {
+      return kf;
+    }
+  });
+
+  storyboard.keyframes = await Promise.all(imagePromises);
+  return storyboard;
+};
+
+// ===========================================
+// UTILITIES
+// ===========================================
+
+export const toggleTranslateText = async (text: string, apiKey?: string): Promise<string> => {
+  const response = await apiCall('/generate-content', {
+    model: MODELS.FLASH,
+    contents: `Translate to English if French, or French if English: "${text}"`
+  }, apiKey);
+  const result = extractText(response);
+  return result.trim();
+};
+
+export const regenerateSinglePrompt = async (
+  params: RegeneratePromptParams & {
+    dogma: Dogma | null;
+    promptBefore?: string;
+    promptAfter?: string;
+  },
+  apiKey?: string
+): Promise<string> => {
+  const { instruction, promptToRevise, dogma, promptBefore, promptAfter } = params;
+
+  // DEBUG: Log which dogma is being used
+  console.log('[DogmaDebug] regenerateSinglePrompt called with dogma:', {
+    id: dogma?.id || 'none',
+    title: dogma?.title || 'none',
+    textPreview: dogma?.text?.substring(0, 100) + '...' || 'none'
+  });
+
+  const systemInstruction = `Revise ONE prompt in a sequence. Dogma: ${dogma?.text}.
   Context: Before: "${promptBefore}", After: "${promptAfter}".
   Target: "${promptToRevise}". User Change: "${instruction}".
   Output JSON: { "revisedPrompt": "..." }`;
 
-    const response = await apiCall('/generate-content', {
-      model: MODELS.PRO,
-      contents: { parts: [{ text: "Revise." }] },
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json'
-      }
-    });
-    const text = extractText(response);
-    const res = JSON.parse(text);
-    return res.revisedPrompt;
-  };
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO,
+    contents: { parts: [{ text: "Revise." }] },
+    config: {
+      systemInstruction,
+      responseMimeType: 'application/json'
+    }
+  });
+  const text = extractText(response);
+  const res = JSON.parse(text);
+  return res.revisedPrompt;
+};
 
-  export const reviseFollowingPrompts = async (
-    params: ReviseFollowingPromptsParams,
-    apiKey?: string
-  ): Promise<string[]> => {
-    const { dogma, promptBefore, editedPrompt, promptsToRevise } = params;
-    const systemInstruction = `Continuity Editor. Dogma: ${dogma?.text}.
+export const reviseFollowingPrompts = async (
+  params: ReviseFollowingPromptsParams,
+  apiKey?: string
+): Promise<string[]> => {
+  const { dogma, promptBefore, editedPrompt, promptsToRevise } = params;
+  const systemInstruction = `Continuity Editor. Dogma: ${dogma?.text}.
   Before: ${promptBefore}. EDITED: ${editedPrompt}.
   Old Next Prompts: ${JSON.stringify(promptsToRevise)}.
   Rewrite Next Prompts for continuity. Output JSON: { "revisedPrompts": ["..."] }`;
 
-    const response = await apiCall('/generate-content', {
-      model: MODELS.PRO,
-      contents: { parts: [{ text: "Fix continuity." }] },
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json'
-      }
-    });
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO,
+    contents: { parts: [{ text: "Fix continuity." }] },
+    config: {
+      systemInstruction,
+      responseMimeType: 'application/json'
+    }
+  });
 
-    const text = extractText(response);
-    const res = JSON.parse(text);
-    return res.revisedPrompts || promptsToRevise;
-  };
+  const text = extractText(response);
+  const res = JSON.parse(text);
+  return res.revisedPrompts || promptsToRevise;
+};
 
-  export const getRevisionAssistant = async () => {
-    return null;
-  }
+export const getRevisionAssistant = async () => {
+  return null;
+}
 
-  export const getRevisionAssistantResponse = async (params: any) => {
-    // DEBUG: Log which dogma is being used for revision
-    console.log('[DogmaDebug] getRevisionAssistantResponse called with dogma:', {
-      id: params.dogma?.id || 'none',
-      title: params.dogma?.title || 'none',
-      textPreview: params.dogma?.text?.substring(0, 100) + '...' || 'none'
-    });
+export const getRevisionAssistantResponse = async (params: any) => {
+  // DEBUG: Log which dogma is being used for revision
+  console.log('[DogmaDebug] getRevisionAssistantResponse called with dogma:', {
+    id: params.dogma?.id || 'none',
+    title: params.dogma?.title || 'none',
+    textPreview: params.dogma?.text?.substring(0, 100) + '...' || 'none'
+  });
 
-    const res = await generateSequenceFromConversation(
-      params.messages,
-      params.dogma,
-      0,
-    );
-    if (typeof res === 'string') return res;
-    return { isFinalRevision: true, revisedPrompt: res.veoOptimizedPrompt || res.creativePrompt };
-  };
+  const res = await generateSequenceFromConversation(
+    params.messages,
+    params.dogma,
+    0,
+  );
+  if (typeof res === 'string') return res;
+  return { isFinalRevision: true, revisedPrompt: res.veoOptimizedPrompt || res.creativePrompt };
+};
 
-  // ===========================================
-  // ADVANCED FEATURES
-  // ===========================================
+// ===========================================
+// ADVANCED FEATURES
+// ===========================================
 
-  export const generateDogmaFromMedia = async (
-    mediaFile: File,
-    mediaBase64: string
-  ): Promise<Omit<Dogma, 'id'>> => {
-    const systemPrompt = `You are an expert Art Director. Analyze this media (image or video frame) and extract its "Visual DNA" to create a Dogma for our video generation studio.
+export const generateDogmaFromMedia = async (
+  mediaFile: File,
+  mediaBase64: string
+): Promise<Omit<Dogma, 'id'>> => {
+  const systemPrompt = `You are an expert Art Director. Analyze this media (image or video frame) and extract its "Visual DNA" to create a Dogma for our video generation studio.
   Identify:
   1. Visual Rules (Lighting, Color Palette, Texture, Composition).
   2. Camera Movement style.
@@ -1299,83 +1321,83 @@ CONTEXT:
   Output JSON ONLY: { "title": "Name of Style", "text": "Detailed markdown instructions...", "referenceImages": [] }
   For the text field, use the structure: ### RULES, ### LIGHTING, ### CAMERA, ### NEGATIVE PROMPT.`;
 
-    // Use smart upload for large media files
-    const imageFile: ImageFile = { file: mediaFile, base64: mediaBase64 };
-    const mediaPart = await createImagePart(imageFile);
+  // Use smart upload for large media files
+  const imageFile: ImageFile = { file: mediaFile, base64: mediaBase64 };
+  const mediaPart = await createImagePart(imageFile);
 
-    const response = await apiCall('/generate-content', {
-      model: MODELS.PRO,
-      contents: {
-        parts: [
-          mediaPart,
-          { text: "Extract DNA." }
-        ]
-      },
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json'
-      }
-    });
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO,
+    contents: {
+      parts: [
+        mediaPart,
+        { text: "Extract DNA." }
+      ]
+    },
+    config: {
+      systemInstruction: systemPrompt,
+      responseMimeType: 'application/json'
+    }
+  });
 
-    const text = extractText(response);
-    const res = JSON.parse(text);
-    return {
-      title: res.title || "Extracted Style",
-      text: res.text || "No description generated.",
-      referenceImages: []
-    };
+  const text = extractText(response);
+  const res = JSON.parse(text);
+  return {
+    title: res.title || "Extracted Style",
+    text: res.text || "No description generated.",
+    referenceImages: []
   };
+};
 
-  export const analyzeVideoCompliance = async (
-    frameBase64: string,
-    prompt: string,
-    dogma: Dogma | null
-  ): Promise<ComplianceResult> => {
-    const dogmaText = dogma?.text || "Standard Cinematic Rules";
-    const systemPrompt = `You are the "Critic Agent". Your job is to compare the generated video frame against the User Prompt and the active Dogma.
+export const analyzeVideoCompliance = async (
+  frameBase64: string,
+  prompt: string,
+  dogma: Dogma | null
+): Promise<ComplianceResult> => {
+  const dogmaText = dogma?.text || "Standard Cinematic Rules";
+  const systemPrompt = `You are the "Critic Agent". Your job is to compare the generated video frame against the User Prompt and the active Dogma.
     Dogma: ${dogmaText}
     Prompt: ${prompt}
 
     Analyze the image. Does it respect the lighting, style, and content requested?
     Output JSON: { "score": number (0-100), "critique": "Short constructive critique (max 2 sentences).", "revisedPrompt": "An improved version of the prompt to fix the issues (optional)." }`;
 
-    // Create a dummy ImageFile for smart upload handling
-    const estimatedSize = frameBase64.length * 0.75;
-    let imagePart: any;
+  // Create a dummy ImageFile for smart upload handling
+  const estimatedSize = frameBase64.length * 0.75;
+  let imagePart: any;
 
-    if (estimatedSize > LARGE_FILE_THRESHOLD) {
-      // Large frame: Upload to Google Files API first
-      console.log(`[SmartUpload] Frame is large (${(estimatedSize / 1024 / 1024).toFixed(2)}MB), using Google Files API`);
-      const response = await fetch(`data:image/jpeg;base64,${frameBase64}`);
-      const blob = await response.blob();
-      const uploadResult = await uploadToGoogleFiles(blob, `frame-${Date.now()}.jpg`);
-      imagePart = {
-        fileData: {
-          fileUri: uploadResult.fileUri,
-          mimeType: 'image/jpeg',
-        }
-      };
-    } else {
-      // Small frame: Use inline base64
-      imagePart = {
-        inlineData: { data: frameBase64, mimeType: 'image/jpeg' }
-      };
-    }
-
-    const response = await apiCall('/generate-content', {
-      model: MODELS.PRO,
-      contents: {
-        parts: [
-          imagePart,
-          { text: "Critique this." }
-        ]
-      },
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json'
+  if (estimatedSize > LARGE_FILE_THRESHOLD) {
+    // Large frame: Upload to Google Files API first
+    console.log(`[SmartUpload] Frame is large (${(estimatedSize / 1024 / 1024).toFixed(2)}MB), using Google Files API`);
+    const response = await fetch(`data:image/jpeg;base64,${frameBase64}`);
+    const blob = await response.blob();
+    const uploadResult = await uploadToGoogleFiles(blob, `frame-${Date.now()}.jpg`);
+    imagePart = {
+      fileData: {
+        fileUri: uploadResult.fileUri,
+        mimeType: 'image/jpeg',
       }
-    });
+    };
+  } else {
+    // Small frame: Use inline base64
+    imagePart = {
+      inlineData: { data: frameBase64, mimeType: 'image/jpeg' }
+    };
+  }
 
-    const text = extractText(response);
-    return JSON.parse(text);
-  };
+  const response = await apiCall('/generate-content', {
+    model: MODELS.PRO,
+    contents: {
+      parts: [
+        imagePart,
+        { text: "Critique this." }
+      ]
+    },
+    config: {
+      systemInstruction: systemPrompt,
+      responseMimeType: 'application/json'
+    }
+  });
+
+  const text = extractText(response);
+  return JSON.parse(text);
+};
