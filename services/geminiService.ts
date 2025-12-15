@@ -106,9 +106,18 @@ export const setRuntimeApiKey = (key: string | null) => {
   if (key) {
     runtimeApiKey = key.trim();
     console.log('[GeminiService] Runtime API key set, length:', runtimeApiKey.length);
+    // Sync to sessionStorage for nanoService (which reads from there)
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem('gemini_api_key', runtimeApiKey);
+      console.log('[GeminiService] API key synced to sessionStorage for nanoService');
+    }
   } else {
     runtimeApiKey = null;
     console.log('[GeminiService] Runtime API key cleared');
+    // Clear from sessionStorage too
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem('gemini_api_key');
+    }
   }
 };
 
