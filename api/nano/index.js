@@ -491,6 +491,6 @@ export default {
     _isMock: USE_MOCK_PROVIDER,
     _models: {
         nanoBanana: NANO_FAST_MODEL,
-        nanoBananaPro: NANO_BANANA_PRO_MODEL,
+        nanoBananaPro: NANO_PRO_MODEL,
     },
 };
