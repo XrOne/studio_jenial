@@ -5,10 +5,10 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { KeyIcon, Trash2Icon, ShieldCheckIcon, ExternalLinkIcon } from './icons';
-import { setLocalApiKey, clearLocalApiKey } from '../services/geminiService';
+// Removed storage imports for Strict BYOK
 
 interface ApiKeyDialogProps {
-  onContinue: () => void;
+  onContinue: (key: string) => void;
   hasCustomKey: boolean;
   providerToken?: string | null;
   errorMessage?: string; // Error message from parent (e.g., "Invalid key", "Key missing")
@@ -69,23 +69,23 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
     if (tokenToSave) window.localStorage.setItem('vertex_token', tokenToSave.trim());
 
     if (trimmedKey && validateKey(trimmedKey)) {
-      setLocalApiKey(trimmedKey); // Use service function instead of direct localStorage
-      onContinue();
+      // BYOK Strict: Pass key to parent (React State), no storage
+      onContinue(trimmedKey);
     } else if (hasCustomKey && !trimmedKey) {
-      // Allow saving just Vertex config if Gemini key is already there
-      onContinue();
+      // Allow continuing with existing key
+      onContinue('');
     }
   };
 
   const handleRemove = () => {
-    clearLocalApiKey(); // Use service function
+    // BYOK Strict: Signal removal to parent (clears React State)
     window.localStorage.removeItem('vertex_project_id');
     window.localStorage.removeItem('vertex_location');
     window.localStorage.removeItem('vertex_token');
     setApiKeyInput('');
     setVertexProjectId('');
     setVertexToken('');
-    // Don't call onContinue - force user to enter a new key
+    onContinue(''); // Signal empty key to parent
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -117,7 +117,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
             100% Private & Secure
           </h3>
           <ul className="text-indigo-200/70 text-xs leading-relaxed space-y-1">
-            <li>✓ Key stored <strong>only in your browser</strong> (localStorage)</li>
+            <li>✓ Key stored <strong>only in your browser</strong> (Memory/Session only)</li>
             <li>✓ Never sent to our servers or database</li>
             <li>✓ Used directly with Google's API</li>
             <li>✓ You control your own usage & billing</li>
@@ -278,7 +278,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
 
         {hasCustomKey && (
           <button
-            onClick={onContinue}
+            onClick={() => onContinue('')}
             className="mt-4 text-gray-500 hover:text-gray-300 text-xs hover:underline transition-colors"
           >
             Continue with current key →

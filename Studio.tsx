@@ -35,10 +35,7 @@ import { useSessionPersistence } from './hooks/useSessionPersistence'; // New //
 import {
   generateVideo,
   reviseFollowingPrompts,
-  getApiKey,
-  hasCustomApiKey,
   fetchGeminiConfig,
-  getLocalApiKey,
   ApiError,
   uploadToGoogleFiles,
 } from './services/geminiService';
@@ -1310,13 +1307,11 @@ const Studio: React.FC = () => {
     handleContinueFromFrame(newImage);
   };
 
-  const handleApiKeyContinue = () => {
-    const hasKey = hasCustomApiKey();
-    setHasCustomKey(hasKey);
-    // Only close dialog if key is present
-    if (hasKey) {
-      setShowApiKeyDialog(false);
-    }
+  const handleApiKeyContinue = (key: string) => {
+    const clean = key.trim();
+    setApiKey(clean || null);
+    setHasCustomKey(!!clean);
+    setShowApiKeyDialog(!clean);
   };
 
   const handleSaveShot = (thumbnailBase64: string) => {
