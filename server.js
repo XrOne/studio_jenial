@@ -144,6 +144,32 @@ app.get('/', (req, res) => {
   });
 });
 
+// ============================================================================
+// 0. HEALTH & CONFIG (CRITICAL: Must be first)
+// ============================================================================
+app.get('/api/config', (req, res) => {
+  // Ultra-safe endpoint: No external deps, just env check
+  try {
+    const hasServerKey = !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length >= 20);
+    // Explicit JSON response - avoid circular refs from accidental objects
+    res.json({
+      status: 'ok',
+      hasServerKey: hasServerKey,
+      mode: hasServerKey ? 'server-managed' : 'BYOK',
+      requiresUserKey: !hasServerKey,
+      timestamp: Date.now()
+    });
+  } catch (err) {
+    // Should never happen, but just in case
+    console.error('[Config] Critical error:', err);
+    res.status(500).json({ error: 'Config failed', details: err.message });
+  }
+});
+
+// ============================================================================
+// 1. SERVICES & HANDLERS
+// ============================================================================
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   const hasServerKey = !!process.env.GEMINI_API_KEY;
