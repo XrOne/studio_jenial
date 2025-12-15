@@ -80,7 +80,10 @@ interface PromptSequenceAssistantProps {
   characters: Character[];
   onMentionedCharactersChange: (characters: Character[]) => void;
   motionDescription?: string | null; // Continuity context from modal
+  onProvisionalSequence?: (prompt: string) => void; // P1: Auto-trigger keyframe
 }
+
+
 
 type AssistantResult = {
   creativePrompt: string;
@@ -167,6 +170,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   characters,
   onMentionedCharactersChange,
   motionDescription,
+  onProvisionalSequence,
 }) => {
   // --- Merged State from PromptForm ---
   const [prompt, setPrompt] = useState(initialValues?.prompt ?? '');
@@ -442,6 +446,11 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         ]);
       } else if (result.creativePrompt && result.veoOptimizedPrompt) {
         setFinalResult(result as AssistantResult);
+        // P1: Auto-trigger keyframe generation
+        if (onProvisionalSequence) {
+          console.log('[Assistant] Triggering provisional sequence for keyframe generation');
+          onProvisionalSequence(result.veoOptimizedPrompt);
+        }
       }
     } catch (err) {
       // Extract error info - now includes user-friendly message from backend

@@ -22,6 +22,7 @@ export interface NanoPreviewRequest {
     dogma?: Dogma | null;
     constraints?: Record<string, unknown>;
     quality?: NanoQuality;  // pro = gemini-3-pro, fast = gemini-2.5-flash
+    target?: string;
 }
 
 export interface NanoPreviewResponse {

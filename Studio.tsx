@@ -1322,23 +1322,20 @@ const Studio: React.FC = () => {
     sequence: PromptSequence,
     isExtension: boolean,
   ) => {
-    // === RULE 3: Bind current dogma to this sequence ===
-    const boundDogma = activeDogma;
-    setSequenceBoundDogma(boundDogma);
-    console.log('[SequenceIntegrity] Bound dogma to sequence:', {
-      dogmaId: boundDogma?.id || 'none',
-      dogmaTitle: boundDogma?.title || 'none',
-    });
+    // If extension, we keep the original main prompt and just replace extensions
+    // But currently generateSequenceFromConversation returns a full object
+    // For now we trust the assistant's output
+    console.log('[Studio] Sequence generated:', sequence);
 
-    // Create scoped sequence with proper structure
-    const scopedSequence: PromptSequence = {
-      ...sequence,
-      id: sequence.id || crypto.randomUUID(),
-      dogmaId: boundDogma?.id ?? null,
-      status: PromptSequenceStatus.CLEAN,
-      dirtyExtensions: [],
-      createdAt: sequence.createdAt || new Date().toISOString(),
-    };
+    // Bind current dogma to this sequence to prevent drift
+    if (activeDogma) {
+      setSequenceBoundDogma(activeDogma);
+      sequence.dogmaId = activeDogma.id;
+    } else {
+      setSequenceBoundDogma(null);
+    }
+
+    const scopedSequence = { ...sequence };
     setPromptSequence(scopedSequence);
 
     // === IMAGE-FIRST: Auto-generate keyframes ===
@@ -1351,7 +1348,7 @@ const Studio: React.FC = () => {
         try {
           const result = await generateNanoPreview({
             textPrompt: prompt,
-            dogma: boundDogma,
+            dogma: activeDogma,
           });
           if (result.previewImage) {
             setStoryboardByIndex(prev => ({
@@ -1410,6 +1407,69 @@ const Studio: React.FC = () => {
 
     setInitialFormValues(newConfig);
     setCurrentStage(AppStage.PROMPTING);
+  };
+
+  const handleProvisionalSequence = (prompt: string) => {
+    console.log('[Studio] Provisional sequence triggering keyframe:', prompt);
+    const newSequence: PromptSequence = {
+      mainPrompt: prompt,
+      extensionPrompts: [],
+      dogmaId: activeDogma?.id,
+      dirtyExtensions: [],
+      status: PromptSequenceStatus.CLEAN,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString()
+    };
+
+    // Bind dogma
+    if (activeDogma) {
+      setSequenceBoundDogma(activeDogma);
+    }
+
+    setPromptSequence(newSequence);
+    setSequenceVideoData({});
+    setStoryboardByIndex({}); // Clear old
+    setActivePromptIndex(0);
+
+    // Trigger keyframe generation
+    // We reuse the logic from generateKeyframe which is internal to handleGenerate
+    // But we need to call generateNanoPreview manually here since generateKeyframe is not globally scoped
+
+    // Define async worker
+    const generateProvisionalKeyframe = async () => {
+      try {
+        // P0: Force quality='pro' for root provisional keyframe
+        const result = await generateNanoPreview({
+          textPrompt: prompt,
+          dogma: activeDogma,
+          quality: 'pro', // Explicitly request pro quality
+          target: 'root'
+        });
+
+        if (result.previewImage) {
+          setStoryboardByIndex(prev => ({
+            ...prev,
+            [0]: {
+              id: crypto.randomUUID(),
+              owner: 'root',
+              previewImage: result.previewImage,
+              previewPrompt: result.previewPrompt || prompt,
+              segmentIndex: 0,
+              cameraNotes: result.cameraNotes,
+              movementNotes: result.movementNotes,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }
+          }));
+          console.log('[ImageFirst] Provisional keyframe generated (pro)');
+        }
+      } catch (e) {
+        console.error('[ImageFirst] Failed to generate provisional keyframe:', e);
+        setErrorMessage('Failed to generate preview. Check settings.');
+      }
+    };
+
+    generateProvisionalKeyframe();
   };
 
   const handleSelectPromptFromSequence = (prompt: string, index: number) => {
@@ -1997,6 +2057,7 @@ const Studio: React.FC = () => {
                         characters={characters}
                         onMentionedCharactersChange={setMentionedCharacters}
                         motionDescription={assistantMotionDescription}
+                        onProvisionalSequence={handleProvisionalSequence}
                       />
                     </div>
                     <div className="col-span-1 h-full">

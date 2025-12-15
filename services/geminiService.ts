@@ -857,30 +857,34 @@ This describes the movement/direction from the original video that the extension
     textPreview: dogma?.text?.substring(0, 100) + '...' || 'none'
   });
 
+  // Count turning to enforce strict limit
+  const userMessageCount = messages.filter(m => m.role === 'user').length;
+  const isFinalTurn = userMessageCount >= 4;
+
   // === VISUAL-FIRST: Minimal assistant, action-oriented ===
   const systemInstruction = `You are a VISUAL-FIRST video director. Be EXTREMELY concise.
 
-RULES:
-- MAX 1-2 sentences response. NO long explanations.
-- Ask MAX 2 clarifying questions ONLY if critical info is missing (subject, action, style).
-- If user provides enough context, IMMEDIATELY output the JSON prompt.
-- End conversational responses with: "🎬 Generating keyframes..."
-- Detect user language and respond in same language.
+CRITICAL RULES:
+1. QUESTION LIMIT: MAX 4 questions total. Current turn: ${userMessageCount}/4.
+   ${isFinalTurn ? "THIS IS THE FINAL TURN. DO NOT ASK MORE QUESTIONS. YOU MUST OUTPUT THE JSON PROMPT NOW." : "Ask 1 short clarifying question if critical info is missing (subject, action, style)."}
+2. VISUAL-FIRST: Prioritize image generation over text.
+   - Response length: MAX 2 lines.
+   - NO "Great idea" or fluff.
+   - If User provides a "Retouch" instruction (e.g. "closer", "more light"), accept it and output JSON immediately.
 
-CONTEXT:
-- Dogma: ${dogma?.title || 'None'}${dogma?.text ? ` - ${dogma.text.substring(0, 200)}` : ''}
-- ${contextInstruction}
-
-OUTPUT FORMAT (when ready):
+3. OUTPUT FORMAT (when ready or forced):
 \`\`\`json
 {
-  "creativePrompt": "Artistic description for storyboard",
-  "veoOptimizedPrompt": "Technical VEO 3.1 prompt with camera, lighting, action"
+  "creativePrompt": "Creative Brief (2-3 lines max). Visual, compelling, setting the mood.",
+  "veoOptimizedPrompt": "Final VEO prompt (compact). Camera details, specific action, lighting. No filler."
 }
 \`\`\`
 
-Example good response: "A lone figure in rain. Cinematic noir. 🎬 Generating keyframes..."
-Example bad response: "Great idea! Let me think about this. First, we should consider the lighting..."`;
+4. Detect user language and respond in same language.
+
+CONTEXT:
+- Dogma: ${dogma?.title || 'None'}${dogma?.text ? ` - ${dogma.text.substring(0, 200)}` : ''}
+- ${contextInstruction}`;
 
 
   // ═══════════════════════════════════════════════════════════════════
