@@ -1139,6 +1139,33 @@ const Studio: React.FC = () => {
       promptLength: payload.previewPrompt.length,
     });
 
+    // Helper: Trigger background upgrade for vignettes
+    const triggerProUpgrade = async (idx: number) => {
+      if (sequenceMode === 'decoupage' || payload.target === 'root') {
+        console.log(`[NanoUpgrade] Upgrading segment ${idx} to Pro...`);
+        try {
+          const res = await generateNanoPreview({
+            textPrompt: payload.previewPrompt,
+            dogma: sequenceBoundDogma ?? activeDogma,
+            quality: 'pro',
+            target: payload.target
+          });
+          if (res.previewImage) {
+            console.log(`[NanoUpgrade] Upgrade complete for ${idx}`);
+            setStoryboardByIndex(prev => ({
+              ...prev,
+              [idx]: {
+                ...prev[idx],
+                id: crypto.randomUUID(),
+                previewImage: res.previewImage,
+                previewPrompt: res.previewPrompt || payload.previewPrompt // update prompt if refined
+              }
+            }));
+          }
+        } catch (e) { console.error('[NanoUpgrade] Failed:', e); }
+      }
+    };
+
     // Update storyboard preview
     const storyboardEntry: StoryboardPreview = {
       id: crypto.randomUUID(),
@@ -1170,6 +1197,7 @@ const Studio: React.FC = () => {
 
       setPromptSequence(updatedSequence);
       setStoryboardByIndex(prev => ({ ...prev, [0]: storyboardEntry }));
+      triggerProUpgrade(0);
 
       if (extensionsCount > 0) {
         setErrorMessage(`⚠️ Prompt root modifié. ${extensionsCount} extension(s) à régénérer.`);
@@ -1204,6 +1232,7 @@ const Studio: React.FC = () => {
 
       setPromptSequence(updatedSequence);
       setStoryboardByIndex(prev => ({ ...prev, [payload.segmentIndex!]: storyboardEntry }));
+      triggerProUpgrade(payload.segmentIndex!);
 
     } else if (payload.target === 'character') {
       // === CHARACTER: Update character asset (no dirty logic) ===
