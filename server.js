@@ -158,75 +158,70 @@ app.get('/api/health', (req, res) => {
 });
 
 // 1. General Content Generation (Text, Images, etc.)
-// 1. General Content Generation (Text, Images, etc.)
 app.post('/api/generate-content', async (req, res) => {
+  // Safe JSON stringify that handles circular refs
+  const safeStringify = (obj, space = 0) => {
+    const seen = new WeakSet();
+    return JSON.stringify(obj, (key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) return '[Circular]';
+        seen.add(value);
+      }
+      return value;
+    }, space);
+  };
+
   try {
     const ai = getClient(req);
     const { model, contents, config } = req.body;
 
-    // Log request size for debugging large payload issues
-    const requestSize = JSON.stringify(req.body).length;
-    console.log(`[ContentAPI] Incoming request: model=${model}, size=${(requestSize / 1024).toFixed(1)}KB`);
+    // Log request info
+    console.log(`[ContentAPI] Request: model=${model}`);
 
-    // Use Gemini SDK to generate content
+    // Call Gemini SDK
     const response = await ai.models.generateContent({
       model,
       contents,
       config
     });
 
-    // Handle response safely
+    // Log response structure for debugging
+    console.log('[ContentAPI] Response keys:', Object.keys(response || {}));
+
+    // Try to send the full response
     try {
-      res.json(response);
-    } catch (serializationError) {
-      console.error('[ContentAPI] Response serialization error:', serializationError);
-      // Fallback: send just what we can
-      res.json({
-        candidates: response.candidates,
-        usageMetadata: response.usageMetadata
-      });
+      const jsonStr = safeStringify(response);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+    } catch (serErr) {
+      console.error('[ContentAPI] Serialization failed, sending minimal response');
+      // Fallback: Extract just the text
+      try {
+        const text = response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        res.json({ text, _fallback: true });
+      } catch {
+        res.json({ error: 'Response could not be serialized', _fallback: true });
+      }
     }
   } catch (error) {
-    // Enhanced error logging
-    const status = error.status || error.statusCode || 500;
-    const errorMessage = error.message || 'Unknown upstream error';
+    // Extract error info safely
+    const status = error?.status || error?.statusCode || 500;
+    const message = error?.message || 'Unknown error';
+    const code = error?.code || 'UNKNOWN';
 
-    // Log full error details including non-enumerable properties
-    const errorDetails = {};
-    Object.getOwnPropertyNames(error).forEach(key => {
-      errorDetails[key] = error[key];
-    });
+    console.error('[ContentAPI] Error:', status, message, code);
 
-    console.error('[ContentAPI] Upstream Error:', {
-      status,
-      message: errorMessage,
-      details: errorDetails
-    });
-
-    // Map error types to user-friendly codes
-    let errorCode = 'INTERNAL_ERROR';
-    let userMessage = 'Une erreur technique est survenue. Réessayez.';
-
-    if (status === 413 || errorMessage.includes('too large')) {
-      errorCode = 'PAYLOAD_TOO_LARGE';
-      userMessage = 'Le contexte est trop volumineux.';
-    } else if (status === 429 || errorMessage.includes('quota') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
-      errorCode = 'QUOTA_EXCEEDED';
-      userMessage = 'Quota API atteint.';
-    } else if (status === 401 || status === 403 || errorMessage.includes('API_KEY')) {
-      errorCode = 'UNAUTHORIZED';
-      userMessage = 'Clé API invalide.';
-    } else if (status >= 500) {
-      errorCode = 'UPSTREAM_ERROR';
-      userMessage = 'Service Google temporairement indisponible.';
+    // Always send a response
+    try {
+      res.status(status).json({
+        error: message,
+        code,
+        debug: { status }
+      });
+    } catch {
+      // Last resort: plain text
+      res.status(500).send('Internal Server Error');
     }
-
-    return res.status(status).json({
-      error: errorMessage,
-      code: errorCode,
-      message: userMessage,
-      debug: { status, code: error.code } // Add debug info for client
-    });
   }
 });
 
