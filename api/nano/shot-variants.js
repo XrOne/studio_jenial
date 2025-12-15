@@ -1,7 +1,9 @@
 /**
  * /api/nano/shot-variants - Nano Banana Pro Shot Variants endpoint
- * Wrapper for Vercel file-based routing
+ * Vercel-compatible handler wrapper
  */
-import nanoHandlers from './index.js';
+import { handleShotVariants } from './index.js';
 
-export default nanoHandlers.shotVariants;
+export default async function handler(req, res) {
+    return handleShotVariants(req, res);
+}

@@ -1,7 +1,9 @@
 /**
  * /api/nano/preview - Nano Banana Pro Preview endpoint
- * Wrapper for Vercel file-based routing
+ * Vercel-compatible handler wrapper
  */
-import nanoHandlers from './index.js';
+import { handlePreview } from './index.js';
 
-export default nanoHandlers.preview;
+export default async function handler(req, res) {
+    return handlePreview(req, res);
+}

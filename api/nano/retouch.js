@@ -1,7 +1,9 @@
 /**
  * /api/nano/retouch - Nano Banana Pro Retouch endpoint
- * Wrapper for Vercel file-based routing
+ * Vercel-compatible handler wrapper
  */
-import nanoHandlers from './index.js';
+import { handleRetouch } from './index.js';
 
-export default nanoHandlers.retouch;
+export default async function handler(req, res) {
+    return handleRetouch(req, res);
+}

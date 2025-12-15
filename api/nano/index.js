@@ -490,7 +490,7 @@ export default {
     shotVariants: handleShotVariants,
     _isMock: USE_MOCK_PROVIDER,
     _models: {
-        nanoBanana: NANO_BANANA_MODEL,
+        nanoBanana: NANO_FAST_MODEL,
         nanoBananaPro: NANO_BANANA_PRO_MODEL,
     },
 };
