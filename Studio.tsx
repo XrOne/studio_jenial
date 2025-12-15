@@ -83,6 +83,7 @@ const PromptConception: React.FC<{
   sequenceMode?: 'pending' | 'plan-sequence' | 'decoupage';
   onSelectPlanSequence?: () => void;
   onSelectDecoupage?: () => void;
+  apiKey?: string | null; // P0.6: BYOK Strict
 }> = ({
   motionDescription,
   referenceImage,
@@ -96,6 +97,7 @@ const PromptConception: React.FC<{
   sequenceMode = 'pending',
   onSelectPlanSequence,
   onSelectDecoupage,
+  apiKey,
 }) => {
     const displayImage = activeChatImage || referenceImage;
     const hasContent =
@@ -2086,6 +2088,7 @@ const Studio: React.FC = () => {
                         onMentionedCharactersChange={setMentionedCharacters}
                         motionDescription={assistantMotionDescription}
                         onProvisionalSequence={handleProvisionalSequence}
+                        apiKey={apiKey} // P0.6: Pass API Key
                       />
                     </div>
                     <div className="col-span-1 h-full">
@@ -2201,6 +2204,7 @@ const Studio: React.FC = () => {
                         />
                       ) : (
                         <PromptConception
+                          apiKey={apiKey} // P0.6: Pass local API key
                           key={resetKey} // Force remount on new project to clear assistant context
                           motionDescription={assistantMotionDescription}
                           referenceImage={assistantExtensionContext}

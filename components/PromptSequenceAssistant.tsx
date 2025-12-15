@@ -79,8 +79,11 @@ interface PromptSequenceAssistantProps {
   onCharacterInjected: () => void;
   characters: Character[];
   onMentionedCharactersChange: (characters: Character[]) => void;
+  displayMode?: 'chat' | 'context' | 'split'; // P1: UI Mode
+  showContextPanel?: boolean; // P1: Toggle context panel
   motionDescription?: string | null; // Continuity context from modal
   onProvisionalSequence?: (prompt: string) => void; // P1: Auto-trigger keyframe
+  apiKey?: string | null; // P0.6: BYOK Strict
 }
 
 
@@ -171,6 +174,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   onMentionedCharactersChange,
   motionDescription,
   onProvisionalSequence,
+  apiKey,
 }) => {
   // --- Merged State from PromptForm ---
   const [prompt, setPrompt] = useState(initialValues?.prompt ?? '');
@@ -437,6 +441,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         parseInt(duration, 10),
         extensionContext,
         motionDescription,
+        apiKey || undefined // P0.6: Pass API Key
       );
 
       if (typeof result === 'string') {

@@ -829,6 +829,7 @@ export const generateSequenceFromConversation = async (
   duration: number,
   extensionContext?: ImageFile | null,
   motionDescription?: string | null,
+  apiKey?: string
 ): Promise<string | { creativePrompt: string; veoOptimizedPrompt: string }> => {
 
   // Build context instruction based on whether this is an extension
@@ -955,10 +956,10 @@ CONTEXT:
   });
 
   const response = await apiCall('/generate-content', {
-    model: MODELS.PRO,
+    model: MODELS.PRO, // Ensure PRO model is used
     contents: apiContents,
     config: { systemInstruction }
-  });
+  }, apiKey); // P0.6: Pass Local API Key
 
   const text = extractText(response);
 
