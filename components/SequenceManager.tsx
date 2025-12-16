@@ -89,7 +89,7 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
           </button>
         </div>
       </div>
-      <div className="overflow-y-auto flex-grow pr-2 -mr-2 max-h-[calc(100vh-280px)] scrollable-panel">
+      <div className="overflow-y-auto flex-grow pr-2 -mr-2">
         <ul className="space-y-3">
           {allPrompts.map((prompt, index) => {
             const isMain = index === 0;

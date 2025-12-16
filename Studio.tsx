@@ -2127,7 +2127,7 @@ const Studio: React.FC = () => {
                         apiKey={apiKey} // P0.6: Pass API Key
                       />
                     </div>
-                    <div className="col-span-1 h-full max-h-[calc(100vh-160px)] overflow-auto">
+                    <div className="col-span-1 h-full">
                       {promptSequence ? (
                         <SequenceManager
                           sequence={promptSequence}
