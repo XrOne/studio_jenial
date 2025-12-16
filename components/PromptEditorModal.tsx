@@ -131,7 +131,7 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-xl w-full max-w-4xl h-[90vh] p-6 flex flex-col gap-4">
+      <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] p-6 flex flex-col gap-4 overflow-hidden">
         <div className="flex justify-between items-center flex-shrink-0">
           <h2 className="text-2xl font-bold text-white flex items-center gap-3">
             <PencilIcon className="w-6 h-6 text-indigo-400" />
@@ -144,19 +144,19 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-grow overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-grow overflow-hidden min-h-0">
           {/* Chat Area */}
-          <div className="flex flex-col h-full bg-gray-900/50 rounded-lg border border-gray-700">
-            <main className="flex-grow p-4 overflow-y-auto flex flex-col gap-4">
+          <div className="flex flex-col min-h-0 max-h-[50vh] lg:max-h-full bg-gray-900/50 rounded-lg border border-gray-700">
+            <main className="flex-grow p-3 overflow-y-auto flex flex-col gap-3 scrollable-panel">
               {messages.map((msg, index) => (
                 <div
                   key={index}
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'
                     }`}>
                   <div
-                    className={`max-w-[90%] p-3 rounded-2xl flex flex-col gap-2 ${msg.role === 'user'
-                      ? 'bg-indigo-600 text-white rounded-br-none'
-                      : 'bg-gray-700 text-gray-200 rounded-bl-none'
+                    className={`max-w-[85%] p-3 rounded-xl flex flex-col gap-2 ${msg.role === 'user'
+                      ? 'bg-indigo-600 text-white rounded-br-sm'
+                      : 'bg-gray-700 text-gray-200 rounded-bl-sm'
                       }`}>
                     {msg.image && (
                       <img
@@ -211,15 +211,15 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
           </div>
 
           {/* Prompt Preview Area */}
-          <div className="flex flex-col gap-2 h-full">
+          <div className="flex flex-col gap-2 min-h-0 max-h-[40vh] lg:max-h-full overflow-hidden">
             {finalPrompt ? (
               <div className="grid grid-cols-2 gap-4 flex-grow min-h-0">
                 <div className="flex flex-col gap-2 min-h-0">
                   <h3 className="text-sm font-semibold text-gray-400 flex-shrink-0">
                     Original Prompt
                   </h3>
-                  <div className="flex-grow bg-[#1f1f1f] border border-gray-600 rounded-lg p-2 min-h-0">
-                    <pre className="w-full h-full text-gray-400 text-xs p-2 overflow-auto whitespace-pre-wrap break-all font-mono">
+                  <div className="flex-grow bg-[#1f1f1f] border border-gray-600 rounded-lg p-2 min-h-0 overflow-hidden">
+                    <pre className="w-full h-full text-gray-400 text-xs p-2 overflow-y-auto whitespace-pre-wrap break-words font-mono scrollable-panel">
                       {originalPrompt}
                     </pre>
                   </div>
@@ -228,8 +228,8 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
                   <h3 className="text-sm font-semibold text-green-400 flex-shrink-0">
                     Revised Prompt
                   </h3>
-                  <div className="flex-grow bg-[#1f1f1f] border border-green-600/50 rounded-lg p-2 min-h-0">
-                    <pre className="w-full h-full text-indigo-300 text-xs p-2 overflow-auto whitespace-pre-wrap break-all font-mono">
+                  <div className="flex-grow bg-[#1f1f1f] border border-green-600/50 rounded-lg p-2 min-h-0 overflow-hidden">
+                    <pre className="w-full h-full text-indigo-300 text-xs p-2 overflow-y-auto whitespace-pre-wrap break-words font-mono scrollable-panel">
                       {finalPrompt}
                     </pre>
                   </div>
@@ -240,8 +240,8 @@ const PromptEditorModal: React.FC<PromptEditorModalProps> = ({
                 <h3 className="text-sm font-semibold text-gray-400 flex-shrink-0">
                   Original Prompt
                 </h3>
-                <div className="flex-grow bg-[#1f1f1f] border border-gray-600 rounded-lg p-2 min-h-0">
-                  <pre className="w-full h-full text-indigo-300 text-xs p-2 overflow-auto whitespace-pre-wrap break-all font-mono">
+                <div className="flex-grow bg-[#1f1f1f] border border-gray-600 rounded-lg p-2 min-h-0 overflow-hidden">
+                  <pre className="w-full h-full text-indigo-300 text-xs p-2 overflow-y-auto whitespace-pre-wrap break-words font-mono scrollable-panel">
                     {originalPrompt}
                   </pre>
                 </div>
