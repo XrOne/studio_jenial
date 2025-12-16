@@ -35,10 +35,11 @@ export default async function handler(req, res) {
 
 | Fichier | Changement |
 |---------|------------|
-| `api/nano/index.js` | `NANO_BANANA_MODEL` → `NANO_FAST_MODEL` |
+| `api/nano/index.js` | `NANO_BANANA_MODEL` → `NANO_FAST_MODEL`, `NANO_BANANA_PRO_MODEL` → `NANO_PRO_MODEL` |
 | `api/nano/preview.js` | Réécrit comme handler Vercel |
 | `api/nano/retouch.js` | Réécrit comme handler Vercel |
 | `api/nano/shot-variants.js` | Réécrit comme handler Vercel |
+| `services/geminiService.ts` | Sync BYOK key → `sessionStorage` pour nanoService |
 
 ## Pattern à respecter pour futurs endpoints
 

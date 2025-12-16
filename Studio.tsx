@@ -69,6 +69,20 @@ import {
 // Dogma templates are available in data/dogmaTemplates.ts for optional import
 // ===================================================================
 
+// ===================================================================
+// HELPER: Convert base64 to File with actual bytes
+// Needed for AIEditorModal which uses URL.createObjectURL(file)
+// ===================================================================
+const base64ToFile = (base64: string, filename: string, mimeType: string): File => {
+  const byteString = atob(base64);
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new File([ab], filename, { type: mimeType });
+};
+
 const PromptConception: React.FC<{
   motionDescription: string | null;
   referenceImage: ImageFile | null;
@@ -139,7 +153,7 @@ const PromptConception: React.FC<{
       if (!onOpenNanoEditor || !thumbnail) return;
 
       const baseImage: ImageFile = {
-        file: new File([], `thumbnail_${segmentIndex}.jpg`, { type: 'image/jpeg' }),
+        file: base64ToFile(thumbnail, `thumbnail_${segmentIndex}.jpg`, 'image/jpeg'),
         base64: thumbnail,
       };
       const initialPrompt = getPromptForSegment(segmentIndex);
@@ -1908,7 +1922,7 @@ const Studio: React.FC = () => {
             onOpenNanoEditor={() => {
               // Create base image from thumbnail for Nano editor
               const baseImage = editingPromptDetails.thumbnail ? {
-                file: new File([], 'thumbnail.jpg', { type: 'image/jpeg' }),
+                file: base64ToFile(editingPromptDetails.thumbnail, 'thumbnail.jpg', 'image/jpeg'),
                 base64: editingPromptDetails.thumbnail,
               } : undefined;
 
@@ -2134,7 +2148,7 @@ const Studio: React.FC = () => {
 
                             // If we have an image, open Nano editor for retouching
                             const existingImage = thumbnailBase64
-                              ? { file: new File([], `keyframe_${index}.png`, { type: 'image/png' }), base64: thumbnailBase64 }
+                              ? { file: base64ToFile(thumbnailBase64, `keyframe_${index}.png`, 'image/png'), base64: thumbnailBase64 }
                               : storyboardByIndex[index]?.previewImage;
 
                             if (existingImage) {
@@ -2212,7 +2226,7 @@ const Studio: React.FC = () => {
                           onUseKeyframeAsBase={(segmentIndex, image) => {
                             console.log(`[ImageFirst] Using keyframe ${segmentIndex} as base`);
                             const imageFile: ImageFile = {
-                              file: new File([], `keyframe_${segmentIndex}.png`, { type: 'image/png' }),
+                              file: base64ToFile(image.base64, `keyframe_${segmentIndex}.png`, 'image/png'),
                               base64: image.base64,
                             };
                             setAssistantImage(imageFile);
