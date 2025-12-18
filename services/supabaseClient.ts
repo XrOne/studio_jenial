@@ -191,3 +191,62 @@ export const saveMediaMetadata = async (metadata: {
     // Don't throw - metadata is optional
   }
 };
+
+/**
+ * Get a time-limited signed URL for private storage access
+ * Use this instead of getPublicUrl() when buckets are private
+ * @param bucket - Bucket name (videos, images, thumbnails)
+ * @param filePath - Path within the bucket
+ * @param expiresInSeconds - URL validity (default 1 hour)
+ * @returns Signed URL with temporary access token
+ */
+export const getSignedUrl = async (
+  bucket: string,
+  filePath: string,
+  expiresInSeconds: number = 3600
+): Promise<string> => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(filePath, expiresInSeconds);
+
+  if (error) {
+    console.error('Failed to create signed URL:', error);
+    throw new Error(`Failed to create signed URL: ${error.message}`);
+  }
+
+  return data.signedUrl;
+};
+
+/**
+ * Get signed URLs for multiple files at once (batch operation)
+ * @param bucket - Bucket name
+ * @param filePaths - Array of file paths
+ * @param expiresInSeconds - URL validity (default 1 hour)
+ */
+export const getSignedUrls = async (
+  bucket: string,
+  filePaths: string[],
+  expiresInSeconds: number = 3600
+): Promise<{ path: string; signedUrl: string }[]> => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrls(filePaths, expiresInSeconds);
+
+  if (error) {
+    console.error('Failed to create signed URLs:', error);
+    throw new Error(`Failed to create signed URLs: ${error.message}`);
+  }
+
+  return data.map((item) => ({
+    path: item.path || '',
+    signedUrl: item.signedUrl || ''
+  }));
+};

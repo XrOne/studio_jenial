@@ -66,7 +66,7 @@ router.get('/', async (req, res) => {
  */
 router.post('/', async (req, res) => {
     try {
-        const { title, fps, aspect, owner_id } = req.body;
+        const { title, fps, aspect, user_id } = req.body;
 
         // RLS Context
         const scopedClient = createClient(supabaseUrl, supabaseKey, {
@@ -75,7 +75,7 @@ router.post('/', async (req, res) => {
 
         const { data, error } = await scopedClient
             .from('projects')
-            .insert([{ title, fps, aspect, owner_id }]) // owner_id must match auth.uid if RLS strict
+            .insert([{ title: title || 'Untitled Project', fps: fps || 24, aspect: aspect || '16:9', user_id: user_id || 'anonymous' }])
             .select()
             .single();
 
@@ -109,22 +109,20 @@ router.get('/:id', async (req, res) => {
         if (projErr) throw projErr;
         if (!project) return res.status(404).json({ error: 'Project not found' });
 
-        // 2. Fetch Segments (ordered) with Active Revision expanded?
-        // Supabase can do deep joins:
-        // segments ( *, active_revision:segment_revisions ( *,  output_image:assets(*), output_video:assets(*) ) )
-
+        // 2. Fetch Segments (ordered) with Active Revision expanded
+        // Join active_revision via active_revision_id, then join assets
         const { data: segments, error: segErr } = await scopedClient
             .from('segments')
             .select(`
-        *,
-        active_revision:segment_revisions (
-          *,
-          output_image:output_image_asset_id (*),
-          output_video:output_video_asset_id (*)
-        )
-      `)
+                *,
+                active_revision:segment_revisions!active_revision_id (
+                    *,
+                    base_asset:assets!base_asset_id (*),
+                    output_asset:assets!output_asset_id (*)
+                )
+            `)
             .eq('project_id', id)
-            .order('order_index', { ascending: true });
+            .order('order', { ascending: true });
 
         if (segErr) throw segErr;
 
