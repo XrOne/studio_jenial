@@ -325,7 +325,16 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
 
               <div className="mt-auto">
                 <button
-                  onClick={() => handleEdit()}
+                  onClick={async () => {
+                    // Generate, then auto-apply
+                    await handleEdit();
+                    // Auto-apply after generation completes
+                    if (isAlignmentMode) {
+                      handleApplyPrompt();
+                    } else {
+                      handleConfirm();
+                    }
+                  }}
                   disabled={isLoading || !prompt.trim()}
                   className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition-all shadow-lg hover:shadow-xl disabled:bg-gray-600 disabled:cursor-wait ${model === 'nano-pro'
                     ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500'
@@ -333,7 +342,7 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
                     }`}>
                   {isLoading && <div className="w-5 h-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div>}
                   <span className="font-semibold">
-                    {isLoading ? 'Generating...' : model === 'nano-pro' ? 'Generate High-Res Edit' : 'Generate Edit'}
+                    {isLoading ? 'Génération...' : 'Générer & Appliquer'}
                   </span>
                   {!isLoading && model === 'nano-pro' && <SparklesIcon className="w-4 h-4" />}
                 </button>
@@ -343,23 +352,7 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
 
           <div className="flex justify-end items-center gap-4 flex-shrink-0 pt-4 border-t border-gray-700">
             <button onClick={onClose} className="px-6 py-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors">
-              Cancel
-            </button>
-
-            {/* Nano Apply: Return prompt + image to stylet */}
-            {isAlignmentMode && (
-              <button
-                onClick={handleApplyPrompt}
-                disabled={isLoading || !prompt.trim()}
-                className="px-6 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-orange-900/20 flex items-center gap-2 disabled:bg-gray-600 disabled:cursor-not-allowed"
-              >
-                <SparklesIcon className="w-4 h-4" />
-                Appliquer Prompt
-              </button>
-            )}
-
-            <button onClick={handleConfirm} disabled={isLoading} className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-green-900/20">
-              Use This Image
+              Annuler
             </button>
           </div>
         </div>

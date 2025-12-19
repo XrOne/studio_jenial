@@ -238,6 +238,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   const [finalResult, setFinalResult] = useState<AssistantResult | null>(null);
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [isDirectorMode, setIsDirectorMode] = useState(false); // Option B: Director Mode
+  const [sequenceIntent, setSequenceIntent] = useState<'plan-sequence' | 'decoupage' | null>(null); // Director Mode: User's sequence choice
   const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(
     null,
   );
@@ -431,6 +432,28 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
     // We want it to persist in the Context Radar (PromptConception).
     // User can manually remove it with the X button if needed.
     // onAssistantImageChange(null); 
+
+    // Director Mode: Detect sequence intent
+    if (isDirectorMode && sequenceIntent === null) {
+      const userMessage = userInput.toLowerCase().trim();
+      if (userMessage.includes('plan-séquence') || userMessage.includes('plan sequence')) {
+        setSequenceIntent('plan-sequence');
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '📹 Parfait ! Plan-séquence sélectionné.\n\nMaintenant, décrivez la scène. Je vais générer un découpage technique avec des valeurs de plan variées (large, moyen, serré) pour capturer tous les angles.',
+          image: null,
+        }]);
+        return;
+      } else if (userMessage.includes('découpage') || userMessage.includes('decoupage')) {
+        setSequenceIntent('decoupage');
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '🎞️ Parfait ! Découpage sélectionné.\n\nMaintenant, décrivez la scène. Je vais générer une séquence de plans indépendants pour un montage dynamique.',
+          image: null,
+        }]);
+        return;
+      }
+    }
 
     setIsLoading(true);
     setError(null);
@@ -1172,12 +1195,15 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
             onClick={() => {
               setIsDirectorMode(!isDirectorMode);
               if (!isDirectorMode) {
-                // Trigger greeting
+                // CRITICAL: Ask sequence type FIRST
                 setMessages(prev => [...prev, {
                   role: 'assistant',
-                  content: '🎬 **Mode Réalisateur activé.**\nPour commencer, décrivez la scène. Je vous demanderai ensuite des précisions sur les axes caméra (plongée, contre-plongée) et les valeurs de plan (large, serré).',
+                  content: '🎬 **Mode Réalisateur activé.**\n\nQuel type de séquence voulez-vous créer?\n\n📹 **Plan-séquence** (caméra continue, mouvement fluide)\n🎞️ **Découpage** (plans multiples, montage)\n\nRépondez "plan-séquence" ou "découpage".',
                   image: null,
                 }]);
+                setSequenceIntent(null); // Reset choice
+              } else {
+                setSequenceIntent(null); // Reset when turning off
               }
             }}
             className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors border ${isDirectorMode

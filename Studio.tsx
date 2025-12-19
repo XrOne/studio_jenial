@@ -2298,7 +2298,7 @@ const Studio: React.FC = () => {
               <div className="w-full h-full">
                 {currentStage === AppStage.PROMPTING && (
                   <div className="grid grid-cols-3 gap-4 h-full">
-                    <div className="col-span-2 h-full">
+                    <div className="col-span-2 h-full min-h-0 overflow-hidden">
                       <PromptSequenceAssistant
                         onSequenceGenerated={handleSequenceGenerated}
                         activeDogma={activeDogma}
@@ -2326,7 +2326,7 @@ const Studio: React.FC = () => {
                         apiKey={apiKey} // P0.6: Pass API Key
                       />
                     </div>
-                    <div className="col-span-1 h-full">
+                    <div className="col-span-1 h-full min-h-0 overflow-hidden">
                       {promptSequence ? (
                         <SequenceManager
                           sequence={promptSequence}
@@ -2523,7 +2523,7 @@ const Studio: React.FC = () => {
                 )}
                 {currentStage === AppStage.EDITING && frameToEdit && (
                   <div className="grid grid-cols-3 gap-4 h-full">
-                    <div className="col-span-2 h-full">
+                    <div className="col-span-2 h-full min-h-0 overflow-hidden">
                       <AIEditorModal
                         image={frameToEdit}
                         onClose={() => setCurrentStage(AppStage.RESULT)}
@@ -2531,7 +2531,7 @@ const Studio: React.FC = () => {
                         dogma={activeDogma}
                       />
                     </div>
-                    <div className="col-span-1 h-full">
+                    <div className="col-span-1 h-full min-h-0 overflow-hidden">
                       <VisualContextViewer
                         image={frameToEdit}
                         stage={currentStage}
