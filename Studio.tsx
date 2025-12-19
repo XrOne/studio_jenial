@@ -517,6 +517,10 @@ const Studio: React.FC = () => {
   type SequenceMode = 'pending' | 'plan-sequence' | 'decoupage';
   const [sequenceMode, setSequenceMode] = useState<SequenceMode>('pending');
 
+  // === ROOT KEYFRAME PROTECTION ===
+  // Once user validates the root keyframe (by selecting a mode), it should not be auto-regenerated
+  const [rootKeyframeLocked, setRootKeyframeLocked] = useState(false);
+
   // === SESSION PERSISTENCE ===
   const {
     profile,
@@ -1238,8 +1242,20 @@ const Studio: React.FC = () => {
     });
 
     // Helper: Trigger background upgrade for vignettes
+    // IMPORTANT: Skip for extensions in plan-sequence mode (they use last frame of previous video)
     const triggerProUpgrade = async (idx: number) => {
-      if (sequenceMode === 'decoupage' || payload.target === 'root') {
+      // Only generate Nano previews for:
+      // 1. Root shot (idx === 0) - ALWAYS
+      // 2. Extensions (idx > 0) - ONLY in découpage mode (independent shots)
+      const isRoot = idx === 0;
+      const isExtensionInPlanSequence = idx > 0 && sequenceMode === 'plan-sequence';
+
+      if (isExtensionInPlanSequence) {
+        console.log(`[NanoUpgrade] SKIP: Extension ${idx} in plan-sequence mode uses last frame`);
+        return;
+      }
+
+      if (sequenceMode === 'decoupage' || isRoot) {
         console.log(`[NanoUpgrade] Upgrading segment ${idx} to Pro...`);
         try {
           const res = await generateNanoPreview({
@@ -1280,6 +1296,25 @@ const Studio: React.FC = () => {
     if (payload.target === 'root') {
       // === ROOT: Update mainPrompt + mark all extensions dirty ===
       if (!promptSequence) return;
+
+      // PROTECTION: If root keyframe is locked (user validated it by selecting mode),
+      // only allow explicit edits via Nano Editor, not auto-regeneration
+      if (rootKeyframeLocked && storyboardByIndex[0]) {
+        console.log('[RootProtection] Root keyframe is locked - updating prompt only, not keyframe');
+        // Update prompt only, keep existing keyframe
+        const extensionsCount = promptSequence.extensionPrompts.length;
+        const updatedSequence: PromptSequence = {
+          ...promptSequence,
+          mainPrompt: payload.previewPrompt,
+          status: extensionsCount > 0 ? PromptSequenceStatus.ROOT_MODIFIED : PromptSequenceStatus.CLEAN,
+          dirtyExtensions: extensionsCount > 0
+            ? Array.from({ length: extensionsCount }, (_, i) => i + 1)
+            : [],
+          rootModifiedAt: new Date().toISOString(),
+        };
+        setPromptSequence(updatedSequence);
+        return; // Don't update keyframe
+      }
 
       const extensionsCount = promptSequence.extensionPrompts.length;
       const updatedSequence: PromptSequence = {
@@ -1329,8 +1364,15 @@ const Studio: React.FC = () => {
       };
 
       setPromptSequence(updatedSequence);
-      setStoryboardByIndex(prev => ({ ...prev, [payload.segmentIndex!]: storyboardEntry }));
-      triggerProUpgrade(payload.segmentIndex!);
+
+      // In plan-sequence mode, extensions don't get their own keyframe
+      // They use the last frame of the previous video
+      if (sequenceMode !== 'plan-sequence') {
+        setStoryboardByIndex(prev => ({ ...prev, [payload.segmentIndex!]: storyboardEntry }));
+        triggerProUpgrade(payload.segmentIndex!);
+      } else {
+        console.log(`[Extension] Skipping keyframe for extension ${payload.segmentIndex} (plan-sequence mode)`);
+      }
 
     } else if (payload.target === 'character') {
       // === CHARACTER: Update character asset (no dirty logic) ===
@@ -2404,10 +2446,12 @@ const Studio: React.FC = () => {
                           sequenceMode={sequenceMode}
                           onSelectPlanSequence={() => {
                             setSequenceMode('plan-sequence');
-                            console.log('[Mode] Selected: Plan-séquence');
+                            setRootKeyframeLocked(true); // Lock root keyframe
+                            console.log('[Mode] Selected: Plan-séquence - Root keyframe locked');
                           }}
                           onSelectDecoupage={() => {
                             setSequenceMode('decoupage');
+                            setRootKeyframeLocked(true); // Lock root keyframe
                             console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
                             // Open StoryboardPreviewModal for 12 vignettes
                             if (storyboardByIndex[0]) {
