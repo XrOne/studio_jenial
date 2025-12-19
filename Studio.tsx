@@ -29,6 +29,7 @@ import StoryboardPreviewModal from './components/StoryboardPreviewModal';
 import ModeSelectionStep from './components/ModeSelectionStep';
 import { UserProfileModal } from './components/UserProfileModal'; // New
 import { SessionHistoryModal } from './components/SessionHistoryModal'; // New
+import { LibraryMenu, ProjectMenu, ProfileMenu } from './components/HeaderMenus'; // New Header Menus
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
 import useLocalStorage from './hooks/useLocalStorage';
@@ -391,7 +392,7 @@ const PromptConception: React.FC<{
   };
 
 const Studio: React.FC = () => {
-  const { user } = useAuth(); // Inject User Context
+  const { user, signOut, signInWithGoogle } = useAuth(); // Inject User Context + Auth actions
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [currentStage, setCurrentStage] = useState<AppStage>(AppStage.PROMPTING);
   const [resetKey, setResetKey] = useState(0); // For forcing component remounts on reset
@@ -2182,79 +2183,36 @@ const Studio: React.FC = () => {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Libraries Menu */}
+            <LibraryMenu
+              onOpenShotLibrary={() => setIsShotLibraryOpen(true)}
+              onOpenCharacters={() => setIsCharacterManagerOpen(true)}
+              onOpenDogmas={() => setIsDogmaManagerOpen(true)}
+              activeDogma={activeDogma}
+            />
 
-            <button
-              onClick={() => setIsDogmaManagerOpen(true)}
-              title={activeDogma ? `Active Dogma: ${activeDogma.title}` : "No Active Dogma"}
-              className="relative flex items-center gap-2 px-3 py-2 bg-gray-700/80 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors">
-              <BookMarkedIcon className="w-5 h-5" />
-              <div className={`absolute top-1 right-1 w-2.5 h-2.5 rounded-full border border-gray-800 ${activeDogma ? 'bg-green-500' : 'bg-gray-500'}`} />
-            </button>
+            {/* Project Menu */}
+            <ProjectMenu
+              onNewProject={handleStartNewProject}
+              onSaveCloud={saveProject}
+              onLoadCloud={() => setIsProfileModalOpen(true)}
+              onExportJSON={handleExportProject}
+              onImportJSON={handleImportProject}
+              onOpenHistory={handleOpenHistory}
+              isSaving={isProjectSaving || isSaving}
+              isAuthenticated={!!user}
+            />
 
-            <button
-              onClick={() => setShowApiKeyDialog(true)}
-              title={hasCustomKey ? "Using Custom Beta Key" : "Using Default Key"}
-              className={`flex items-center gap-2 px-3 py-2 ${hasCustomKey ? 'bg-green-600/20 text-green-400 border border-green-600/50' : 'bg-red-900/20 text-red-400 border border-red-800/50'} font-semibold rounded-lg transition-colors`}>
-              <KeyIcon className="w-5 h-5" />
-            </button>
-
-            <button
-              onClick={() => setIsCharacterManagerOpen(true)}
-              title="Character Library"
-              className="flex items-center gap-2 px-3 py-2 bg-gray-700/80 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors">
-              <UsersIcon className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setIsShotLibraryOpen(true)}
-              title="Shot Library"
-              className="flex items-center gap-2 px-3 py-2 bg-gray-700/80 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors">
-              <FilmIcon className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setIsProfileModalOpen(true)}
-              title="User Profile & Projects"
-              className="flex items-center gap-2 px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-semibold rounded-lg transition-colors">
-              <span className="w-5 h-5 flex items-center justify-center font-bold">
-                {user?.email?.[0].toUpperCase() || <UsersIcon className="w-5 h-5" />}
-              </span>
-            </button>
-            <button
-              onClick={saveProject}
-              disabled={isProjectSaving}
-              title="Save Project to Cloud"
-              className="flex items-center gap-2 px-3 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30 font-semibold rounded-lg transition-colors disabled:opacity-50">
-              {isProjectSaving ? (
-                <ArrowPathIcon className="w-5 h-5 animate-spin" />
-              ) : (
-                <UploadCloudIcon className="w-5 h-5" />
-              )}
-            </button>
-            <button
-              onClick={handleExportProject}
-              title="Export Project to JSON"
-              className="flex items-center gap-2 px-2 py-2 bg-gray-700/80 hover:bg-gray-700 text-gray-300 hover:text-white font-semibold rounded-lg transition-colors">
-              <DownloadIcon className="w-5 h-5" />
-            </button>
-            <button
-              onClick={handleImportProject}
-              title="Import Project from JSON"
-              className="flex items-center gap-2 px-2 py-2 bg-gray-700/80 hover:bg-gray-700 text-gray-300 hover:text-white font-semibold rounded-lg transition-colors">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12" />
-              </svg>
-            </button>
-            <div className="w-px h-6 bg-gray-700 mx-1"></div>
-            <button
-              onClick={handleOpenHistory}
-              title="Session History"
-              className={`flex items-center gap-2 px-3 py-2 bg-gray-700/80 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors ${isSaving ? 'animate-pulse border border-green-500/50' : ''}`}
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </button>
-
+            {/* Profile Menu */}
+            <ProfileMenu
+              user={user}
+              hasApiKey={hasCustomKey}
+              onOpenApiKey={() => setShowApiKeyDialog(true)}
+              onOpenProfile={() => setIsProfileModalOpen(true)}
+              onSignOut={signOut}
+              onSignIn={signInWithGoogle}
+            />
           </div>
         </header>
         <main className="flex-grow p-4 overflow-hidden">
