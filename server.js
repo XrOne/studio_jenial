@@ -27,7 +27,33 @@ VideoStorageFactory.register(new SupabaseVideoStorage());
 
 // Allow large payloads for base64 images/videos
 app.use(express.json({ limit: '100mb' }));
-app.use(cors());
+
+// CORS Configuration - Restrict to allowed origins only
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',    // Vite dev server
+  'http://localhost:3001',    // Backend dev
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3001',
+  'https://jenial.app',       // Production domain
+  process.env.ALLOWED_ORIGIN, // Additional origin from env
+].filter(Boolean);
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] Blocked request from: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Api-Key', 'X-Gemini-Api-Key', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
 app.use(requestIdMiddleware);
 
 // === ROUTERS ===
@@ -355,7 +381,8 @@ app.post('/api/video/generate', async (req, res) => {
       requestBody.parameters = parameters;
     }
 
-    console.log('[Veo] Request body:', JSON.stringify(requestBody, null, 2));
+    // Security: Log minimal info only (no prompts)
+    console.log('[Veo] Request:', { model, hasVideoUri: !!videoUri, hasStartFrame: !!startFrameBase64 });
 
     const endpoint = `${VEO_API_BASE}/models/${model}:predictLongRunning`;
 
@@ -478,7 +505,8 @@ app.get('/api/video/status', async (req, res) => {
     }
 
     if (!videoUri) {
-      console.error('[Veo] No video URI found in response. Full response:', JSON.stringify(data, null, 2));
+      // Security: Don't log full response
+      console.error('[Veo] No video URI found. Keys:', Object.keys(data || {}));
       return res.status(500).json({
         done: true,
         error: 'No video URI in completed operation response',

@@ -1,0 +1,15 @@
+867e0ff Revert "ergonomie des fenetre ux"
+b50d291 ergonomie des fenetre ux
+31bbd70 reparation nano
+6ac8b87 Update geminiService.ts
+b1c80c3 fix(nano): Correct NANO_PRO_MODEL variable name
+2fa2cdf nano pro change api
+9f9e891 fix(P0): Vercel file-based routing - fixes 500 errors
+f887991 BYOK runtime vault + build errors
+ee06d35 api review
+0a389a5 Update server.js
+385ae19 Update server.js
+f86bdf9 apiKey ok for all function
+c0c296a appel api corrig├®
+bb3fb9a reparation apikey
+d54ccf2 Update Studio.tsx

@@ -1,0 +1,6 @@
+  feature/vertical-timeline 8fa2a6f correction securit├®
+  gallant-bassi             585d67a package json review
+  hungry-sanderson          585d67a package json review
+* main                      867e0ff Revert "ergonomie des fenetre ux"
+  nostalgic-mahavira        c9a16b1 vertex
+  serene-chebyshev          2f6cd45 fix(veo): use predictLongRunning API with instances format for BYOK

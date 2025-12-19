@@ -1,0 +1,10 @@
+8fa2a6f correction securit├®
+7a42a52 security change
+b50d291 ergonomie des fenetre ux
+31bbd70 reparation nano
+6ac8b87 Update geminiService.ts
+b1c80c3 fix(nano): Correct NANO_PRO_MODEL variable name
+2fa2cdf nano pro change api
+9f9e891 fix(P0): Vercel file-based routing - fixes 500 errors
+f887991 BYOK runtime vault + build errors
+ee06d35 api review
