@@ -1330,7 +1330,10 @@ const Studio: React.FC = () => {
 
       setPromptSequence(updatedSequence);
       setStoryboardByIndex(prev => ({ ...prev, [0]: storyboardEntry }));
-      triggerProUpgrade(0);
+
+      // CRITICAL: Do NOT auto-regenerate after user edits!
+      // User explicitly edited this image in AIEditor - we must preserve it
+      // triggerProUpgrade(0); // REMOVED - was causing unwanted auto-regeneration
 
       if (extensionsCount > 0) {
         setErrorMessage(`⚠️ Prompt root modifié. ${extensionsCount} extension(s) à régénérer.`);
@@ -1365,13 +1368,22 @@ const Studio: React.FC = () => {
 
       setPromptSequence(updatedSequence);
 
-      // In plan-sequence mode, extensions don't get their own keyframe
-      // They use the last frame of the previous video
-      if (sequenceMode !== 'plan-sequence') {
+      // Extension keyframes: ONLY generate if in découpage mode
+      // In plan-séquence mode, extensions use the last frame of the previous video
+      const isExtension = payload.segmentIndex! > 0;
+      const shouldGenerateKeyframe = isExtension
+        ? sequenceMode === 'decoupage'  // Extensions only in découpage
+        : true;  // Root always gets a keyframe
+
+      if (shouldGenerateKeyframe) {
+        console.log(`[Extension] Generating keyframe for segment ${payload.segmentIndex} (${sequenceMode} mode)`);
         setStoryboardByIndex(prev => ({ ...prev, [payload.segmentIndex!]: storyboardEntry }));
-        triggerProUpgrade(payload.segmentIndex!);
+
+        // CRITICAL: Do NOT auto-regenerate after user edits!
+        // User explicitly edited this image in AIEditor - we must preserve it
+        // triggerProUpgrade(payload.segmentIndex!); // REMOVED - was causing unwanted auto-regeneration
       } else {
-        console.log(`[Extension] Skipping keyframe for extension ${payload.segmentIndex} (plan-sequence mode)`);
+        console.log(`[Extension] SKIPPING keyframe for extension ${payload.segmentIndex} (plan-séquence mode - uses last frame)`);
       }
 
     } else if (payload.target === 'character') {
