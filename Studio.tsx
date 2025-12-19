@@ -826,16 +826,29 @@ const Studio: React.FC = () => {
           console.log('[Sequence] Root shot index=0 → mode=TEXT_TO_VIDEO (no base video)');
 
           // IMAGE-FIRST ENFORCEMENT
-          // If no keyframe exists for the root shot, we MUST generate one first via Nano
-          if (!storyboardByIndex[0]) {
+          // If no keyframe exists AND no startFrame provided, generate one first via Nano
+          // This ensures we have a visual reference before video generation
+          const hasExistingKeyframe = storyboardByIndex[0] || effectiveParams.startFrame;
+          if (!hasExistingKeyframe) {
             console.log('[ImageFirst] No keyframe found for root shot. Enforcing Nano preview.');
             // Generate keyframe using the prompt
             generateKeyframe(0, effectiveParams.prompt);
-            // Optionally set state to indicate we are in preview mode
-            // Inform user via temporary message (using error message slot for visibility, or console)
             console.log('[ImageFirst] Preview generation triggered. Pausing video generation.');
-            // Abort video generation
+            // Abort video generation - user must review keyframe first
             return;
+          }
+          console.log('[ImageFirst] Keyframe detected, proceeding with video generation.');
+
+          // AUTO-INJECT KEYFRAME: If storyboard has a keyframe but params don't have startFrame,
+          // use the keyframe as startFrame and switch to FRAMES_TO_VIDEO mode for better consistency
+          const keyframeImage = storyboardByIndex[0]?.previewImage;
+          if (keyframeImage && !effectiveParams.startFrame) {
+            console.log('[ImageFirst] Injecting storyboard keyframe as startFrame');
+            effectiveParams = {
+              ...effectiveParams,
+              startFrame: keyframeImage,
+              mode: GenerationMode.FRAMES_TO_VIDEO,
+            };
           }
 
           // Force TEXT_TO_VIDEO for root shot (unless using frames/references mode)
