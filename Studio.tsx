@@ -2424,6 +2424,24 @@ const Studio: React.FC = () => {
                             setActivePromptIndex(segmentIndex);
                             setInitialFormValues(prev => prev ? { ...prev, prompt } : null);
                           }}
+                          // MODE SELECTION: Plan-séquence vs Découpage
+                          sequenceMode={sequenceMode}
+                          onSelectPlanSequence={() => {
+                            setSequenceMode('plan-sequence');
+                            setRootKeyframeLocked(true);
+                            console.log('[Mode] Selected: Plan-séquence - Root keyframe locked');
+                          }}
+                          onSelectDecoupage={() => {
+                            setSequenceMode('decoupage');
+                            setRootKeyframeLocked(true);
+                            console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
+                            if (storyboardByIndex[0]) {
+                              setStoryboardModalContext({
+                                segmentIndex: 0,
+                                baseImage: storyboardByIndex[0].previewImage,
+                              });
+                            }
+                          }}
                         />
                       ) : (
                         <PromptConception

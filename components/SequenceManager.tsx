@@ -5,6 +5,7 @@
 import * as React from 'react';
 import { PromptSequence, PromptSequenceStatus, SequenceVideoData, StoryboardPreview } from '../types';
 import { CheckIcon, PencilIcon, XMarkIcon, SparklesIcon } from './icons';
+import ModeSelectionStep from './ModeSelectionStep';
 
 // Refresh icon for regenerate action
 const RefreshIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -33,6 +34,10 @@ interface SequenceManagerProps {
   // P2.4: Keyframe actions
   onRegenerateKeyframe?: (segmentIndex: number) => void;
   onUseKeyframeAsBase?: (segmentIndex: number, image: { base64: string }) => void;
+  // MODE SELECTION: Plan-séquence vs Découpage
+  sequenceMode?: 'pending' | 'plan-sequence' | 'decoupage';
+  onSelectPlanSequence?: () => void;
+  onSelectDecoupage?: () => void;
 }
 
 const SequenceManager: React.FC<SequenceManagerProps> = ({
@@ -50,6 +55,9 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
   storyboardByIndex = {},
   onRegenerateKeyframe,
   onUseKeyframeAsBase,
+  sequenceMode = 'pending',
+  onSelectPlanSequence,
+  onSelectDecoupage,
 }) => {
   const allPrompts = [sequence.mainPrompt, ...sequence.extensionPrompts];
 
@@ -89,6 +97,18 @@ const SequenceManager: React.FC<SequenceManagerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* === MODE SELECTION: Show when root keyframe exists but mode not selected === */}
+      {storyboardByIndex[0] && sequenceMode === 'pending' && onSelectPlanSequence && onSelectDecoupage && (
+        <div className="mb-4">
+          <ModeSelectionStep
+            keyframeImage={storyboardByIndex[0].previewImage}
+            onSelectPlanSequence={onSelectPlanSequence}
+            onSelectDecoupage={onSelectDecoupage}
+          />
+        </div>
+      )}
+
       <div className="overflow-y-auto flex-grow pr-2 -mr-2 max-h-[calc(100vh-280px)] scrollable-panel">
         <ul className="space-y-3">
           {allPrompts.map((prompt, index) => {
