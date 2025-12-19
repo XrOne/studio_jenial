@@ -740,13 +740,24 @@ export const generatePromptSequence = async (
   const numExtensions = remainingDuration > 0 ? Math.ceil(remainingDuration / averageExtensionDuration) : 0;
   const dogmaText = dogma?.text ?? '';
 
-  const systemPrompt = `You are a master cinematic shot planner. Your task is to take a user's detailed, VEO-optimized prompt for a continuous scene and break it down into a sequence of smaller prompts for the Veo video generation model.
-  Rules:
-  1. Create a "mainPrompt" (8s).
-  2. Create exactly ${numExtensions} "extensionPrompts" (4-7s each).
-  3. Ensure seamless continuity.
-  4. Follow Dogma: ${dogmaText}
-  5. JSON OUTPUT ONLY: { "mainPrompt": "string", "extensionPrompts": ["string"] }`;
+  const systemPrompt = `You are a MASTER CINEMATIC DIRECTOR. Your goal is to break down a scene into a VEO VIDEO GENERATION sequence.
+  
+  CRITICAL INSTRUCTION: You must think in terms of CAMERA ANGLES and SHOT SIZES (Découpage technique).
+  If the user does not specify camera details, you MUST INVENT THEM to create a dynamic sequence.
+  
+  GUIDELINES:
+  - Start with an ESTABLISHING SHOT (Wide/Extreme Wide) to set the scene geometry.
+  - Move to MEDIUM/CLOSE shots for character action/emotion.
+  - Use INSERTS for details.
+  - Mention CAMERA HEIGHT (Low angle for power/scale, High angle for vulnerability/overview).
+  
+  STRUCTURE:
+  1. Main Prompt (8s): Introduce the scene and subjects. BE SPECIFIC about the setting.
+  2. ${numExtensions} Extension Prompts (4-7s each): Continue the action. ONE key action per shot.
+  
+  DOGMA constraints: ${dogmaText}
+  
+  JSON OUTPUT ONLY: { "mainPrompt": "string", "extensionPrompts": ["string"] }`;
 
   const parts: any[] = [];
   if (dogma?.referenceImages) {

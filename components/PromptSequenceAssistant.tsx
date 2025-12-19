@@ -237,6 +237,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [finalResult, setFinalResult] = useState<AssistantResult | null>(null);
   const [isConfiguring, setIsConfiguring] = useState(false);
+  const [isDirectorMode, setIsDirectorMode] = useState(false); // Option B: Director Mode
   const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(
     null,
   );
@@ -1163,6 +1164,32 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
             Manage
           </button>
         </div>
+
+        {/* OPTION B: Director Mode Toggle */}
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            type="button"
+            onClick={() => {
+              setIsDirectorMode(!isDirectorMode);
+              if (!isDirectorMode) {
+                // Trigger greeting
+                setMessages(prev => [...prev, {
+                  role: 'assistant',
+                  content: '🎬 **Mode Réalisateur activé.**\nPour commencer, décrivez la scène. Je vous demanderai ensuite des précisions sur les axes caméra (plongée, contre-plongée) et les valeurs de plan (large, serré).',
+                  image: null,
+                }]);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors border ${isDirectorMode
+              ? 'bg-purple-500/20 text-purple-300 border-purple-500/50'
+              : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'
+              }`}
+            title="Activer le mode Assistant Réalisateur pour un découpage guidé"
+          >
+            <VideoIcon className="w-3.5 h-3.5" />
+            {isDirectorMode ? 'Director ON' : 'Director OFF'}
+          </button>
+        </div>
         {!extensionContext && (
           <div className="flex items-center gap-3 mb-3">
             <label
@@ -1259,14 +1286,24 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
           dogma={activeDogma}
         />
       )}
-      {storyboard && (
+      {storyboard && startFrame && (
         <StoryboardPreviewModal
-          storyboard={storyboard}
+          isOpen={!!storyboard}
           onClose={() => setStoryboard(null)}
-          onConfirm={handleConfirmStoryboard}
-          onRegenerate={() => handleGenerateStoryboard(prompt)}
-          startFrame={startFrame}
-          endFrame={endFrame}
+          onApplyVariant={(payload) => {
+            // Handle applying the variant from the storyboard
+            if (payload.previewImage) {
+              setPrompt(payload.previewPrompt);
+              setStartFrame(payload.previewImage);
+              // You might want to update the storyboard state here or just close
+              setStoryboard(null);
+            }
+          }}
+          segmentIndex={0} // PromptAssistant context is typically root or single generation
+          baseImage={startFrame}
+          currentPrompt={prompt}
+          dogma={activeDogma}
+          mode="single-select"
         />
       )}
       {isFrameSelectorOpen && (

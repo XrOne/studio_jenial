@@ -15,6 +15,23 @@ import { Dogma, ImageFile, NanoApplyPayload, STANDARD_SHOT_LIST } from '../types
 import { SparklesIcon, XMarkIcon, FilmIcon } from './icons';
 import { generateShotVariants } from '../services/nanoService';
 
+// === MOVEMENTS ===
+const CAMERA_MOVEMENTS = [
+  'Static (Fixe)',
+  'Traveling Avant (Slow Push In)',
+  'Traveling Arrière (Slow Pull Out)',
+  'Panoramique Gauche (Pan Left)',
+  'Panoramique Droite (Pan Right)',
+  'Tilt Haut (Tilt Up)',
+  'Tilt Bas (Tilt Down)',
+  'Plan Drone (Drone Shot)',
+  'Plan Épaule (Handheld shake)',
+  'Steadycam (Smooth follow)',
+  'Dolly Zoom (Vertigo Effect)',
+  'Low Angle (Contre-plongée)',
+  'High Angle (Plongée)',
+] as const;
+
 // === TYPES ===
 
 export interface OrderedShot {
@@ -23,6 +40,7 @@ export interface OrderedShot {
   prompt: string;
   duration: number;  // seconds
   order: number;     // 1-based order
+  cameraMovement?: string; // Opt C: Camera movement
 }
 
 interface StoryboardPreviewModalProps {
@@ -66,6 +84,7 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
   // === ORDERED-SELECT STATE ===
   const [selectedOrder, setSelectedOrder] = useState<string[]>([]);  // Array of shotTypes in selection order
   const [durations, setDurations] = useState<Record<string, number>>({});  // shotType -> duration in seconds
+  const [cameraMovements, setCameraMovements] = useState<Record<string, string>>({});  // shotType -> movement
 
   // Derive target from segment index
   const target = segmentIndex === 0 ? 'root' : 'extension';
@@ -102,6 +121,7 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
       setGlobalError(null);
       setSelectedOrder([]);
       setDurations({});
+      setCameraMovements({});
     }
   }, [isOpen]);
 
@@ -174,8 +194,12 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
       if (!durations[variant.shotType]) {
         setDurations(prev => ({ ...prev, [variant.shotType]: 3 }));  // Default 3s
       }
+      // Initialize movement if not set
+      if (!cameraMovements[variant.shotType]) {
+        setCameraMovements(prev => ({ ...prev, [variant.shotType]: 'Static (Fixe)' }));
+      }
     }
-  }, [mode, target, segmentIndex, currentPrompt, onApplyVariant, onClose, durations]);
+  }, [mode, target, segmentIndex, currentPrompt, onApplyVariant, onClose, durations, cameraMovements]);
 
   // Build timeline from ordered shots
   const handleBuildTimeline = useCallback(() => {
@@ -183,19 +207,30 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
 
     const orderedShots: OrderedShot[] = selectedOrder.map((shotType, idx) => {
       const variant = variants.find(v => v.shotType === shotType);
+
+      // OPTION C: Append movement to prompt if selected
+      const movement = cameraMovements[shotType] || 'Static (Fixe)';
+      const cleanMovement = movement.split(' (')[0]; // Remove french/description
+
+      let finalPrompt = variant?.prompt || currentPrompt;
+      if (movement && movement !== 'Static (Fixe)') {
+        finalPrompt += `, camera movement: ${cleanMovement}`;
+      }
+
       return {
         shotType,
         image: variant?.image || baseImage,
-        prompt: variant?.prompt || currentPrompt,
+        prompt: finalPrompt,
         duration: durations[shotType] || 3,
         order: idx + 1,
+        cameraMovement: movement,
       };
     });
 
     console.log('[StoryboardPreview] Building timeline:', { shotCount: orderedShots.length, totalDuration });
     onBuildTimeline(orderedShots);
     onClose();
-  }, [selectedOrder, variants, baseImage, currentPrompt, durations, totalDuration, onBuildTimeline, onClose]);
+  }, [selectedOrder, variants, baseImage, currentPrompt, durations, cameraMovements, totalDuration, onBuildTimeline, onClose]);
 
   // Get order badge for a shot type
   const getOrderBadge = (shotType: string): number | null => {
@@ -310,15 +345,16 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
                     )}
                   </div>
 
-                  {/* Label + Duration Input */}
-                  <div className="p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold text-gray-300 truncate">
+                  {/* Label + Duration + Movement Input */}
+                  <div className="p-2 space-y-2">
+                    <div className="flex items-center justify-between gap-1">
+                      <div className="text-xs font-semibold text-gray-300 truncate" title={variant.shotType}>
                         {variant.shotType}
                       </div>
+
                       {/* Duration input (ordered-select mode, when selected) */}
                       {mode === 'ordered-select' && isSelected && (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           <input
                             type="number"
                             min="1"
@@ -332,20 +368,41 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
                               }));
                             }}
                             onClick={(e) => e.stopPropagation()}
-                            className="w-12 px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white text-center"
+                            className="w-10 px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white text-center"
                           />
                           <span className="text-[10px] text-gray-500">s</span>
                         </div>
                       )}
                     </div>
+
+                    {/* OPTION C: Camera Movement Selector */}
+                    {mode === 'ordered-select' && isSelected && (
+                      <select
+                        value={cameraMovements[variant.shotType] || 'Static (Fixe)'}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setCameraMovements(prev => ({
+                            ...prev,
+                            [variant.shotType]: e.target.value
+                          }));
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full text-[10px] bg-gray-900 border border-gray-600 rounded px-1 py-0.5 text-gray-300 focus:border-green-500 outline-none"
+                      >
+                        {CAMERA_MOVEMENTS.map(mov => (
+                          <option key={mov} value={mov}>{mov}</option>
+                        ))}
+                      </select>
+                    )}
+
                     {/* Timecode (ordered-select mode) */}
                     {mode === 'ordered-select' && isSelected && (
-                      <div className="text-[10px] text-green-400 mt-1">
+                      <div className="text-[10px] text-green-400">
                         @ {timecodes[variant.shotType]}
                       </div>
                     )}
                     {variant.error && (
-                      <div className="text-[10px] text-red-400 mt-1">{variant.error}</div>
+                      <div className="text-[10px] text-red-400">{variant.error}</div>
                     )}
                   </div>
                 </div>
