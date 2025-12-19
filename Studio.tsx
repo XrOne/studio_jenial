@@ -18,6 +18,7 @@ import {
   UsersIcon,
   UploadCloudIcon,
   ArrowPathIcon,
+  DownloadIcon,
 } from './components/icons';
 import LoadingIndicator from './components/LoadingIndicator';
 import PromptEditorModal from './components/PromptEditorModal';
@@ -44,6 +45,7 @@ import {
   setRuntimeApiKey, // New
 } from './services/geminiService';
 import { generatePreview as generateNanoPreview } from './services/nanoService';
+import { exportProjectToJSON, importProjectFromJSON, triggerImportFilePicker } from './services/exportService';
 import { useAuth } from './contexts/AuthContext';
 import {
   AppState,
@@ -584,6 +586,26 @@ const Studio: React.FC = () => {
       startNewSession();
     }
   }, [profile, sessionId, startNewSession]);
+
+  // Load API Key from profile on authentication
+  useEffect(() => {
+    const loadApiKeyFromProfile = async () => {
+      if (user?.id && !apiKey) { // Only load if user is authenticated and no key is set
+        try {
+          const profile = await ProjectService.getProfile(user.id);
+          if (profile?.api_key) {
+            setApiKey(profile.api_key);
+            setRuntimeApiKey(profile.api_key);
+            setHasCustomKey(true);
+            console.log('[API Key] Loaded from profile');
+          }
+        } catch (e) {
+          console.warn('[API Key] Failed to load from profile:', e);
+        }
+      }
+    };
+    loadApiKeyFromProfile();
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleProfileConfirm = async (identifier: string) => {
     setIsLoadingHistory(true);
@@ -1386,7 +1408,7 @@ const Studio: React.FC = () => {
 
   // Handlers for API Key Dialog (BYOK Strict Mode)
   // Uses existing apiKey state (line 383) + Memory Vault
-  const handleApiKeySet = (newKey: string) => {
+  const handleApiKeySet = async (newKey: string) => {
     const trimmed = newKey.trim();
     if (trimmed.length >= 20) {
       setApiKey(trimmed);
@@ -1394,6 +1416,16 @@ const Studio: React.FC = () => {
       setShowApiKeyDialog(false);
       setApiKeyError(null);
       setHasCustomKey(true);
+
+      // Persist to Supabase profile if authenticated
+      if (user?.id) {
+        try {
+          await ProjectService.updateProfile(user.id, { api_key: trimmed });
+          console.log('[API Key] Saved to profile');
+        } catch (e) {
+          console.warn('[API Key] Failed to save to profile:', e);
+        }
+      }
     } else {
       setApiKeyError('Invalid API Key (too short)');
     }
@@ -1404,6 +1436,52 @@ const Studio: React.FC = () => {
     setRuntimeApiKey(null); // Clear Memory Vault
     setShowApiKeyDialog(false);
     setHasCustomKey(false);
+  };
+
+  // === JSON Export/Import Handlers ===
+  const handleExportProject = () => {
+    const state = {
+      promptSequence,
+      storyboardByIndex,
+      sequenceVideoData: {}, // Videos can't be serialized, will need regeneration
+      sequenceHistory: [],
+      activeDogma: sequenceBoundDogma,
+      assistants: {
+        motionDescription: assistantMotionDescription,
+        assistantExtensionContext,
+        assistantImage,
+        assistantReferenceVideo,
+        mentionedCharacters
+      }
+    };
+    const title = currentProject?.title || promptSequence?.mainPrompt?.slice(0, 30) || 'jenial_project';
+    exportProjectToJSON(state, title);
+  };
+
+  const handleImportProject = async () => {
+    const file = await triggerImportFilePicker();
+    if (!file) return;
+
+    try {
+      const { title, state } = await importProjectFromJSON(file);
+
+      // Restore state
+      setPromptSequence(state.promptSequence);
+      setStoryboardByIndex(state.storyboardByIndex || {});
+      setSequenceBoundDogma(state.activeDogma || null);
+      setAssistantMotionDescription(state.assistants?.motionDescription || null);
+      setAssistantExtensionContext(state.assistants?.assistantExtensionContext || null);
+      setAssistantImage(state.assistants?.assistantImage || null);
+      setAssistantReferenceVideo(state.assistants?.assistantReferenceVideo || null);
+      setMentionedCharacters(state.assistants?.mentionedCharacters || []);
+
+      // Clear current project association (this is a local import)
+      setCurrentProject(null);
+
+      alert(`Project "${title}" imported successfully!`);
+    } catch (error: any) {
+      alert(`Import failed: ${error.message}`);
+    }
   };
 
   const handleSaveShot = (thumbnailBase64: string) => {
@@ -2144,13 +2222,27 @@ const Studio: React.FC = () => {
             <button
               onClick={saveProject}
               disabled={isProjectSaving}
-              title="Save Project"
+              title="Save Project to Cloud"
               className="flex items-center gap-2 px-3 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30 font-semibold rounded-lg transition-colors disabled:opacity-50">
               {isProjectSaving ? (
                 <ArrowPathIcon className="w-5 h-5 animate-spin" />
               ) : (
                 <UploadCloudIcon className="w-5 h-5" />
               )}
+            </button>
+            <button
+              onClick={handleExportProject}
+              title="Export Project to JSON"
+              className="flex items-center gap-2 px-2 py-2 bg-gray-700/80 hover:bg-gray-700 text-gray-300 hover:text-white font-semibold rounded-lg transition-colors">
+              <DownloadIcon className="w-5 h-5" />
+            </button>
+            <button
+              onClick={handleImportProject}
+              title="Import Project from JSON"
+              className="flex items-center gap-2 px-2 py-2 bg-gray-700/80 hover:bg-gray-700 text-gray-300 hover:text-white font-semibold rounded-lg transition-colors">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12" />
+              </svg>
             </button>
             <div className="w-px h-6 bg-gray-700 mx-1"></div>
             <button
@@ -2422,8 +2514,8 @@ const Studio: React.FC = () => {
             )}
           </div>
         </main>
-      </div>
-    </ErrorBoundary>
+      </div >
+    </ErrorBoundary >
   );
 };
 
