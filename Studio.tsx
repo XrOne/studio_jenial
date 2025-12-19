@@ -17,6 +17,7 @@ import {
   SparklesIcon,
   UsersIcon,
   UploadCloudIcon,
+  ArrowPathIcon,
 } from './components/icons';
 import LoadingIndicator from './components/LoadingIndicator';
 import PromptEditorModal from './components/PromptEditorModal';
@@ -31,7 +32,8 @@ import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
 import useLocalStorage from './hooks/useLocalStorage';
 import { useShotLibrary } from './hooks/useShotLibrary';
-import { useSessionPersistence } from './hooks/useSessionPersistence'; // New // New Hook
+import { useSessionPersistence } from './hooks/useSessionPersistence'; // New Hook
+import { useProjectPersistence } from './hooks/useProjectPersistence'; // Persistence Hook
 import {
   generateVideo,
   reviseFollowingPrompts,
@@ -64,7 +66,10 @@ import {
   VeoModel,
   VideoFile,
   VideoProvider,
+  Project,
+  ProjectState
 } from './types';
+import { ProjectService } from './services/projectService';
 
 // ===================================================================
 // NEUTRAL DEFAULT: No hardcoded dogmas
@@ -384,6 +389,7 @@ const PromptConception: React.FC<{
   };
 
 const Studio: React.FC = () => {
+  const { user } = useAuth(); // Inject User Context
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [currentStage, setCurrentStage] = useState<AppStage>(AppStage.PROMPTING);
   const [resetKey, setResetKey] = useState(0); // For forcing component remounts on reset
@@ -494,6 +500,8 @@ const Studio: React.FC = () => {
     thumbnail?: string;
   } | null>(null);
 
+
+
   // === NANO BANANA PRO: Centralized editor context ===
   const [nanoEditorContext, setNanoEditorContext] = useState<NanoEditorContext | null>(null);
   const [storyboardByIndex, setStoryboardByIndex] = useState<Record<number, StoryboardPreview>>({});
@@ -525,6 +533,39 @@ const Studio: React.FC = () => {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [historySessions, setHistorySessions] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // --- Project Persistence (Correct Location) ---
+  const {
+    currentProject,
+    setCurrentProject,
+    saveProject,
+    loadProject,
+    isSaving: isProjectSaving
+  } = useProjectPersistence(
+    user,
+    {
+      promptSequence,
+      storyboardByIndex,
+      sequenceVideoData,
+      activeDogma: sequenceBoundDogma,
+      assistantMotionDescription,
+      assistantExtensionContext,
+      assistantImage,
+      assistantReferenceVideo,
+      mentionedCharacters
+    },
+    {
+      setPromptSequence,
+      setStoryboardByIndex,
+      setSequenceVideoData,
+      setSequenceBoundDogma,
+      setAssistantMotionDescription,
+      setAssistantExtensionContext,
+      setAssistantImage,
+      setAssistantReferenceVideo,
+      setMentionedCharacters
+    }
+  );
 
   // Auto-open profile modal if no profile
   useEffect(() => {
@@ -1851,8 +1892,17 @@ const Studio: React.FC = () => {
         {/* Persistence Modals */}
         <UserProfileModal
           isOpen={isProfileModalOpen}
-          onConfirm={handleProfileConfirm}
-          isLoading={isLoadingHistory}
+          onClose={() => setIsProfileModalOpen(false)}
+          currentProject={currentProject}
+          onLoadProject={(p) => {
+            loadProject(p);
+            setIsProfileModalOpen(false);
+          }}
+          onNewProject={() => {
+            handleStartNewProject();
+            setCurrentProject(null);
+            setIsProfileModalOpen(false);
+          }}
         />
         <SessionHistoryModal
           isOpen={isHistoryModalOpen}
@@ -2082,6 +2132,25 @@ const Studio: React.FC = () => {
               title="Shot Library"
               className="flex items-center gap-2 px-3 py-2 bg-gray-700/80 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors">
               <FilmIcon className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setIsProfileModalOpen(true)}
+              title="User Profile & Projects"
+              className="flex items-center gap-2 px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-semibold rounded-lg transition-colors">
+              <span className="w-5 h-5 flex items-center justify-center font-bold">
+                {user?.email?.[0].toUpperCase() || <UsersIcon className="w-5 h-5" />}
+              </span>
+            </button>
+            <button
+              onClick={saveProject}
+              disabled={isProjectSaving}
+              title="Save Project"
+              className="flex items-center gap-2 px-3 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30 font-semibold rounded-lg transition-colors disabled:opacity-50">
+              {isProjectSaving ? (
+                <ArrowPathIcon className="w-5 h-5 animate-spin" />
+              ) : (
+                <UploadCloudIcon className="w-5 h-5" />
+              )}
             </button>
             <div className="w-px h-6 bg-gray-700 mx-1"></div>
             <button

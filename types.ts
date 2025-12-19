@@ -259,3 +259,37 @@ export interface NanoEditorContext {
   baseImage?: ImageFile;
   initialPrompt?: string;
 }
+
+// === PERSISTENCE & USER ===
+
+export interface UserProfile {
+  id: string;
+  email?: string;
+  full_name?: string;
+  avatar_url?: string;
+  api_key?: string; // Stored preference
+}
+
+export interface ProjectState {
+  promptSequence: PromptSequence | null;
+  storyboardByIndex: Record<number, StoryboardPreview>;
+  sequenceVideoData: Record<number, SequenceVideoData>;
+  sequenceHistory: any[]; // Using any[] for now to match Studio.tsx usage, ideally typed
+  assistants: {
+    motionDescription: string | null;
+    assistantExtensionContext: ImageFile | null;
+    assistantImage: ImageFile | null;
+    assistantReferenceVideo: VideoFile | null;
+    mentionedCharacters: Character[];
+  };
+  activeDogma: Dogma | null;
+}
+
+export interface Project {
+  id: string;
+  title: string;
+  user_id: string;
+  content_json?: ProjectState;
+  updated_at: string;
+  created_at: string;
+}
