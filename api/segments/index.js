@@ -12,16 +12,25 @@ const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_A
  */
 router.post('/', async (req, res) => {
     try {
-        const { project_id, order_index, label, duration_sec } = req.body;
+        const { project_id, order, label, in_sec, out_sec } = req.body;
 
         // RLS Context
         const scopedClient = createClient(supabaseUrl, supabaseKey, {
             global: { headers: { Authorization: req.headers.authorization } }
         });
 
+        // Calculate default out_sec if not provided
+        const defaultOutSec = out_sec || (in_sec || 0) + 5;
+
         const { data, error } = await scopedClient
             .from('segments')
-            .insert([{ project_id, order_index, label, duration_sec }])
+            .insert([{
+                project_id,
+                order: order || 0,
+                label,
+                in_sec: in_sec || 0,
+                out_sec: defaultOutSec
+            }])
             .select()
             .single();
 
@@ -72,8 +81,8 @@ router.post('/:id/revisions', async (req, res) => {
             provider,
             prompt_json,
             base_asset_id,
-            output_image_asset_id,
-            output_video_asset_id,
+            output_asset_id,
+            parent_revision_id,
             status
         } = req.body;
 
@@ -86,12 +95,12 @@ router.post('/:id/revisions', async (req, res) => {
             .from('segment_revisions')
             .insert([{
                 segment_id: id,
-                provider,
-                prompt_json,
+                provider: provider || 'veo',
+                prompt_json: prompt_json || { rootPrompt: '' },
                 base_asset_id,
-                output_image_asset_id,
-                output_video_asset_id,
-                status: status || 'succeeded', // Default to succeeded if pushing completed result
+                output_asset_id,
+                parent_revision_id,
+                status: status || 'draft',
             }])
             .select()
             .single();

@@ -24,18 +24,20 @@ Ce guide vous aide à configurer Studio Jenial pour fonctionner avec Supabase et
 ### Option A: Via l'Interface Web (Recommandé)
 
 1. Dans votre projet Supabase, allez dans **Storage**
-2. Créez 3 buckets publics:
+2. Créez 3 buckets **privés** (par défaut):
    - `videos`
    - `images`
    - `thumbnails`
-3. Pour chaque bucket, activez "Public bucket" dans les settings
+3. **⚠️ SÉCURITÉ**: Laissez "Public bucket" **désactivé** pour chaque bucket
+
+> **Note**: Les médias seront accessibles uniquement via des URLs signées temporaires, ce qui est plus sécurisé que des URLs publiques permanentes.
 
 ### Option B: Via SQL (Automatique)
 
 1. Dans votre projet Supabase, allez dans **SQL Editor**
 2. Créez une nouvelle query
 3. Copiez-collez le contenu de `supabase-setup.sql`
-4. Exécutez la requête
+4. **Puis** exécutez `supabase-security-patch-storage.sql` pour sécuriser les buckets
 
 ---
 
@@ -167,8 +169,9 @@ Testez ces fonctionnalités sur votre site déployé:
 
 ### Erreur "Failed to upload to Supabase"
 - Vérifiez que les buckets existent (videos, images, thumbnails)
-- Vérifiez que les buckets sont publics
+- Vérifiez que les Storage RLS policies sont configurées
 - Vérifiez vos credentials Supabase
+- Consultez les logs Supabase pour plus de détails
 
 ### Les vidéos ne se génèrent pas
 - Vérifiez que votre clé API a accès à Veo (beta access requis)

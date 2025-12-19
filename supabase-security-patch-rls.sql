@@ -6,7 +6,7 @@ DROP POLICY IF EXISTS "Public profiles access" ON studio_profiles;
 DROP POLICY IF EXISTS "Public sessions access" ON studio_sessions;
 DROP POLICY IF EXISTS "Public previews access" ON storyboard_previews;
 
--- Create authenticated-only policies (minimal security improvement)
+-- Create authenticated-only policies
 CREATE POLICY "Authenticated access profiles" ON studio_profiles 
   FOR ALL TO authenticated USING (true);
 
