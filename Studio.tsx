@@ -52,9 +52,11 @@ import {
   GenerationMode,
   ImageFile,
   NanoApplyPayload,
+  AspectRatio,
   NanoEditorContext,
   PromptSequence,
   PromptSequenceStatus,
+  Resolution,
   SavedShot,
   SequenceProgress,
   SequenceVideoData,
@@ -166,7 +168,7 @@ const PromptConception: React.FC<{
           <SparklesIcon className="w-5 h-5 text-indigo-400" />
           {title}
         </h3>
-        <div className="flex-grow flex flex-col gap-4 overflow-y-auto">
+        <div className="flex-grow flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-300px)] scrollable-panel">
           {!hasContent ? (
             <div className="flex-grow flex flex-col items-center justify-center text-center p-4 border-2 border-dashed border-gray-800 rounded-xl bg-gray-900/50">
               <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-3 animate-pulse">
@@ -1072,7 +1074,7 @@ const Studio: React.FC = () => {
         }
       }
     },
-    [promptSequence, activePromptIndex, assistantExtensionContext],
+    [promptSequence, activePromptIndex, assistantExtensionContext, storyboardByIndex, sequenceVideoData, apiKey, hasCustomKey],
   );
 
   const handleStartNewProject = useCallback(() => {
@@ -1554,11 +1556,21 @@ const Studio: React.FC = () => {
     if (!isMainPrompt) {
       console.log('[Sequence] Setting up Extension', index, 'with base video:', sequenceVideoData[index - 1]?.video);
     }
+
+    // For root shot (index=0), create default config if mainPromptConfig is null
+    const defaultRootConfig: GenerateVideoParams = {
+      prompt: '',
+      model: VeoModel.VEO,
+      aspectRatio: AspectRatio.LANDSCAPE,
+      resolution: Resolution.P720,
+      mode: GenerationMode.TEXT_TO_VIDEO,
+    };
+
     const baseConfig = isMainPrompt
-      ? mainPromptConfig
+      ? (mainPromptConfig || defaultRootConfig)  // Use default if mainPromptConfig is null
       : sequenceVideoData[index - 1]
         ? {
-          ...mainPromptConfig,
+          ...(mainPromptConfig || defaultRootConfig),
           mode: GenerationMode.EXTEND_VIDEO,
           inputVideoObject: sequenceVideoData[index - 1].video,
           prompt: '',
@@ -1572,6 +1584,7 @@ const Studio: React.FC = () => {
       };
       setInitialFormValues(newConfig);
       setActivePromptIndex(index);
+      console.log(`[Sequence] Selected prompt index=${index}, isMain=${isMainPrompt}, config ready`);
     } else {
       // GUARDRAIL 3: Block early selection of extensions
       console.warn(`[Sequence] Blocked selection of extension index=${index}: previous shot (index=${index - 1}) not ready`);
