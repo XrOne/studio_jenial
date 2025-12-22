@@ -271,6 +271,10 @@ export interface UserProfile {
   full_name?: string;
   avatar_url?: string;
   api_key?: string; // Stored preference
+  preferences?: {
+    videoStorage?: 'google-drive' | 'local-download';
+    [key: string]: any; // Allow other future preferences
+  };
 }
 
 export interface ProjectState {

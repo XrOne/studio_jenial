@@ -10,7 +10,7 @@ interface StorageSettingsProps {
 
 export const StorageSettings: React.FC<StorageSettingsProps> = ({ isOpen, onClose }) => {
     const { user } = useAuth();
-    const [storageMode, setStorageMode] = useState<'google-drive' | 'local-download'>('google-drive');
+    const [storageMode, setStorageMode] = useState<'google-drive' | 'local-download'>('local-download'); // Default to local
     const [driveEnabled, setDriveEnabled] = useState(false);
     const [driveConnected, setDriveConnected] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -40,10 +40,15 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ isOpen, onClos
                 const profile = await ProjectService.getProfile(user.id);
                 if (profile?.preferences?.videoStorage) {
                     setStorageMode(profile.preferences.videoStorage);
+                } else {
+                    // No preference saved: default to local-download (always works)
+                    setStorageMode('local-download');
                 }
             }
         } catch (error) {
             console.error('[StorageSettings] Error loading settings:', error);
+            // On error, default to local (safest option)
+            setStorageMode('local-download');
         } finally {
             setIsLoading(false);
         }
