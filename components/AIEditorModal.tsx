@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { editImage } from '../services/geminiService';
 import { Dogma, ImageFile, NanoApplyPayload } from '../types';
 import AngleKit from './AngleKit';
+import { BananaAxisControl } from './BananaAxisControl'; // New 3D Compass
 import {
   PencilIcon,
   XMarkIcon,
@@ -14,8 +15,6 @@ import {
   SparklesIcon,
   HighAngleIcon,
   LowAngleIcon,
-  PanLeftIcon,
-  PanRightIcon,
   ZoomInIcon
 } from './icons';
 import { ImageUpload } from './PromptForm';
@@ -42,6 +41,10 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
   target = 'character',
   initialPrompt = '',
 }) => {
+  // PIVOT SYSTEM: We use workingImage as the base for edits.
+  // Initially it's the props image, but user can "Commit" an edit to make it the new base.
+  const [workingImage, setWorkingImage] = useState<ImageFile>(image);
+
   const [prompt, setPrompt] = useState(initialPrompt);
   const [styleImage, setStyleImage] = useState<ImageFile | null>(null);
   const [editedImage, setEditedImage] = useState<ImageFile | null>(null);
@@ -69,7 +72,8 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
     setEditedImage(null);
 
     try {
-      const imagesToProcess = [image];
+      // PIVOT SYSTEM: Using workingImage which allows accumulated edits
+      const imagesToProcess = [workingImage];
       let fullPrompt = finalPromptText;
 
       if (styleImage) {
@@ -97,12 +101,18 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
     }
   };
 
-  const handleQuickAxis = (axis: string, instruction: string) => {
-    // Force Pro model for complex spatial transformations
+  const handleAxisUpdate = (instruction: string) => {
+    setPrompt(instruction);
+    // Force Pro model for spatial reasoning
     setModel('nano-pro');
-    const axisPrompt = `Change camera angle to ${axis}. ${instruction}. Maintain absolute character and style consistency with the original image.`;
-    setPrompt(axisPrompt); // Update UI so user sees what happened
-    handleEdit(axisPrompt);
+  };
+
+  const handleCommit = () => {
+    if (editedImage) {
+      setWorkingImage(editedImage);
+      setEditedImage(null);
+      setPrompt('');
+    }
   };
 
   const handleSelectAngle = (angle: string) => {
@@ -113,7 +123,7 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
     if (editedImage) {
       onConfirm(editedImage);
     } else {
-      onConfirm(image);
+      onConfirm(workingImage);
     }
   };
 
@@ -156,7 +166,7 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
                 {model === 'nano' ? (
                   <>⚡ Gemini Flash</>
                 ) : (
-                  <><SparklesIcon className="w-3.5 h-3.5" /> Gemini 3 Pro</>
+                  <><SparklesIcon className="w-3.5 h-3.5" /> Banana Nano Pro</>
                 )}
               </span>
               <ChevronDownIcon className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
@@ -181,7 +191,7 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
                 >
                   <span className={`w-2 h-2 rounded-full ${model === 'nano-pro' ? 'bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.8)]' : 'bg-gray-600'}`} />
                   <div>
-                    <span className="block font-medium">Gemini 3.0 Pro</span>
+                    <span className="block font-medium">Banana Nano Pro</span>
                     <span className="text-xs text-gray-500">Highest Quality & Logic</span>
                   </div>
                 </button>
@@ -214,80 +224,39 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
             <div className="w-2/3 relative bg-black rounded-lg border border-gray-700/30 overflow-hidden group">
               <div className="w-full h-full flex items-center justify-center">
                 <img
-                  src={URL.createObjectURL(editedImage?.file ?? image.file)}
+                  src={URL.createObjectURL(editedImage?.file ?? workingImage.file)}
                   alt="Image to edit"
                   className="max-w-full max-h-full object-contain"
                 />
               </div>
 
               {/* Banana Axis Overlay */}
-              {showAxisControls && !isLoading && (
-                <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  {/* Top: High Angle */}
-                  <div className="flex justify-center">
-                    <button
-                      onClick={() => handleQuickAxis('High Angle', 'Look down from above')}
-                      className="pointer-events-auto p-3 bg-black/50 hover:bg-indigo-600 backdrop-blur-sm rounded-full text-white border border-white/10 hover:border-indigo-400 transition-all transform hover:scale-110 hover:-translate-y-1 shadow-lg"
-                      title="High Angle (Plongée)"
-                    >
-                      <HighAngleIcon className="w-6 h-6" />
-                    </button>
-                  </div>
-
-                  <div className="flex justify-between items-center w-full px-4">
-                    {/* Left: Pan/Profile Left */}
-                    <button
-                      onClick={() => handleQuickAxis('Left Side Profile', 'Rotate camera left around subject')}
-                      className="pointer-events-auto p-3 bg-black/50 hover:bg-indigo-600 backdrop-blur-sm rounded-full text-white border border-white/10 hover:border-indigo-400 transition-all transform hover:scale-110 hover:-translate-x-1 shadow-lg"
-                      title="Left Profile"
-                    >
-                      <PanLeftIcon className="w-6 h-6" />
-                    </button>
-
-                    {/* Center: Zoom/Detail */}
-                    <button
-                      onClick={() => handleQuickAxis('Extreme Close Up', 'Zoom in on the face/details')}
-                      className="pointer-events-auto p-4 bg-indigo-600/20 hover:bg-indigo-600 backdrop-blur-sm rounded-full text-indigo-300 hover:text-white border border-indigo-500/30 transition-all transform hover:scale-110 shadow-lg"
-                      title="Zoom In / Enhance Detail"
-                    >
-                      <ZoomInIcon className="w-6 h-6" />
-                    </button>
-
-                    {/* Right: Pan/Profile Right */}
-                    <button
-                      onClick={() => handleQuickAxis('Right Side Profile', 'Rotate camera right around subject')}
-                      className="pointer-events-auto p-3 bg-black/50 hover:bg-indigo-600 backdrop-blur-sm rounded-full text-white border border-white/10 hover:border-indigo-400 transition-all transform hover:scale-110 hover:translate-x-1 shadow-lg"
-                      title="Right Profile"
-                    >
-                      <PanRightIcon className="w-6 h-6" />
-                    </button>
-                  </div>
-
-                  {/* Bottom: Low Angle */}
-                  <div className="flex justify-center">
-                    <button
-                      onClick={() => handleQuickAxis('Low Angle', 'Look up from below')}
-                      className="pointer-events-auto p-3 bg-black/50 hover:bg-indigo-600 backdrop-blur-sm rounded-full text-white border border-white/10 hover:border-indigo-400 transition-all transform hover:scale-110 hover:translate-y-1 shadow-lg"
-                      title="Low Angle (Contre-plongée)"
-                    >
-                      <LowAngleIcon className="w-6 h-6" />
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* Banana Axis Overlay Removed - Moved to Sidebar */}
 
               {isLoading && (
                 <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center backdrop-blur-sm z-20">
                   <div className="w-12 h-12 border-4 border-t-transparent border-indigo-500 rounded-full animate-spin mb-4"></div>
                   <p className="text-white font-semibold animate-pulse">
-                    {model === 'nano' ? 'Flash Edit in progress...' : 'Pro 3.0 Axis Shift...'}
+                    {model === 'nano' ? 'Flash Edit in progress...' : 'Banana Nano Axis Shift...'}
                   </p>
                 </div>
               )}
             </div>
 
             {/* Controls */}
-            <div className="w-1/3 flex flex-col gap-4">
+            <div className="w-1/3 flex flex-col gap-4 overflow-y-auto pr-2">
+              {/* Banana Axis 3D Control */}
+              {showAxisControls && (
+                <div className="bg-gray-900/50 p-4 rounded-xl border border-gray-700 shadow-inner">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+                      Banana Axis 3D
+                    </h3>
+                  </div>
+                  <BananaAxisControl onUpdate={handleAxisUpdate} />
+                </div>
+              )}
               <div>
                 <label htmlFor="ai-prompt" className="text-sm font-semibold mb-2 text-gray-400 block">
                   Editing Instruction
@@ -346,6 +315,23 @@ const AIEditorModal: React.FC<AIEditorModalProps> = ({
                   </span>
                   {!isLoading && model === 'nano-pro' && <SparklesIcon className="w-4 h-4" />}
                 </button>
+
+                {/* PIVOT COMMIT BUTTON */}
+                {editedImage && (
+                  <div className="mt-3 p-3 bg-green-900/20 border border-green-500/30 rounded-xl flex items-center justify-between animate-in fade-in slide-in-from-bottom-4">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-green-400">Résultat Satisfaisant ?</span>
+                      <span className="text-[10px] text-gray-400">Utiliser cette image comme nouvelle base.</span>
+                    </div>
+                    <button
+                      onClick={handleCommit}
+                      className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-lg shadow-lg flex items-center gap-1 transition-colors hover:scale-105 transform"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                      Valider l'étape
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
