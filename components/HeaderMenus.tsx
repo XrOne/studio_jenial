@@ -74,10 +74,10 @@ const DropdownMenu: React.FC<DropdownMenuProps> = ({ trigger, items, align = 'le
                                     }}
                                     disabled={item.disabled}
                                     className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${item.disabled
-                                            ? 'text-gray-500 cursor-not-allowed'
-                                            : item.variant === 'danger'
-                                                ? 'text-red-400 hover:bg-red-500/10'
-                                                : 'text-gray-200 hover:bg-gray-700/50'
+                                        ? 'text-gray-500 cursor-not-allowed'
+                                        : item.variant === 'danger'
+                                            ? 'text-red-400 hover:bg-red-500/10'
+                                            : 'text-gray-200 hover:bg-gray-700/50'
                                         }`}
                                 >
                                     {item.icon && <span className="w-5 h-5 flex-shrink-0">{item.icon}</span>}
@@ -149,6 +149,7 @@ interface ProjectMenuProps {
     onExportJSON: () => void;
     onImportJSON: () => void;
     onOpenHistory: () => void;
+    onCleanHistory: () => void; // Permet de nettoyer les projets corrompus
     isSaving: boolean;
     isAuthenticated: boolean;
 }
@@ -160,6 +161,7 @@ export const ProjectMenu: React.FC<ProjectMenuProps> = ({
     onExportJSON,
     onImportJSON,
     onOpenHistory,
+    onCleanHistory,
     isSaving,
     isAuthenticated,
 }) => {
@@ -207,6 +209,17 @@ export const ProjectMenu: React.FC<ProjectMenuProps> = ({
             ),
             onClick: onOpenHistory,
         },
+        {
+            label: '🧹 Nettoyer l\'historique',
+            icon: (
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+            ),
+            onClick: onCleanHistory,
+            disabled: !isAuthenticated,
+            variant: 'danger',
+        },
     ];
 
     return (
@@ -232,6 +245,7 @@ interface ProfileMenuProps {
     hasApiKey: boolean;
     onOpenApiKey: () => void;
     onOpenProfile: () => void;
+    onOpenStorageSettings: () => void;
     onSignOut: () => void;
     onSignIn: () => void;
 }
@@ -241,6 +255,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
     hasApiKey,
     onOpenApiKey,
     onOpenProfile,
+    onOpenStorageSettings,
     onSignOut,
     onSignIn,
 }) => {
@@ -271,6 +286,15 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
             label: hasApiKey ? '✓ Clé API configurée' : 'Configurer clé API',
             icon: <KeyIcon className="w-5 h-5" />,
             onClick: onOpenApiKey,
+        },
+        {
+            label: '💾 Stockage vidéos',
+            icon: (
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                </svg>
+            ),
+            onClick: onOpenStorageSettings,
         },
         { label: '', divider: true, onClick: () => { } },
         {

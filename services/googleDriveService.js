@@ -158,10 +158,54 @@ export const createDriveClient = async (userId) => {
 };
 
 /**
+ * Ensure "Studio Jenial" folder exists in user's Drive
+ * Creates the folder if it doesn't exist, returns folder ID
+ */
+export const ensureStudioFolder = async (drive, userId) => {
+    try {
+        // Search for existing folder
+        const query = "mimeType='application/vnd.google-apps.folder' and name='Studio Jenial' and trashed=false";
+
+        const res = await drive.files.list({
+            q: query,
+            fields: 'files(id, name)',
+            spaces: 'drive'
+        });
+
+        // Return existing folder
+        if (res.data.files && res.data.files.length > 0) {
+            console.log(`[Drive] Found existing Studio Jenial folder for user ${userId}`);
+            return res.data.files[0].id;
+        }
+
+        // Create new folder
+        const folderMetadata = {
+            name: 'Studio Jenial',
+            mimeType: 'application/vnd.google-apps.folder'
+        };
+
+        const folder = await drive.files.create({
+            requestBody: folderMetadata,
+            fields: 'id'
+        });
+
+        console.log(`[Drive] Created Studio Jenial folder for user ${userId}`);
+        return folder.data.id;
+    } catch (error) {
+        console.error('[Drive] Error ensuring folder:', error.message);
+        // If folder creation fails, return null to upload to root
+        return null;
+    }
+};
+
+/**
  * Upload a file to user's Drive from a URL (streaming, no disk storage)
  */
 export const uploadFileToDrive = async (userId, fileUrl, fileName, mimeType) => {
     const drive = await createDriveClient(userId);
+
+    // Ensure Studio Jenial folder exists
+    const folderId = await ensureStudioFolder(drive, userId);
 
     // Stream download from URL
     const response = await fetch(fileUrl);
@@ -169,11 +213,19 @@ export const uploadFileToDrive = async (userId, fileUrl, fileName, mimeType) => 
         throw new Error('SOURCE_DOWNLOAD_FAILED');
     }
 
-    // Upload to Drive
+    // Upload to Drive (in Studio Jenial folder if available)
     const fileMetadata = {
         name: fileName,
         mimeType
     };
+
+    // Add folder parent if folder exists
+    if (folderId) {
+        fileMetadata.parents = [folderId];
+        console.log(`[Drive] Uploading to Studio Jenial folder: ${fileName}`);
+    } else {
+        console.log(`[Drive] Uploading to root (folder creation failed): ${fileName}`);
+    }
 
     const media = {
         mimeType,

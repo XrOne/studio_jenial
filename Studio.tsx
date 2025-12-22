@@ -29,6 +29,7 @@ import StoryboardPreviewModal from './components/StoryboardPreviewModal';
 import ModeSelectionStep from './components/ModeSelectionStep';
 import { UserProfileModal } from './components/UserProfileModal'; // New
 import { SessionHistoryModal } from './components/SessionHistoryModal'; // New
+import { StorageSettings } from './components/StorageSettings'; // Storage configuration
 import { LibraryMenu, ProjectMenu, ProfileMenu } from './components/HeaderMenus'; // New Header Menus
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
@@ -542,6 +543,7 @@ const Studio: React.FC = () => {
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isStorageSettingsOpen, setIsStorageSettingsOpen] = useState(false);
   const [historySessions, setHistorySessions] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -639,6 +641,31 @@ const Studio: React.FC = () => {
       setHistorySessions(sessions);
     } finally {
       setIsLoadingHistory(false);
+    }
+  };
+
+  const handleCleanHistory = async () => {
+    if (!user) return;
+
+    const confirmed = window.confirm(
+      '⚠️ ATTENTION: Cette action va supprimer TOUS vos projets sauvegardés dans le cloud.\n\n' +
+      'Les projets corrompus ou anciens seront définitivement supprimés.\n\n' +
+      'Voulez-vous continuer?'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const projects = await ProjectService.listProjects(user.id);
+
+      for (const project of projects) {
+        await ProjectService.deleteProject(project.id);
+      }
+
+      alert(`✅ ${projects.length} projet(s) supprimé(s) avec succès.`);
+    } catch (error) {
+      console.error('[CleanHistory] Error cleaning projects:', error);
+      alert('❌ Erreur lors du nettoyage de l\'historique.');
     }
   };
 
@@ -2097,6 +2124,10 @@ const Studio: React.FC = () => {
           onRestore={handleRestoreSession}
           isLoading={isLoadingHistory}
         />
+        <StorageSettings
+          isOpen={isStorageSettingsOpen}
+          onClose={() => setIsStorageSettingsOpen(false)}
+        />
         {isShotLibraryOpen && (
           <ShotLibrary
             isOpen={isShotLibraryOpen}
@@ -2307,6 +2338,7 @@ const Studio: React.FC = () => {
               onExportJSON={handleExportProject}
               onImportJSON={handleImportProject}
               onOpenHistory={handleOpenHistory}
+              onCleanHistory={handleCleanHistory}
               isSaving={isProjectSaving || isSaving}
               isAuthenticated={!!user}
             />
@@ -2317,6 +2349,7 @@ const Studio: React.FC = () => {
               hasApiKey={hasCustomKey}
               onOpenApiKey={() => setShowApiKeyDialog(true)}
               onOpenProfile={() => setIsProfileModalOpen(true)}
+              onOpenStorageSettings={() => setIsStorageSettingsOpen(true)}
               onSignOut={signOut}
               onSignIn={signInWithGoogle}
             />
