@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Project, ProjectState, PromptSequence, StoryboardPreview, SequenceVideoData, Dogma, ImageFile, VideoFile, Character } from '../types';
+import { Project, ProjectState, PromptSequence, StoryboardPreview, SequenceVideoData, Dogma, ImageFile, VideoFile, Character, ChatMessage } from '../types';
 import { ProjectService } from '../services/projectService';
 
 export const useProjectPersistence = (
@@ -14,6 +14,8 @@ export const useProjectPersistence = (
         assistantImage: ImageFile | null;
         assistantReferenceVideo: VideoFile | null;
         mentionedCharacters: Character[];
+        // P0: Add assistant messages for full persistence
+        assistantMessages: ChatMessage[];
     },
     setters: {
         setPromptSequence: (p: PromptSequence | null) => void;
@@ -25,6 +27,8 @@ export const useProjectPersistence = (
         setAssistantImage: (i: ImageFile | null) => void;
         setAssistantReferenceVideo: (v: VideoFile | null) => void;
         setMentionedCharacters: (c: Character[]) => void;
+        // P0: Add setter for assistant messages
+        setAssistantMessages: (m: ChatMessage[]) => void;
     }
 ) => {
     const [currentProject, setCurrentProject] = useState<Project | null>(null);
@@ -82,7 +86,12 @@ export const useProjectPersistence = (
                 assistantExtensionContext: sanitizeImage(state.assistantExtensionContext),
                 assistantImage: sanitizeImage(state.assistantImage),
                 assistantReferenceVideo: sanitizeVideo(state.assistantReferenceVideo),
-                mentionedCharacters: state.mentionedCharacters
+                mentionedCharacters: state.mentionedCharacters,
+                // P0: Persist assistant chat messages (sanitize images inside)
+                messages: state.assistantMessages.map(msg => ({
+                    ...msg,
+                    image: msg.image ? sanitizeImage(msg.image) : null
+                }))
             }
         };
     }, [state, sanitizeImage, sanitizeVideo]);
@@ -100,6 +109,8 @@ export const useProjectPersistence = (
         setters.setAssistantImage(params.assistants?.assistantImage || null);
         setters.setAssistantReferenceVideo(params.assistants?.assistantReferenceVideo || null);
         setters.setMentionedCharacters(params.assistants?.mentionedCharacters || []);
+        // P0: Restore assistant messages
+        setters.setAssistantMessages(params.assistants?.messages || []);
 
         // Note: Video pointers (blobs) are lost. UI should handle missing videos gracefully.
     }, [setters]);

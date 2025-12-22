@@ -873,7 +873,9 @@ export const generateSequenceFromConversation = async (
   duration: number,
   extensionContext?: ImageFile | null,
   motionDescription?: string | null,
-  apiKey?: string
+  apiKey?: string,
+  // P1: Director Mode sequence intent
+  sequenceIntent?: 'plan-sequence' | 'decoupage' | null
 ): Promise<string | { creativePrompt: string; veoOptimizedPrompt: string }> => {
 
   // Build context instruction based on whether this is an extension
@@ -886,6 +888,21 @@ This describes the movement/direction from the original video that the extension
     }
   } else {
     contextInstruction = `User wants a NEW video. Duration: ${duration}s.`;
+  }
+
+  // P1: Director Mode context - adapt generation based on sequence type
+  if (sequenceIntent === 'plan-sequence') {
+    contextInstruction += `\n\n🎬 MODE RÉALISATEUR: PLAN-SÉQUENCE (caméra continue)
+- Générer UN SEUL prompt vidéo continu
+- Pas de coupes, transitions fluides
+- Le mouvement de caméra doit être cohérent du début à la fin
+- Durée totale: ${duration}s en un seul plan`;
+  } else if (sequenceIntent === 'decoupage') {
+    contextInstruction += `\n\n🎬 MODE RÉALISATEUR: DÉCOUPAGE (plans multiples)
+- Générer une SÉQUENCE de plans avec valeurs variées
+- Inclure: plan large (établissement), plan moyen (action), plan serré (émotion)
+- Chaque plan doit avoir une transition logique
+- Suggérer ~3-5 plans pour couvrir la scène`;
   }
 
   // DEBUG: Log dogma being used

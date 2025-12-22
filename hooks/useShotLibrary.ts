@@ -12,7 +12,7 @@ import useLocalStorage from './useLocalStorage';
 export function useShotLibrary() {
   // Fallback local state using existing hook
   const [localShots, setLocalShots] = useLocalStorage<SavedShot[]>('shot-library', defaultShots);
-  
+
   // Real exposed state
   const [shots, setShots] = useState<SavedShot[]>(localShots);
   const [isLoading, setIsLoading] = useState(false);
@@ -35,23 +35,26 @@ export function useShotLibrary() {
         .from('shots')
         .select('*')
         .order('created_at', { ascending: false });
-      
+
       if (error) throw error;
-      
+
       if (data) {
-          // Map database columns to SavedShot type if snake_case is used in DB
-          const mappedShots: SavedShot[] = data.map((item: any) => ({
-              id: item.id,
-              title: item.title,
-              prompt: item.prompt,
-              thumbnail: item.thumbnail,
-              createdAt: item.created_at || item.createdAt, // Handle both cases
-              model: item.model,
-              aspectRatio: item.aspect_ratio || item.aspectRatio,
-              resolution: item.resolution,
-              mode: item.mode
-          }));
-          setShots(mappedShots);
+        // Map database columns to SavedShot type if snake_case is used in DB
+        const mappedShots: SavedShot[] = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          prompt: item.prompt,
+          thumbnail: item.thumbnail,
+          createdAt: item.created_at || item.createdAt, // Handle both cases
+          model: item.model,
+          aspectRatio: item.aspect_ratio || item.aspectRatio,
+          resolution: item.resolution,
+          mode: item.mode,
+          // P1: Video restoration fields
+          videoUrl: item.video_url || item.videoUrl,
+          previewImageBase64: item.preview_image_base64 || item.previewImageBase64,
+        }));
+        setShots(mappedShots);
       }
     } catch (error) {
       console.error("Error fetching shots from Supabase:", error);
@@ -66,18 +69,21 @@ export function useShotLibrary() {
     if (isCloudEnabled && supabase) {
       // Optimistic update
       setShots(prev => [newShot, ...prev]);
-      
+
       try {
         const { error } = await supabase.from('shots').insert([{
-            id: newShot.id,
-            title: newShot.title,
-            prompt: newShot.prompt,
-            thumbnail: newShot.thumbnail,
-            created_at: newShot.createdAt,
-            model: newShot.model,
-            aspect_ratio: newShot.aspectRatio,
-            resolution: newShot.resolution,
-            mode: newShot.mode
+          id: newShot.id,
+          title: newShot.title,
+          prompt: newShot.prompt,
+          thumbnail: newShot.thumbnail,
+          created_at: newShot.createdAt,
+          model: newShot.model,
+          aspect_ratio: newShot.aspectRatio,
+          resolution: newShot.resolution,
+          mode: newShot.mode,
+          // P1: Video restoration fields
+          video_url: newShot.videoUrl,
+          preview_image_base64: newShot.previewImageBase64,
         }]);
         if (error) throw error;
       } catch (err) {
@@ -101,7 +107,7 @@ export function useShotLibrary() {
         const { error } = await supabase.from('shots').delete().eq('id', shotId);
         if (error) throw error;
       } catch (err) {
-         console.error("Failed to delete from cloud:", err);
+        console.error("Failed to delete from cloud:", err);
       }
     } else {
       const updated = localShots.filter(s => s.id !== shotId);
@@ -111,19 +117,19 @@ export function useShotLibrary() {
   };
 
   const updateShotTitle = async (shotId: string, newTitle: string) => {
-     if (isCloudEnabled && supabase) {
-        setShots(prev => prev.map(s => s.id === shotId ? { ...s, title: newTitle } : s));
-        try {
-            const { error } = await supabase.from('shots').update({ title: newTitle }).eq('id', shotId);
-            if (error) throw error;
-        } catch (err) {
-            console.error("Failed to update title in cloud:", err);
-        }
-     } else {
-        const updated = localShots.map(s => s.id === shotId ? { ...s, title: newTitle } : s);
-        setLocalShots(updated);
-        setShots(updated);
-     }
+    if (isCloudEnabled && supabase) {
+      setShots(prev => prev.map(s => s.id === shotId ? { ...s, title: newTitle } : s));
+      try {
+        const { error } = await supabase.from('shots').update({ title: newTitle }).eq('id', shotId);
+        if (error) throw error;
+      } catch (err) {
+        console.error("Failed to update title in cloud:", err);
+      }
+    } else {
+      const updated = localShots.map(s => s.id === shotId ? { ...s, title: newTitle } : s);
+      setLocalShots(updated);
+      setShots(updated);
+    }
   };
 
   return {

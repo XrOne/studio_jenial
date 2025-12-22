@@ -52,6 +52,7 @@ import {
   AppState,
   AppStage,
   Character,
+  ChatMessage,
   Dogma,
   GenerateVideoParams,
   GenerationMode,
@@ -428,6 +429,9 @@ const Studio: React.FC = () => {
   const [mainPromptConfig, setMainPromptConfig] =
     useState<GenerateVideoParams | null>(null);
 
+  // P0: Lift assistant messages to Studio for persistence across tab switches
+  const [assistantMessages, setAssistantMessages] = useState<ChatMessage[]>([]);
+
   // === NANO BANANA PRO: 12 Vignettes Modal ===
   const [storyboardModalContext, setStoryboardModalContext] = useState<{
     segmentIndex: number;
@@ -559,7 +563,9 @@ const Studio: React.FC = () => {
       assistantExtensionContext,
       assistantImage,
       assistantReferenceVideo,
-      mentionedCharacters
+      mentionedCharacters,
+      // P0: Include assistant messages for full persistence
+      assistantMessages
     },
     {
       setPromptSequence,
@@ -570,7 +576,9 @@ const Studio: React.FC = () => {
       setAssistantExtensionContext,
       setAssistantImage,
       setAssistantReferenceVideo,
-      setMentionedCharacters
+      setMentionedCharacters,
+      // P0: Setter for assistant messages
+      setAssistantMessages
     }
   );
 
@@ -1541,6 +1549,9 @@ const Studio: React.FC = () => {
 
   const handleSaveShot = (thumbnailBase64: string) => {
     if (lastConfig) {
+      // P1: Find the high-res keyframe from storyboard for better restoration
+      const rootKeyframe = storyboardByIndex[0]?.previewImage;
+
       const newShot: SavedShot = {
         id: `shot-${Date.now()}`,
         prompt: lastConfig.prompt,
@@ -1550,6 +1561,9 @@ const Studio: React.FC = () => {
         aspectRatio: lastConfig.aspectRatio,
         resolution: lastConfig.resolution,
         mode: lastConfig.mode,
+        // P1: Store video URL and full preview for restoration
+        videoUrl: videoUrl || undefined,
+        previewImageBase64: rootKeyframe?.base64 || undefined
       };
       handleSaveShotToLibrary(newShot);
       setIsCurrentVideoSaved(true);
@@ -1558,6 +1572,11 @@ const Studio: React.FC = () => {
 
   const handleLoadShot = (shot: SavedShot) => {
     if (!confirmUnsavedVideo()) return;
+
+    // 1. Full reset
+    handleStartNewProject();
+
+    // 2. Prepare config
     const loadedConfig: GenerateVideoParams = {
       prompt: shot.prompt,
       model: shot.model,
@@ -1565,9 +1584,43 @@ const Studio: React.FC = () => {
       resolution: shot.resolution,
       mode: shot.mode,
     };
-    handleStartNewProject();
+
     setInitialFormValues(loadedConfig);
     setIsShotLibraryOpen(false);
+
+    // 3. Restore Media (Preview & Video)
+    if (shot.previewImageBase64) {
+      setStoryboardByIndex({
+        0: {
+          id: crypto.randomUUID(),
+          owner: 'root',
+          previewImage: {
+            base64: shot.previewImageBase64,
+          },
+          previewPrompt: shot.prompt,
+          segmentIndex: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+      });
+    }
+
+    if (shot.videoUrl) {
+      setVideoUrl(shot.videoUrl);
+      setAppState(AppState.RESULTS); // Go straight to results view
+      setCurrentStage(AppStage.RESULTS);
+
+      // Sync to sequenceVideoData for index 0 to enable extensions
+      setSequenceVideoData({
+        0: {
+          videoUrl: shot.videoUrl,
+          prompt: shot.prompt,
+          isExtension: false,
+          status: 'completed',
+          createdAt: new Date().toISOString()
+        }
+      });
+    }
   };
 
   const handleSequenceGenerated = (
@@ -2324,6 +2377,9 @@ const Studio: React.FC = () => {
                         motionDescription={assistantMotionDescription}
                         onProvisionalSequence={handleProvisionalSequence}
                         apiKey={apiKey} // P0.6: Pass API Key
+                        // P0: Lift messages for persistence across tab switches
+                        messages={assistantMessages}
+                        onMessagesChange={setAssistantMessages}
                       />
                     </div>
                     <div className="col-span-1 h-full min-h-0 overflow-hidden">
@@ -2353,6 +2409,16 @@ const Studio: React.FC = () => {
                             if (existingImage) {
                               openNanoEditor({ segmentIndex: index, baseImage: existingImage, initialPrompt: prompt });
                             } else {
+                              // CRITICAL: Extensions in plan-séquence mode should NOT generate keyframes
+                              const isExtension = index > 0;
+                              const isBlockedExtension = isExtension && sequenceMode === 'plan-sequence';
+
+                              if (isBlockedExtension) {
+                                console.log(`[ImageFirst] BLOCKED: Extension ${index} in plan-séquence mode cannot generate keyframe`);
+                                setErrorMessage(`❌ Les extensions en mode plan-séquence n'ont pas de keyframe propre. Utilisez la dernière frame de la vidéo précédente.`);
+                                return;
+                              }
+
                               // No image - generate a new preview
                               console.log(`[ImageFirst] Generating preview for segment ${index}`);
                               try {
@@ -2388,6 +2454,16 @@ const Studio: React.FC = () => {
                           }}
                           // P2.4: Regenerate keyframe action
                           onRegenerateKeyframe={async (segmentIndex) => {
+                            // CRITICAL: Extensions in plan-séquence mode should NOT have keyframes
+                            const isExtension = segmentIndex > 0;
+                            const isBlockedExtension = isExtension && sequenceMode === 'plan-sequence';
+
+                            if (isBlockedExtension) {
+                              console.log(`[ImageFirst] BLOCKED: Cannot regenerate keyframe for extension ${segmentIndex} in plan-séquence mode`);
+                              setErrorMessage(`❌ Les extensions en mode plan-séquence n'ont pas de keyframe. Utilisez le dernier frame de la vidéo précédente.`);
+                              return;
+                            }
+
                             console.log(`[ImageFirst] Regenerating keyframe for segment ${segmentIndex}`);
                             const prompt = segmentIndex === 0
                               ? promptSequence.mainPrompt

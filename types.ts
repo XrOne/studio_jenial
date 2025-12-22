@@ -41,12 +41,12 @@ export enum GenerationMode {
 }
 
 export interface ImageFile {
-  file: File;
+  file?: File;
   base64: string;
 }
 
 export interface VideoFile {
-  file: File;
+  file?: File;
   base64: string;
 }
 
@@ -150,6 +150,9 @@ export interface SavedShot {
   aspectRatio: AspectRatio;
   resolution: Resolution;
   mode: GenerationMode;
+  // P1: Video restoration fields
+  videoUrl?: string; // Supabase Storage URL
+  previewImageBase64?: string; // Full keyframe image (not just thumbnail)
 }
 
 export interface Keyframe {
@@ -281,6 +284,8 @@ export interface ProjectState {
     assistantImage: ImageFile | null;
     assistantReferenceVideo: VideoFile | null;
     mentionedCharacters: Character[];
+    // P0: Include chat messages for full persistence
+    messages?: ChatMessage[];
   };
   activeDogma: Dogma | null;
 }

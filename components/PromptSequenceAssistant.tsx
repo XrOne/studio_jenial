@@ -84,6 +84,9 @@ interface PromptSequenceAssistantProps {
   motionDescription?: string | null; // Continuity context from modal
   onProvisionalSequence?: (prompt: string) => void; // P1: Auto-trigger keyframe
   apiKey?: string | null; // P0.6: BYOK Strict
+  // P0: Lift messages state to parent for persistence
+  messages?: ChatMessage[];
+  onMessagesChange?: (messages: ChatMessage[]) => void;
 }
 
 
@@ -175,6 +178,9 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   motionDescription,
   onProvisionalSequence,
   apiKey,
+  // P0: Message persistence props
+  messages: messagesProp,
+  onMessagesChange,
 }) => {
   // --- Merged State from PromptForm ---
   const [prompt, setPrompt] = useState(initialValues?.prompt ?? '');
@@ -230,7 +236,20 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   );
 
   // --- Assistant-specific State ---
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // P0: Use lifted messages from props if provided (controlled mode)
+  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
+  const messages = messagesProp ?? localMessages;
+  const setMessages = useCallback((newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    if (onMessagesChange) {
+      // Controlled mode: lift to parent
+      const resolved = typeof newMessages === 'function' ? newMessages(messages) : newMessages;
+      onMessagesChange(resolved);
+    } else {
+      // Uncontrolled mode: local state
+      setLocalMessages(newMessages as any);
+    }
+  }, [onMessagesChange, messages]);
+
   const [userInput, setUserInput] = useState('');
   const [duration, setDuration] = useState('8');
   const [isLoading, setIsLoading] = useState(false);
@@ -455,6 +474,16 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
       }
     }
 
+    // CRITICAL: In Director Mode, BLOCK generation until user has chosen sequence type
+    if (isDirectorMode && sequenceIntent === null) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '⚠️ **Veuillez d\'abord choisir le type de séquence** :\n\n📹 Tapez "plan-séquence" pour une caméra continue\n🎞️ Tapez "découpage" pour des plans multiples',
+        image: null,
+      }]);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
@@ -465,7 +494,9 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         parseInt(duration, 10),
         extensionContext,
         motionDescription,
-        apiKey || undefined // P0.6: Pass API Key
+        apiKey || undefined, // P0.6: Pass API Key
+        // P1: Pass Director Mode context for tailored generation
+        isDirectorMode ? sequenceIntent : undefined
       );
 
       if (typeof result === 'string') {
