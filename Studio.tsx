@@ -30,6 +30,7 @@ import ModeSelectionStep from './components/ModeSelectionStep';
 import { UserProfileModal } from './components/UserProfileModal'; // New
 import { SessionHistoryModal } from './components/SessionHistoryModal'; // New
 import { StorageSettings } from './components/StorageSettings'; // Storage configuration
+import { uploadToDrive } from './services/googleDriveClient'; // Google Drive operations
 import { LibraryMenu, ProjectMenu, ProfileMenu } from './components/HeaderMenus'; // New Header Menus
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
@@ -1574,10 +1575,45 @@ const Studio: React.FC = () => {
     }
   };
 
-  const handleSaveShot = (thumbnailBase64: string) => {
+  const handleSaveShot = async (thumbnailBase64: string) => {
     if (lastConfig) {
       // P1: Find the high-res keyframe from storyboard for better restoration
       const rootKeyframe = storyboardByIndex[0]?.previewImage;
+
+      // Determine storage preference
+      const storagePreference = profile?.preferences?.videoStorage || 'local-download';
+      let driveData = undefined;
+
+      // Handle Storage based on preference
+      if (videoUrl) {
+        if (storagePreference === 'google-drive') {
+          try {
+            console.log('[Storage] Saving to Google Drive...');
+            const fileName = `${lastConfig.prompt.replace(/[^a-z0-9]/gi, '_').substring(0, 30)}_${Date.now()}.mp4`;
+            const res = await uploadToDrive(videoUrl, fileName);
+            if (res.success) {
+              console.log('[Storage] Saved to Drive:', res.fileId);
+              driveData = {
+                fileId: res.fileId,
+                webViewLink: res.webViewLink
+              };
+            } else {
+              console.warn('[Storage] Drive upload failed, falling back to local metadata');
+            }
+          } catch (error) {
+            console.error('[Storage] Error uploading to Drive:', error);
+          }
+        } else {
+          // Default: Local Download
+          console.log('[Storage] Triggering local download...');
+          const a = document.createElement('a');
+          a.href = videoUrl;
+          a.download = `Jenial_${Date.now()}.mp4`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      }
 
       const newShot: SavedShot = {
         id: `shot-${Date.now()}`,
@@ -1588,9 +1624,20 @@ const Studio: React.FC = () => {
         aspectRatio: lastConfig.aspectRatio,
         resolution: lastConfig.resolution,
         mode: lastConfig.mode,
-        // P1: Store video URL and full preview for restoration
+
+        // Medias
         videoUrl: videoUrl || undefined,
-        previewImageBase64: rootKeyframe?.base64 || undefined
+        previewImageBase64: rootKeyframe?.base64 || undefined,
+
+        // Metadata for storage restoration
+        videoStorage: driveData ? {
+          type: 'google-drive',
+          reference: driveData.fileId || '',
+          url: driveData.webViewLink
+        } : {
+          type: 'local-download',
+          reference: `Jenial_${Date.now()}.mp4`
+        }
       };
       handleSaveShotToLibrary(newShot);
       setIsCurrentVideoSaved(true);
@@ -1634,13 +1681,13 @@ const Studio: React.FC = () => {
 
     if (shot.videoUrl) {
       setVideoUrl(shot.videoUrl);
-      setAppState(AppState.RESULTS); // Go straight to results view
-      setCurrentStage(AppStage.RESULTS);
+      setAppState(AppState.SUCCESS); // Go straight to results view
+      setCurrentStage(AppStage.RESULT);
 
       // Sync to sequenceVideoData for index 0 to enable extensions
       setSequenceVideoData({
         0: {
-          videoUrl: shot.videoUrl,
+          url: shot.videoUrl,
           prompt: shot.prompt,
           isExtension: false,
           status: 'completed',

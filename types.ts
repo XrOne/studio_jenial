@@ -151,8 +151,15 @@ export interface SavedShot {
   resolution: Resolution;
   mode: GenerationMode;
   // P1: Video restoration fields
-  videoUrl?: string; // Supabase Storage URL
+  videoUrl?: string; // Original URL
   previewImageBase64?: string; // Full keyframe image (not just thumbnail)
+
+  // Advanced Storage
+  videoStorage?: {
+    type: 'google-drive' | 'local-download' | 'supabase';
+    reference: string; // fileId or fileName
+    url?: string;     // Public link if applicable
+  };
 }
 
 export interface Keyframe {
@@ -167,10 +174,12 @@ export interface Storyboard {
 }
 
 export interface SequenceVideoData {
-  video: any; // Changed from Video to any
-  blob: Blob;
   url: string;
-  thumbnail: string; // base64
+  prompt: string;
+  isExtension: boolean;
+  status: 'pending' | 'completed' | 'failed';
+  createdAt: string;
+  thumbnail?: string; // base64
 }
 
 export interface ChatMessage {
