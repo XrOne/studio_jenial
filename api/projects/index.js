@@ -122,7 +122,7 @@ router.get('/:id', async (req, res) => {
                 )
             `)
             .eq('project_id', id)
-            .order('order', { ascending: true });
+            .order('order_index', { ascending: true });
 
         if (segErr) throw segErr;
 

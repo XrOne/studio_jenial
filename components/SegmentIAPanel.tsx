@@ -9,24 +9,24 @@
 
 import * as React from 'react';
 import {
-    SegmentIAPanelProps,
-    VerticalTimelineSegment,
-    SegmentIteration
-} from '../types-vertical-timeline';
+  SegmentIAPanelProps,
+  SegmentWithUI,
+  SegmentRevision
+} from '../types/timeline';
 
 type TabId = 'prompt' | 'keyframes' | 'edit-image' | 'edit-video' | 'versions';
 
 interface TabConfig {
-    id: TabId;
-    label: string;
+  id: TabId;
+  label: string;
 }
 
 const TABS: TabConfig[] = [
-    { id: 'prompt', label: 'Prompt' },
-    { id: 'keyframes', label: 'Keyframes' },
-    { id: 'edit-image', label: 'Édition (Image)' },
-    { id: 'edit-video', label: 'Édition (Vidéo)' },
-    { id: 'versions', label: 'Versions' },
+  { id: 'prompt', label: 'Prompt' },
+  { id: 'keyframes', label: 'Keyframes' },
+  { id: 'edit-image', label: 'Édition (Image)' },
+  { id: 'edit-video', label: 'Édition (Vidéo)' },
+  { id: 'versions', label: 'Versions' },
 ];
 
 /**
@@ -41,376 +41,167 @@ const TABS: TabConfig[] = [
  * - Version history
  */
 export default function SegmentIAPanel({
-    segment,
-    activeIteration,
-    activeTab,
-    onTabChange,
-    onReprompt,
-    onRegenerate,
+  segment,
+  activeRevision,
+  activeTab,
+  onTabChange,
+  onReprompt,
+  onRegenerate,
 }: SegmentIAPanelProps) {
 
-    const [promptValue, setPromptValue] = React.useState('');
+  const [promptValue, setPromptValue] = React.useState('');
 
-    // Update prompt value when segment changes
-    React.useEffect(() => {
-        if (activeIteration) {
-            setPromptValue(activeIteration.prompt);
-        }
-    }, [activeIteration?.id]);
-
-    const handleReprompt = () => {
-        if (promptValue.trim() && promptValue !== activeIteration?.prompt) {
-            onReprompt(promptValue);
-        }
-    };
-
-    if (!segment) {
-        return (
-            <div className="ia-panel empty">
-                <div className="empty-state">
-                    <span className="empty-icon">📝</span>
-                    <p>Sélectionnez un segment pour voir ses détails</p>
-                </div>
-                <style jsx>{`
-          .ia-panel.empty {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            background: var(--surface-secondary, #1e1e1e);
-          }
-          .empty-state {
-            text-align: center;
-            color: var(--text-secondary, #888);
-          }
-          .empty-icon {
-            font-size: 32px;
-            display: block;
-            margin-bottom: 12px;
-          }
-        `}</style>
-            </div>
-        );
+  // Update prompt value when segment changes
+  React.useEffect(() => {
+    if (activeRevision) {
+      setPromptValue(activeRevision.promptJson.rootPrompt);
     }
+  }, [activeRevision?.id]);
 
+  const handleReprompt = () => {
+    if (promptValue.trim() && promptValue !== activeRevision?.promptJson.rootPrompt) {
+      onReprompt(promptValue);
+    }
+  };
+
+  if (!segment) {
     return (
-        <div className="ia-panel">
-            {/* Header */}
-            <div className="ia-panel-header">
-                <h3>IA Panel</h3>
-                <span className="segment-name">{segment.label || `Plan ${segment.position + 1}`}</span>
-            </div>
-
-            {/* Tab navigation */}
-            <div className="ia-panel-tabs">
-                {TABS.map((tab) => (
-                    <button
-                        key={tab.id}
-                        className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
-                        onClick={() => onTabChange(tab.id)}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
-
-            {/* Tab content */}
-            <div className="ia-panel-content">
-
-                {/* Prompt Tab */}
-                {activeTab === 'prompt' && (
-                    <div className="tab-content prompt-tab">
-                        <label className="field-label">Root Prompt</label>
-                        <textarea
-                            className="prompt-input"
-                            value={promptValue}
-                            onChange={(e) => setPromptValue(e.target.value)}
-                            placeholder="Décrivez le plan..."
-                            rows={4}
-                        />
-
-                        {segment.dogma && (
-                            <>
-                                <label className="field-label">Dogma</label>
-                                <div className="dogma-badge">
-                                    {segment.dogma.title}
-                                </div>
-                            </>
-                        )}
-
-                        <div className="prompt-actions">
-                            <button
-                                className="btn-secondary"
-                                onClick={onRegenerate}
-                                disabled={!activeIteration}
-                            >
-                                Régénérer
-                            </button>
-                            <button
-                                className="btn-primary"
-                                onClick={handleReprompt}
-                                disabled={promptValue === activeIteration?.prompt}
-                            >
-                                Créer variation
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Keyframes Tab */}
-                {activeTab === 'keyframes' && (
-                    <div className="tab-content keyframes-tab">
-                        <p className="placeholder-text">
-                            Keyframes extraites de la version active
-                        </p>
-                        {/* TODO: Display keyframes from activeIteration */}
-                    </div>
-                )}
-
-                {/* Edit Image Tab */}
-                {activeTab === 'edit-image' && (
-                    <div className="tab-content edit-image-tab">
-                        <p className="placeholder-text">
-                            Retouche d'image avec Nano
-                        </p>
-                        {/* TODO: Nano editor integration */}
-                    </div>
-                )}
-
-                {/* Edit Video Tab */}
-                {activeTab === 'edit-video' && (
-                    <div className="tab-content edit-video-tab">
-                        <p className="placeholder-text">
-                            Paramètres de la vidéo (durée, vitesse...)
-                        </p>
-                        {/* TODO: Video editing controls */}
-                    </div>
-                )}
-
-                {/* Versions Tab */}
-                {activeTab === 'versions' && (
-                    <div className="tab-content versions-tab">
-                        <p className="versions-count">
-                            {segment.iterations.length} version(s)
-                        </p>
-                        <div className="versions-list">
-                            {segment.iterations.map((iter, index) => (
-                                <div
-                                    key={iter.id}
-                                    className={`version-item ${iter.id === segment.activeIterationId ? 'active' : ''}`}
-                                >
-                                    <span className="version-number">v{index + 1}</span>
-                                    <span className="version-model">{iter.model}</span>
-                                    <span className="version-status">{iter.status}</span>
-                                    <span className="version-date">
-                                        {new Date(iter.createdAt).toLocaleDateString()}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* Styles */}
-            <style jsx>{`
-        .ia-panel {
-          display: flex;
-          flex-direction: column;
-          width: 320px;
-          height: 100%;
-          background: var(--surface-secondary, #1e1e1e);
-          border-left: 1px solid var(--border-color, #333);
-        }
-        
-        .ia-panel-header {
-          padding: 12px 16px;
-          border-bottom: 1px solid var(--border-color, #333);
-        }
-        
-        .ia-panel-header h3 {
-          margin: 0;
-          font-size: 14px;
-          font-weight: 600;
-          color: var(--text-primary, #fff);
-        }
-        
-        .segment-name {
-          font-size: 12px;
-          color: var(--text-secondary, #888);
-        }
-        
-        .ia-panel-tabs {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 4px;
-          padding: 8px;
-          border-bottom: 1px solid var(--border-color, #333);
-        }
-        
-        .tab-btn {
-          padding: 6px 10px;
-          font-size: 11px;
-          background: transparent;
-          border: 1px solid var(--border-color, #333);
-          border-radius: 4px;
-          color: var(--text-secondary, #888);
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-        
-        .tab-btn:hover {
-          border-color: var(--accent-color, #60a5fa);
-          color: var(--text-primary, #fff);
-        }
-        
-        .tab-btn.active {
-          background: var(--accent-color, #60a5fa);
-          border-color: var(--accent-color, #60a5fa);
-          color: #fff;
-        }
-        
-        .ia-panel-content {
-          flex: 1;
-          overflow-y: auto;
-          padding: 16px;
-        }
-        
-        .tab-content {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-        
-        .field-label {
-          font-size: 12px;
-          font-weight: 500;
-          color: var(--text-secondary, #888);
-        }
-        
-        .prompt-input {
-          width: 100%;
-          padding: 10px;
-          font-size: 13px;
-          background: var(--surface-tertiary, #2a2a2a);
-          border: 1px solid var(--border-color, #333);
-          border-radius: 6px;
-          color: var(--text-primary, #fff);
-          resize: vertical;
-          min-height: 80px;
-        }
-        
-        .prompt-input:focus {
-          outline: none;
-          border-color: var(--accent-color, #60a5fa);
-        }
-        
-        .dogma-badge {
-          display: inline-block;
-          padding: 4px 8px;
-          background: var(--accent-color-dim, #1e3a5f);
-          border-radius: 4px;
-          font-size: 12px;
-          color: var(--accent-color, #60a5fa);
-        }
-        
-        .prompt-actions {
-          display: flex;
-          gap: 8px;
-          margin-top: 8px;
-        }
-        
-        .btn-primary,
-        .btn-secondary {
-          flex: 1;
-          padding: 8px 12px;
-          font-size: 12px;
-          border-radius: 6px;
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-        
-        .btn-primary {
-          background: var(--accent-color, #60a5fa);
-          border: none;
-          color: #fff;
-        }
-        
-        .btn-primary:hover:not(:disabled) {
-          background: var(--accent-color-hover, #3b82f6);
-        }
-        
-        .btn-primary:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-        
-        .btn-secondary {
-          background: transparent;
-          border: 1px solid var(--border-color, #333);
-          color: var(--text-primary, #fff);
-        }
-        
-        .btn-secondary:hover:not(:disabled) {
-          border-color: var(--accent-color, #60a5fa);
-        }
-        
-        .btn-secondary:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-        
-        .placeholder-text {
-          color: var(--text-secondary, #888);
-          font-size: 13px;
-          text-align: center;
-          padding: 24px;
-        }
-        
-        .versions-count {
-          font-size: 12px;
-          color: var(--text-secondary, #888);
-          margin-bottom: 8px;
-        }
-        
-        .versions-list {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        
-        .version-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px;
-          background: var(--surface-tertiary, #2a2a2a);
-          border-radius: 6px;
-          font-size: 12px;
-        }
-        
-        .version-item.active {
-          border: 1px solid var(--accent-success, #4ade80);
-        }
-        
-        .version-number {
-          font-weight: 600;
-          color: var(--text-primary, #fff);
-        }
-        
-        .version-model {
-          color: var(--accent-color, #60a5fa);
-        }
-        
-        .version-status {
-          color: var(--text-secondary, #888);
-        }
-        
-        .version-date {
-          margin-left: auto;
-          color: var(--text-muted, #666);
-        }
-      `}</style>
+      <div className="flex items-center justify-center h-full bg-[#1e1e1e]">
+        <div className="text-center text-gray-500">
+          <span className="text-3xl block mb-3">📝</span>
+          <p>Sélectionnez un segment pour voir ses détails</p>
         </div>
+      </div>
     );
+  }
+
+  return (
+    <div className="flex flex-col w-[320px] h-full bg-[#1e1e1e] border-l border-[#333]">
+      {/* Header */}
+      <div className="flex items-center justify-between p-2 px-3 bg-[#1a1a1a] border-bottom border-[#333]">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-gray-400 text-sm">edit_note</span>
+          <h3 className="font-semibold text-[10px] text-gray-200 uppercase tracking-widest font-display">IA PANEL</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-xs text-gray-500 cursor-pointer hover:text-white">north</span>
+          <span className="material-symbols-outlined text-xs text-gray-400 cursor-pointer hover:text-white">south</span>
+        </div>
+      </div>
+
+      {/* Tab navigation */}
+      <div className="flex flex-wrap gap-1 p-2 border-b border-[#333]">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            className={`px-2.5 py-1.5 text-[11px] rounded transition-all border border-[#333] ${activeTab === tab.id ? 'bg-indigo-500 border-indigo-500 text-white' : 'text-gray-500 hover:border-indigo-400 hover:text-white'}`}
+            onClick={() => onTabChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto p-4">
+
+        {/* Prompt Tab */}
+        {activeTab === 'prompt' && (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] font-bold tracking-wider text-gray-500 uppercase">ROOT PROMPT</label>
+              <span className="material-symbols-outlined text-xs text-gray-500 cursor-pointer hover:text-indigo-400">tune</span>
+            </div>
+            <textarea
+              className="w-full p-2.5 text-xs bg-[#2a2a2a] border border-[#333] rounded text-white resize-vertical min-h-[80px] focus:outline-none focus:border-indigo-500"
+              value={promptValue}
+              onChange={(e) => setPromptValue(e.target.value)}
+              placeholder="Décrivez le plan..."
+              rows={4}
+            />
+
+            {activeRevision?.promptJson.dogmaId && (
+              <>
+                <div className="flex items-center justify-between mt-2 mb-1">
+                  <label className="text-[10px] font-bold tracking-wider text-gray-500 uppercase">DOGMA</label>
+                  <span className="material-symbols-outlined text-xs text-gray-500 cursor-pointer hover:text-indigo-400">tune</span>
+                </div>
+                <div className="inline-block px-2 py-1 bg-indigo-900/30 rounded text-[11px] text-indigo-400">
+                  {activeRevision.promptJson.dogmaId}
+                </div>
+              </>
+            )}
+
+            <div className="flex gap-2 mt-2">
+              <button
+                className="flex-1 px-3 py-2 text-[11px] bg-transparent border border-[#333] text-white rounded hover:border-indigo-500 transition-all disabled:opacity-50"
+                onClick={onRegenerate}
+                disabled={!activeRevision}
+              >
+                Régénérer
+              </button>
+              <button
+                className="flex-1 px-3 py-2 text-[11px] bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-all disabled:opacity-50"
+                onClick={handleReprompt}
+                disabled={promptValue === activeRevision?.promptJson.rootPrompt}
+              >
+                Créer variation
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Keyframes Tab */}
+        {activeTab === 'keyframes' && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-gray-500 text-center py-6">
+              Keyframes extraites de la version active
+            </p>
+          </div>
+        )}
+
+        {/* Edit Image Tab */}
+        {activeTab === 'edit-image' && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-gray-500 text-center py-6">
+              Retouche d'image avec Nano
+            </p>
+          </div>
+        )}
+
+        {/* Edit Video Tab */}
+        {activeTab === 'edit-video' && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-gray-500 text-center py-6">
+              Paramètres de la vidéo (durée, vitesse...)
+            </p>
+          </div>
+        )}
+
+        {/* Versions Tab */}
+        {activeTab === 'versions' && (
+          <div className="flex flex-col gap-3">
+            <p className="text-[11px] text-gray-500 mb-2">
+              {segment.revisions?.length || 0} version(s)
+            </p>
+            <div className="flex flex-col gap-2">
+              {segment.revisions?.map((iter, index) => (
+                <div
+                  key={iter.id}
+                  className={`flex items-center gap-2 p-2 bg-[#2a2a2a] rounded text-[11px] border ${iter.id === segment.activeRevisionId ? 'border-green-500/50' : 'border-transparent'}`}
+                >
+                  <span className="font-bold text-white">v{index + 1}</span>
+                  <span className="text-indigo-400">{iter.provider}</span>
+                  <span className="text-gray-500">{iter.status}</span>
+                  <span className="ml-auto text-gray-600">
+                    {new Date(iter.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

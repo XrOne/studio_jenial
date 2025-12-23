@@ -9,9 +9,9 @@
 
 import * as React from 'react';
 import {
-    IterationThumbnailsProps,
-    SegmentIteration
-} from '../types-vertical-timeline';
+  IterationThumbnailsProps,
+  SegmentRevision
+} from '../types/timeline';
 
 /**
  * IterationThumbnails
@@ -22,184 +22,79 @@ import {
  * - Click to preview, delete button on hover
  */
 export default function IterationThumbnails({
-    iterations,
-    activeIterationId,
-    previewingIterationId,
-    onIterationClick,
-    onIterationDelete,
+  iterations,
+  activeRevisionId,
+  previewingRevisionId,
+  onIterationClick,
+  onIterationDelete,
 }: IterationThumbnailsProps) {
 
-    // Sort: active first, then by creation date (oldest to newest)
-    const sortedIterations = React.useMemo(() => {
-        const active = iterations.find((i) => i.id === activeIterationId);
-        const others = iterations
-            .filter((i) => i.id !== activeIterationId)
-            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  // Sort: active first, then by creation date (oldest to newest)
+  const sortedIterations = React.useMemo(() => {
+    const active = iterations.find((i) => i.id === activeRevisionId);
+    const others = iterations
+      .filter((i) => i.id !== activeRevisionId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-        return active ? [active, ...others] : others;
-    }, [iterations, activeIterationId]);
+    return active ? [active, ...others] : others;
+  }, [iterations, activeRevisionId]);
 
-    return (
-        <div className="iteration-thumbnails">
-            {sortedIterations.map((iteration, index) => {
-                const isActive = iteration.id === activeIterationId;
-                const isPreviewing = iteration.id === previewingIterationId;
+  return (
+    <div className="flex gap-2 overflow-x-auto py-2">
+      {sortedIterations.map((iteration, index) => {
+        const isActive = iteration.id === activeRevisionId;
+        const isPreviewing = iteration.id === previewingRevisionId;
 
-                return (
-                    <div
-                        key={iteration.id}
-                        className={`iteration-thumb ${isActive ? 'active' : ''} ${isPreviewing ? 'previewing' : ''}`}
-                        onClick={() => onIterationClick(iteration.id)}
-                        title={`${iteration.prompt.substring(0, 50)}...`}
-                    >
-                        {/* Thumbnail image */}
-                        {iteration.keyframeThumbnail ? (
-                            <img
-                                src={iteration.keyframeThumbnail}
-                                alt={`Iteration ${index + 1}`}
-                            />
-                        ) : (
-                            <div className="thumb-placeholder">
-                                {iteration.status === 'running' ? '◌' : '🎬'}
-                            </div>
-                        )}
+        return (
+          <div
+            key={iteration.id}
+            className={`group relative w-[60px] h-[34px] rounded border-2 shrink-0 cursor-pointer overflow-hidden transition-all hover:scale-105 ${isActive ? 'border-green-400' : isPreviewing ? 'border-yellow-400' : 'border-transparent hover:border-blue-400'}`}
+            onClick={() => onIterationClick(iteration.id)}
+            title={`${iteration.promptJson.rootPrompt.substring(0, 50)}...`}
+          >
+            {/* Thumbnail image */}
+            {iteration.outputAsset?.url ? (
+              <img
+                src={iteration.outputAsset.url}
+                alt={`Iteration ${index + 1}`}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-[#1e1e1e] text-[10px] text-gray-500">
+                {iteration.status === 'running' ? '◌' : '🎬'}
+              </div>
+            )}
 
-                        {/* Active badge */}
-                        {isActive && (
-                            <span className="active-badge">●</span>
-                        )}
+            {/* Active badge */}
+            {isActive && (
+              <span className="absolute top-0.5 left-0.5 text-[8px] text-green-400">●</span>
+            )}
 
-                        {/* Status overlay for non-succeeded */}
-                        {iteration.status !== 'succeeded' && (
-                            <div className="status-overlay">
-                                {iteration.status === 'running' && <span className="spinner">◌</span>}
-                                {iteration.status === 'queued' && <span>◷</span>}
-                                {iteration.status === 'failed' && <span>⚠</span>}
-                            </div>
-                        )}
+            {/* Status overlay for non-succeeded */}
+            {iteration.status !== 'succeeded' && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-[10px]">
+                {iteration.status === 'running' && <span className="animate-spin">◌</span>}
+                {iteration.status === 'queued' && <span>◷</span>}
+                {iteration.status === 'failed' && <span>⚠</span>}
+              </div>
+            )}
 
-                        {/* Delete button (hover) */}
-                        {!isActive && (
-                            <button
-                                className="delete-btn"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onIterationDelete(iteration.id);
-                                }}
-                                title="Supprimer cette itération"
-                            >
-                                ×
-                            </button>
-                        )}
-                    </div>
-                );
-            })}
-
-            {/* Styles */}
-            <style jsx>{`
-        .iteration-thumbnails {
-          display: flex;
-          gap: 8px;
-          overflow-x: auto;
-          padding: 8px 0;
-        }
-        
-        .iteration-thumb {
-          position: relative;
-          width: 60px;
-          height: 34px;
-          border-radius: 4px;
-          overflow: hidden;
-          cursor: pointer;
-          border: 2px solid transparent;
-          flex-shrink: 0;
-          background: #000;
-          transition: all 0.15s ease;
-        }
-        
-        .iteration-thumb:hover {
-          border-color: var(--accent-color, #60a5fa);
-          transform: scale(1.05);
-        }
-        
-        .iteration-thumb.active {
-          border-color: var(--accent-success, #4ade80);
-        }
-        
-        .iteration-thumb.previewing {
-          border-color: var(--accent-warning, #facc15);
-        }
-        
-        .iteration-thumb img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-        
-        .thumb-placeholder {
-          width: 100%;
-          height: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--surface-secondary, #1e1e1e);
-          font-size: 14px;
-          color: var(--text-secondary, #888);
-        }
-        
-        .active-badge {
-          position: absolute;
-          top: 2px;
-          left: 2px;
-          font-size: 8px;
-          color: var(--accent-success, #4ade80);
-        }
-        
-        .status-overlay {
-          position: absolute;
-          inset: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: rgba(0, 0, 0, 0.6);
-          color: #fff;
-          font-size: 16px;
-        }
-        
-        .spinner {
-          animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        
-        .delete-btn {
-          position: absolute;
-          top: 2px;
-          right: 2px;
-          width: 16px;
-          height: 16px;
-          border-radius: 50%;
-          background: rgba(239, 68, 68, 0.9);
-          color: #fff;
-          border: none;
-          font-size: 12px;
-          line-height: 1;
-          cursor: pointer;
-          opacity: 0;
-          transition: opacity 0.15s ease;
-        }
-        
-        .iteration-thumb:hover .delete-btn {
-          opacity: 1;
-        }
-        
-        .delete-btn:hover {
-          background: #ef4444;
-        }
-      `}</style>
-        </div>
-    );
+            {/* Delete button (hover) */}
+            {!isActive && (
+              <button
+                className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-600/90 text-white rounded-full flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onIterationDelete(iteration.id);
+                }}
+                title="Supprimer cette itération"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }

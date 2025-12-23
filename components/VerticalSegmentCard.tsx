@@ -9,69 +9,51 @@
 
 import * as React from 'react';
 import {
-    VerticalSegmentCardProps,
-    SegmentIteration
-} from '../types-vertical-timeline';
+  VerticalSegmentCardProps,
+  SegmentRevision
+} from '../types/timeline';
 import IterationThumbnails from './IterationThumbnails';
 
 /**
  * LockIcon - Simple lock icon component
  */
+/**
+ * LockIcon - Simple lock icon component
+ */
 function LockIcon({ locked }: { locked: boolean }) {
-    return (
-        <span className={`lock-icon ${locked ? 'locked' : 'unlocked'}`}>
-            {locked ? '🔒' : '🔓'}
-            <style jsx>{`
-        .lock-icon {
-          font-size: 14px;
-          cursor: pointer;
-        }
-        .lock-icon.locked {
-          opacity: 1;
-        }
-        .lock-icon.unlocked {
-          opacity: 0.5;
-        }
-        .lock-icon:hover {
-          opacity: 1;
-        }
-      `}</style>
-        </span>
-    );
+  return (
+    <span className={`text-sm cursor-pointer transition-opacity ${locked ? 'opacity-100' : 'opacity-50 hover:opacity-100'}`}>
+      {locked ? '🔒' : '🔓'}
+    </span>
+  );
 }
 
 /**
  * StatusIndicator - Shows generation status
  */
 function StatusIndicator({ status }: { status: string }) {
-    const getStatusInfo = () => {
-        switch (status) {
-            case 'succeeded':
-                return { icon: '✓', color: '#4ade80', label: 'Succeeded' };
-            case 'running':
-                return { icon: '◌', color: '#60a5fa', label: 'Running' };
-            case 'queued':
-                return { icon: '◷', color: '#facc15', label: 'Queued' };
-            case 'failed':
-                return { icon: '⚠', color: '#f87171', label: 'Failed' };
-            default:
-                return { icon: '—', color: '#888', label: 'Unknown' };
-        }
-    };
+  const getStatusInfo = () => {
+    switch (status) {
+      case 'succeeded':
+        return { icon: '✓', color: 'text-green-400', label: 'Succeeded' };
+      case 'running':
+        return { icon: '◌', color: 'text-blue-400', label: 'Running' };
+      case 'queued':
+        return { icon: '◷', color: 'text-yellow-400', label: 'Queued' };
+      case 'failed':
+        return { icon: '⚠', color: 'text-red-400', label: 'Failed' };
+      default:
+        return { icon: '—', color: 'text-gray-500', label: 'Unknown' };
+    }
+  };
 
-    const { icon, color, label } = getStatusInfo();
+  const { icon, color, label } = getStatusInfo();
 
-    return (
-        <span className="status-indicator" title={label} style={{ color }}>
-            {icon}
-            <style jsx>{`
-        .status-indicator {
-          font-size: 12px;
-          margin-left: 8px;
-        }
-      `}</style>
-        </span>
-    );
+  return (
+    <span className={`text-[12px] ml-2 ${color}`} title={label}>
+      {icon}
+    </span>
+  );
 }
 
 /**
@@ -84,241 +66,127 @@ function StatusIndicator({ status }: { status: string }) {
  * - Expands horizontally to show all iterations
  */
 export default function VerticalSegmentCard({
-    segment,
-    isSelected,
-    isExpanded,
-    onClick,
-    onExpand,
-    onCollapse,
-    onLock,
-    onUnlock,
-    onIterationClick,
-    onIterationValidate,
-    onIterationDelete,
+  segment,
+  isSelected,
+  isExpanded,
+  onClick,
+  onExpand,
+  onCollapse,
+  onLock,
+  onUnlock,
+  onIterationClick,
+  onIterationValidate,
+  onIterationDelete,
 }: VerticalSegmentCardProps) {
 
-    // Get active iteration
-    const activeIteration = segment.iterations.find(
-        (iter) => iter.id === segment.activeIterationId
-    );
+  // Get active iteration
+  const activeIteration = segment.activeRevision;
 
-    // Get previewing iteration (if different from active)
-    const previewingIteration = segment.previewingIterationId
-        ? segment.iterations.find((iter) => iter.id === segment.previewingIterationId)
-        : null;
+  // Get previewing iteration (if different from active)
+  const previewingIteration = segment.previewingRevisionId
+    ? segment.revisions?.find((iter) => iter.id === segment.previewingRevisionId)
+    : null;
 
-    // Displayed iteration (preview takes precedence)
-    const displayedIteration = previewingIteration || activeIteration;
+  // Displayed iteration (preview takes precedence)
+  const displayedIteration = previewingIteration || activeIteration;
 
-    const isLocked = segment.state === 'locked';
+  const isLocked = segment.uiState === 'locked';
 
-    const handleCardClick = () => {
-        if (isLocked) return;
-        onClick();
-    };
+  const handleCardClick = () => {
+    if (isLocked) return;
+    onClick();
+  };
 
-    const handleExpandToggle = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (isLocked) return;
-        isExpanded ? onCollapse() : onExpand();
-    };
+  const handleExpandToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isLocked) return;
+    isExpanded ? onCollapse() : onExpand();
+  };
 
-    const handleLockToggle = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        isLocked ? onUnlock() : onLock();
-    };
+  const handleLockToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    isLocked ? onUnlock() : onLock();
+  };
 
-    return (
-        <div
-            className={`segment-card ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''} ${isLocked ? 'locked' : ''}`}
-            onClick={handleCardClick}
-        >
-            {/* Main card content */}
-            <div className="segment-main">
-                {/* Thumbnail */}
-                <div className="segment-thumbnail">
-                    {displayedIteration?.keyframeThumbnail ? (
-                        <img
-                            src={displayedIteration.keyframeThumbnail}
-                            alt={segment.label || `Segment ${segment.position + 1}`}
-                        />
-                    ) : (
-                        <div className="thumbnail-placeholder">
-                            <span>🎬</span>
-                        </div>
-                    )}
-                </div>
-
-                {/* Info */}
-                <div className="segment-info">
-                    <div className="segment-label">
-                        {segment.label || `Plan ${segment.position + 1}`}
-                    </div>
-                    <div className="segment-meta">
-                        <span>{displayedIteration?.model || '—'}</span>
-                        <span>{formatDuration(segment.duration)}</span>
-                        {displayedIteration && (
-                            <StatusIndicator status={displayedIteration.status} />
-                        )}
-                    </div>
-                </div>
-
-                {/* Actions */}
-                <div className="segment-actions">
-                    <button
-                        className="lock-btn"
-                        onClick={handleLockToggle}
-                        title={isLocked ? 'Déverrouiller' : 'Verrouiller'}
-                    >
-                        <LockIcon locked={isLocked} />
-                    </button>
-
-                    {!isLocked && (
-                        <button
-                            className="expand-btn"
-                            onClick={handleExpandToggle}
-                            title={isExpanded ? 'Réduire' : 'Voir les itérations'}
-                        >
-                            {isExpanded ? '▲' : '▼'}
-                        </button>
-                    )}
-                </div>
+  return (
+    <div
+      className={`bg-[#2a2a2a] rounded-lg border-2 transition-all overflow-hidden ${isSelected ? 'border-indigo-500 bg-indigo-900/20' : 'border-transparent hover:border-indigo-500/50 hover:bg-[#333]'} ${isLocked ? 'opacity-80' : ''}`}
+      onClick={handleCardClick}
+    >
+      {/* Main card content */}
+      <div className={`flex items-center p-2 gap-3 ${isLocked ? 'cursor-default' : 'cursor-pointer'}`}>
+        {/* Thumbnail */}
+        <div className="w-20 h-11 rounded bg-black shrink-0 overflow-hidden">
+          {displayedIteration?.outputAsset?.url ? (
+            <img
+              src={displayedIteration.outputAsset.url}
+              alt={segment.label || `Segment ${segment.order + 1}`}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-[#1e1e1e] text-xl">
+              <span>🎬</span>
             </div>
-
-            {/* Expanded iterations */}
-            {isExpanded && !isLocked && (
-                <div className="segment-iterations">
-                    <IterationThumbnails
-                        iterations={segment.iterations}
-                        activeIterationId={segment.activeIterationId}
-                        previewingIterationId={segment.previewingIterationId}
-                        onIterationClick={onIterationClick}
-                        onIterationDelete={onIterationDelete}
-                    />
-                </div>
-            )}
-
-            {/* Styles */}
-            <style jsx>{`
-        .segment-card {
-          background: var(--surface-tertiary, #2a2a2a);
-          border-radius: 8px;
-          border: 2px solid transparent;
-          overflow: hidden;
-          transition: all 0.2s ease;
-        }
-        
-        .segment-card:hover:not(.locked) {
-          border-color: var(--accent-color, #60a5fa);
-        }
-        
-        .segment-card.selected {
-          border-color: var(--accent-color, #60a5fa);
-          background: var(--surface-selected, #1e3a5f);
-        }
-        
-        .segment-card.locked {
-          opacity: 0.8;
-        }
-        
-        .segment-main {
-          display: flex;
-          align-items: center;
-          padding: 8px;
-          gap: 12px;
-          cursor: pointer;
-        }
-        
-        .segment-card.locked .segment-main {
-          cursor: default;
-        }
-        
-        .segment-thumbnail {
-          width: 80px;
-          height: 45px;
-          border-radius: 4px;
-          overflow: hidden;
-          background: #000;
-          flex-shrink: 0;
-        }
-        
-        .segment-thumbnail img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-        
-        .thumbnail-placeholder {
-          width: 100%;
-          height: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--surface-secondary, #1e1e1e);
-          font-size: 20px;
-        }
-        
-        .segment-info {
-          flex: 1;
-          min-width: 0;
-        }
-        
-        .segment-label {
-          font-size: 13px;
-          font-weight: 500;
-          color: var(--text-primary, #fff);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        
-        .segment-meta {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 11px;
-          color: var(--text-secondary, #888);
-          margin-top: 4px;
-        }
-        
-        .segment-actions {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-        
-        .lock-btn,
-        .expand-btn {
-          background: none;
-          border: none;
-          color: var(--text-secondary, #888);
-          cursor: pointer;
-          padding: 4px;
-          font-size: 12px;
-          border-radius: 4px;
-        }
-        
-        .lock-btn:hover,
-        .expand-btn:hover {
-          background: var(--surface-hover, #333);
-          color: var(--text-primary, #fff);
-        }
-        
-        .segment-iterations {
-          padding: 8px;
-          padding-top: 0;
-          border-top: 1px solid var(--border-color, #333);
-        }
-      `}</style>
+          )}
         </div>
-    );
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-white truncate">
+            {segment.label || `Plan ${segment.order + 1}`}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-1">
+            <span className="truncate">{displayedIteration?.provider || '—'}</span>
+            <span>{formatDuration(segment.durationSec)}</span>
+            {displayedIteration && (
+              <StatusIndicator status={displayedIteration.status} />
+            )}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1">
+          <button
+            className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded text-xs transition-colors"
+            onClick={handleLockToggle}
+            title={isLocked ? 'Déverrouiller' : 'Verrouiller'}
+          >
+            <LockIcon locked={isLocked} />
+          </button>
+
+          {!isLocked && (
+            <button
+              className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded text-xs transition-colors"
+              onClick={handleExpandToggle}
+              title={isExpanded ? 'Réduire' : 'Voir les itérations'}
+            >
+              {isExpanded ? '▲' : '▼'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Expanded iterations */}
+      {isExpanded && !isLocked && (
+        <div className="p-2 pt-0 border-t border-[#333]">
+          <IterationThumbnails
+            iterations={segment.revisions || []}
+            activeRevisionId={segment.activeRevisionId || ''}
+            previewingRevisionId={segment.previewingRevisionId}
+            onIterationClick={onIterationClick}
+            onIterationDelete={onIterationDelete}
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
  * Format duration in seconds to mm:ss
  */
 function formatDuration(seconds: number): string {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }

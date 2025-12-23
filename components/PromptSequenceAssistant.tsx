@@ -84,6 +84,12 @@ interface PromptSequenceAssistantProps {
   motionDescription?: string | null; // Continuity context from modal
   onProvisionalSequence?: (prompt: string) => void; // P1: Auto-trigger keyframe
   apiKey?: string | null; // P0.6: BYOK Strict
+  // P0: Lift messages state to parent for persistence
+  messages?: ChatMessage[];
+  onMessagesChange?: (messages: ChatMessage[]) => void;
+  // Mode toggle: Plan Extensif / Découpage
+  sequenceMode?: 'plan-sequence' | 'decoupage';
+  onSequenceModeChange?: (mode: 'plan-sequence' | 'decoupage') => void;
 }
 
 
@@ -175,6 +181,12 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   motionDescription,
   onProvisionalSequence,
   apiKey,
+  // P0: Message persistence props
+  messages: messagesProp,
+  onMessagesChange,
+  // Mode toggle props
+  sequenceMode = 'plan-sequence',
+  onSequenceModeChange,
 }) => {
   // --- Merged State from PromptForm ---
   const [prompt, setPrompt] = useState(initialValues?.prompt ?? '');
@@ -1164,21 +1176,54 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
           </button>
         </div>
         {!extensionContext && (
-          <div className="flex items-center gap-3 mb-3">
-            <label
-              htmlFor="duration-input"
-              className="text-sm font-medium text-gray-400">
-              Total Sequence Duration (seconds)
-            </label>
-            <input
-              id="duration-input"
-              type="number"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              min="8"
-              max="60"
-              className="w-20 bg-[#1f1f1f] border border-gray-600 rounded-lg p-2 text-center"
-            />
+          <div className="flex items-center gap-4 mb-3 flex-wrap">
+            {/* Duration input */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="duration-input"
+                className="text-sm font-medium text-gray-400">
+                Durée
+              </label>
+              <input
+                id="duration-input"
+                type="number"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                min="8"
+                max="60"
+                className="w-16 bg-[#1f1f1f] border border-gray-600 rounded-lg p-2 text-center text-sm"
+              />
+              <span className="text-xs text-gray-500">sec</span>
+            </div>
+
+            {/* Mode toggle */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-400">Mode:</span>
+              <div className="flex items-center bg-gray-900 rounded-lg p-0.5 border border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => onSequenceModeChange?.('plan-sequence')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${sequenceMode === 'plan-sequence'
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    }`}
+                  title="Extensions fluides, caméra continue"
+                >
+                  📹 Plan Extensif
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSequenceModeChange?.('decoupage')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${sequenceMode === 'decoupage'
+                      ? 'bg-purple-600 text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    }`}
+                  title="Plans multiples, montage classique"
+                >
+                  🎞️ Découpage
+                </button>
+              </div>
+            </div>
           </div>
         )}
         {assistantImage && (

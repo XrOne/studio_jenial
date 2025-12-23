@@ -10,9 +10,10 @@ interface VisualContextViewerProps {
   image: ImageFile;
   stage: AppStage;
   onEditRequest: (image: ImageFile) => void;
+  onApplyNano?: (image: ImageFile) => void;
 }
 
-const VisualContextViewer: React.FC<VisualContextViewerProps> = ({ image, stage, onEditRequest }) => {
+const VisualContextViewer: React.FC<VisualContextViewerProps> = ({ image, stage, onEditRequest, onApplyNano }) => {
   return (
     <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-gray-800/50 rounded-lg border border-gray-700">
       <h2 className="text-xl font-semibold text-gray-300 mb-4 flex-shrink-0">

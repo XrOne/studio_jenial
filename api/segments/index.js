@@ -26,7 +26,7 @@ router.post('/', async (req, res) => {
             .from('segments')
             .insert([{
                 project_id,
-                order: order || 0,
+                order_index: order || 0,
                 label,
                 in_sec: in_sec || 0,
                 out_sec: defaultOutSec
