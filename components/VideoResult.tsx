@@ -578,7 +578,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
                     <div className="absolute bottom-full right-0 mb-2 w-72 bg-gray-900 border border-gray-600 rounded-xl p-4 shadow-2xl z-20 animate-in fade-in slide-in-from-bottom-2">
                       <h4 className="text-sm font-bold text-white mb-2 flex justify-between items-center">
                         Critic Report
-                        <span className="text-xs font-normal text-gray-400">Gemini 3.0 Vision</span>
+                        <span className="text-xs font-normal text-gray-400">Nano Banana Pro</span>
                       </h4>
                       <p className="text-xs text-gray-300 leading-relaxed mb-3">
                         "{complianceResult.critique}"

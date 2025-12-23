@@ -459,7 +459,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         setSequenceIntent('plan-sequence');
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: '📹 Parfait ! Plan-séquence sélectionné.\n\nMaintenant, décrivez la scène. Je vais générer un découpage technique avec des valeurs de plan variées (large, moyen, serré) pour capturer tous les angles.',
+          content: '📹 Parfait ! **Plan-séquence** sélectionné.\n\nMaintenant, décrivez la scène. Je vais générer un **plan continu unique** avec des **extensions fluides** pour suivre l\'action sans coupe. Vous pourrez affiner chaque extension si nécessaire.',
           image: null,
         }]);
         return;
@@ -467,7 +467,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         setSequenceIntent('decoupage');
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: '🎞️ Parfait ! Découpage sélectionné.\n\nMaintenant, décrivez la scène. Je vais générer une séquence de plans indépendants pour un montage dynamique.',
+          content: '🎞️ Parfait ! **Découpage technique** sélectionné.\n\nMaintenant, décrivez la scène. Je vais proposer un **découpage professionnel** avec valeurs de plan, cadrages et mouvements. Vous pourrez **éditer chaque plan** avant génération.',
           image: null,
         }]);
         return;

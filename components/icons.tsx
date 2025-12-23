@@ -176,6 +176,10 @@ export const PencilIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <Pencil {...defaultProps} {...props} />
 );
 
+export const TrashIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <Trash2 {...defaultProps} {...props} />
+);
+
 export const BookMarkedIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
   props,
 ) => <BookMarked {...defaultProps} {...props} />;

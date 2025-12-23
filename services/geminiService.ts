@@ -81,13 +81,13 @@ const compressImageBase64 = (base64: string, maxDimension: number = 1024, qualit
 // Reference: https://ai.google.dev/gemini-api/docs/models
 
 const MODELS = {
-  // Gemini 3 Pro - Latest reasoning model
+  // Nano Banana Pro - Latest reasoning model
   PRO: 'gemini-3-pro-preview',
 
   // Gemini 2.5 Flash - Fast and efficient
   FLASH: 'gemini-2.5-flash',
 
-  // Gemini 3 Pro Image (Nano Banana Pro) - High-fidelity image generation
+  // Nano Banana Pro - High-fidelity image generation
   IMAGE_PRO: 'gemini-3-pro-image-preview',
 
   // Gemini 2.5 Flash Image (Nano Banana) - Fast image generation/editing
