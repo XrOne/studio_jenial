@@ -20,8 +20,10 @@ import { GoogleGenAI } from '@google/genai';
 const USE_MOCK_PROVIDER = process.env.NANO_MOCK_MODE === 'true';
 
 // Model selection - quality-aware
-const NANO_PRO_MODEL = 'gemini-3-pro-image-preview';   // Pro, up to 4K (for root keyframes)
-const NANO_FAST_MODEL = 'gemini-2.5-flash-image';      // Fast, 1024px (for 12 thumbnails)
+// PRO = High quality for final keyframes sent to Veo
+// FAST = Quick previews for iterative refinement
+const NANO_PRO_MODEL = 'gemini-3-pro-image-preview';   // Pro, up to 4K (for root keyframes → Veo)
+const NANO_FAST_MODEL = 'gemini-2.5-flash-image';      // Fast, 1024px (for quick previews)
 
 /**
  * Get model based on quality param
@@ -30,13 +32,14 @@ const NANO_FAST_MODEL = 'gemini-2.5-flash-image';      // Fast, 1024px (for 12 t
  * @returns {string} Model name
  */
 function getModelForQuality(quality, target) {
-    // Fail-safe: Root always uses pro by default if quality not specified
+    // Root keyframes default to PRO for Veo quality
     if (!quality && target === 'root') {
         quality = 'pro';
     }
 
+    // Explicit quality selection
     const model = quality === 'fast' ? NANO_FAST_MODEL : NANO_PRO_MODEL;
-    console.log(`[Nano] quality=${quality || 'default'} model=${model}`);
+    console.log(`[Nano] quality=${quality || 'default'} target=${target} model=${model}`);
     return model;
 }
 
