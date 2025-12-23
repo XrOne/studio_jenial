@@ -180,6 +180,8 @@ export interface SequenceVideoData {
   status: 'pending' | 'completed' | 'failed';
   createdAt: string;
   thumbnail?: string; // base64
+  video?: any; // Video object reference
+  blob?: Blob; // Video blob for processing
 }
 
 export interface ChatMessage {

@@ -1079,7 +1079,16 @@ const Studio: React.FC = () => {
             }
             setSequenceVideoData((prev) => ({
               ...prev,
-              [currentPromptIndex]: { video, blob, url: objectUrl, thumbnail },
+              [currentPromptIndex]: {
+                video,
+                blob,
+                url: objectUrl,
+                thumbnail,
+                prompt: promptSequence?.mainPrompt || '',
+                isExtension: currentPromptIndex > 0,
+                status: 'completed' as const,
+                createdAt: new Date().toISOString(),
+              },
             }));
           } catch (thumbError) {
             console.error(
@@ -1088,7 +1097,16 @@ const Studio: React.FC = () => {
             );
             setSequenceVideoData((prev) => ({
               ...prev,
-              [currentPromptIndex]: { video, blob, url: objectUrl, thumbnail: '' },
+              [currentPromptIndex]: {
+                video,
+                blob,
+                url: objectUrl,
+                thumbnail: '',
+                prompt: promptSequence?.mainPrompt || '',
+                isExtension: currentPromptIndex > 0,
+                status: 'completed' as const,
+                createdAt: new Date().toISOString(),
+              },
             }));
           }
         }
@@ -1751,13 +1769,9 @@ const Studio: React.FC = () => {
         }
       };
 
-      // Generate root keyframe
+      // Generate root keyframe ONLY
+      // CRITICAL: Extensions should NOT have keyframes - they use last frame of previous video
       generateKeyframe(0, scopedSequence.mainPrompt);
-
-      // Generate first extension keyframe if exists
-      if (scopedSequence.extensionPrompts && scopedSequence.extensionPrompts[0]) {
-        generateKeyframe(1, scopedSequence.extensionPrompts[0]);
-      }
 
       // Mark generation complete after a delay
       setTimeout(() => setIsGeneratingKeyframes(false), 3000);
