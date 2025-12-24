@@ -35,6 +35,7 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:5173',
   'http://127.0.0.1:3001',
   'https://jenial.app',       // Production domain
+  'https://www.jenial.app',   // Production www subdomain
   process.env.ALLOWED_ORIGIN, // Additional origin from env
 ].filter(Boolean);
 
@@ -42,6 +43,10 @@ const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else if (process.env.VERCEL_ENV === 'preview' && origin.endsWith('.vercel.app')) {
+      // Allow Vercel preview deployments (safe: only in preview env)
+      console.log(`[CORS] Allowing preview origin: ${origin}`);
       callback(null, true);
     } else {
       console.warn(`[CORS] Blocked request from: ${origin}`);
@@ -52,6 +57,7 @@ const corsOptions = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Api-Key', 'X-Gemini-Api-Key', 'X-Requested-With']
 };
+
 
 app.use(cors(corsOptions));
 app.use(requestIdMiddleware);
