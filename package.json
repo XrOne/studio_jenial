@@ -29,7 +29,8 @@
     "googleapis": "^167.0.0",
     "lucide-react": "^0.408.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
