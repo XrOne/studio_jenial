@@ -591,8 +591,7 @@ const Studio: React.FC = () => {
           ? restoredSession.dirty_extensions
           : []
       };
-      setPromptSequence(restoredPromptSequence);
-      setPromptSequence(restoredPromptSequence);
+      setPromptSequence(restoredPromptSequence); // Fixed double set
 
       // 2. Dogma
       if (restoredSession.dogma_snapshot) {
@@ -2236,12 +2235,14 @@ const Studio: React.FC = () => {
                                 onSegmentClick={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
                                 onSegmentExpand={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: [...s.expandedSegmentIds, id] }))}
                                 onSegmentCollapse={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: s.expandedSegmentIds.filter(x => x !== id) }))}
-                                onIterationClick={() => { }}
                                 onIterationValidate={() => { }}
                                 onIterationDelete={() => { }}
                                 onSegmentLock={() => { }}
                                 onSegmentUnlock={() => { }}
                                 onReprompt={() => { }}
+                                onReorder={handleSegmentReorder}
+                                onSegmentDelete={handleSegmentDelete}
+                                onSegmentDuplicate={handleSegmentDuplicate}
                               />
                             </div>
                           </div>

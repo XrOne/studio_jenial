@@ -15,12 +15,15 @@ import {
 } from '../types/timeline';
 import VerticalSegmentCard from './VerticalSegmentCard';
 
+import { Reorder } from 'framer-motion';
+
 /**
  * VerticalTimelineStack
  * 
  * Main container for the vertical timeline view.
  * Displays all segments from the horizontal timeline in a vertical stack.
  * Each segment can be expanded to show its iterations.
+ * Now supports Drag & Drop reordering via framer-motion.
  */
 export default function VerticalTimelineStack({
   segments,
@@ -35,7 +38,8 @@ export default function VerticalTimelineStack({
   onSegmentLock,
   onSegmentUnlock,
   onReprompt,
-}: VerticalTimelineStackProps) {
+  onReorder, // New prop
+}: VerticalTimelineStackProps & { onReorder?: (newOrder: SegmentWithUI[]) => void }) {
 
   return (
     <div className="flex flex-col w-full h-full bg-[#1e1e1e] overflow-hidden">
@@ -46,22 +50,39 @@ export default function VerticalTimelineStack({
             <p>Aucun segment dans la timeline</p>
           </div>
         ) : (
-          segments.map((segment) => (
-            <VerticalSegmentCard
-              key={segment.id}
-              segment={segment}
-              isSelected={selectedSegmentIds.includes(segment.id)}
-              isExpanded={expandedSegmentIds.includes(segment.id)}
-              onClick={() => onSegmentClick(segment.id)}
-              onExpand={() => onSegmentExpand(segment.id)}
-              onCollapse={() => onSegmentCollapse(segment.id)}
-              onLock={() => onSegmentLock(segment.id)}
-              onUnlock={() => onSegmentUnlock(segment.id)}
-              onIterationClick={(revisionId) => onIterationClick(segment.id, revisionId)}
-              onIterationValidate={(revisionId) => onIterationValidate(segment.id, revisionId)}
-              onIterationDelete={(revisionId) => onIterationDelete(segment.id, revisionId)}
-            />
-          ))
+          <Reorder.Group
+            axis="y"
+            values={segments}
+            onReorder={onReorder || (() => { })}
+            className="flex flex-col gap-2"
+          >
+            {segments.map((segment) => (
+              <Reorder.Item
+                key={segment.id}
+                value={segment}
+                dragListener={false} // Disable default drag, use handle
+                dragControls={undefined} // Controlled by child handle
+              >
+                <VerticalSegmentCard
+                  segment={segment}
+                  isSelected={selectedSegmentIds.includes(segment.id)}
+                  isExpanded={expandedSegmentIds.includes(segment.id)}
+                  onClick={() => onSegmentClick(segment.id)}
+                  onExpand={() => onSegmentExpand(segment.id)}
+                  onCollapse={() => onSegmentCollapse(segment.id)}
+                  onLock={() => onSegmentLock(segment.id)}
+                  onUnlock={() => onSegmentUnlock(segment.id)}
+                  onIterationClick={(revisionId) => onIterationClick(segment.id, revisionId)}
+                  onIterationValidate={(revisionId) => onIterationValidate(segment.id, revisionId)}
+                  onIterationDelete={(revisionId) => onIterationDelete(segment.id, revisionId)}
+                  // Pass drag controls or use internal handle logic
+                  // Note: Reorder.Item handles drag logic if dragListener is true or controls are passed.
+                  // For simple implementation, we can let framer-motion handle it via a specific handle class.
+                  enableDragHandle={true}
+                />
+              </Reorder.Item>
+            ))}
+          </Reorder.Group>
         )}
       </div>
     </div>
