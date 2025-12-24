@@ -1,10 +1,19 @@
 import { supabase } from './supabaseClient';
 import { Project, ProjectState, UserProfile } from '../types';
+import { localProjects, localProfile } from '../utils/previewStorage';
+
+const isPreview = import.meta.env.VITE_VERCEL_ENV === 'preview' ||
+    (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app'));
 
 export const ProjectService = {
     // === PROJECTS ===
 
     async listProjects(userId: string): Promise<Project[]> {
+        if (isPreview) {
+            console.log('[ProjectService] Preview Mode: Listing local projects');
+            return localProjects.list(userId);
+        }
+
         if (!supabase) throw new Error('Supabase client not initialized');
 
         const { data, error } = await supabase
@@ -18,6 +27,11 @@ export const ProjectService = {
     },
 
     async createProject(userId: string, title: string = 'Untitled Project'): Promise<Project> {
+        if (isPreview) {
+            console.log('[ProjectService] Preview Mode: Creating local project');
+            return localProjects.create(userId, title);
+        }
+
         if (!supabase) throw new Error('Supabase client not initialized');
 
         const { data, error } = await supabase
@@ -35,6 +49,12 @@ export const ProjectService = {
     },
 
     async saveProject(projectId: string, state: ProjectState): Promise<void> {
+        if (isPreview) {
+            console.log('[ProjectService] Preview Mode: Saving local project');
+            localProjects.save(projectId, state);
+            return;
+        }
+
         if (!supabase) throw new Error('Supabase client not initialized');
 
         const { error } = await supabase
@@ -49,6 +69,12 @@ export const ProjectService = {
     },
 
     async loadProject(projectId: string): Promise<Project> {
+        if (isPreview) {
+            const project = localProjects.load(projectId);
+            if (!project) throw new Error('Project not found in preview storage');
+            return project;
+        }
+
         if (!supabase) throw new Error('Supabase client not initialized');
 
         const { data, error } = await supabase
@@ -62,6 +88,11 @@ export const ProjectService = {
     },
 
     async deleteProject(projectId: string): Promise<void> {
+        if (isPreview) {
+            localProjects.delete(projectId);
+            return;
+        }
+
         if (!supabase) throw new Error('Supabase client not initialized');
 
         const { error } = await supabase
@@ -75,6 +106,10 @@ export const ProjectService = {
     // === PROFILES ===
 
     async getProfile(userId: string): Promise<UserProfile | null> {
+        if (isPreview) {
+            return localProfile.get(userId);
+        }
+
         if (!supabase) throw new Error('Supabase client not initialized');
 
         const { data, error } = await supabase
@@ -91,6 +126,11 @@ export const ProjectService = {
     },
 
     async updateProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
+        if (isPreview) {
+            localProfile.update(userId, updates);
+            return;
+        }
+
         if (!supabase) throw new Error('Supabase client not initialized');
 
         const { error } = await supabase

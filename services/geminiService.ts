@@ -13,6 +13,7 @@ import {
   VeoModel,
   VideoFile,
 } from '../types';
+import { getGeminiKey } from '../utils/runtimeKeys';
 import {
   isSupabaseConfigured,
   // uploadVideoToSupabase, // Removed in favor of VideoStorageProvider
@@ -117,11 +118,17 @@ export const setRuntimeApiKey = (key: string | null) => {
     // Clear from sessionStorage too
     if (typeof window !== 'undefined') {
       window.sessionStorage.removeItem('gemini_api_key');
+      // Also clear from preview storage if needed
+      // Note: We don't import clearGeminiKey here to avoid circular dependencies if we don't have to,
+      // but strictly speaking setRuntimeApiKey is memory-only setter.
+      // The Dialog handles the persistence clearing.
     }
   }
 };
 
-export const getRuntimeApiKey = (): string | null => runtimeApiKey;
+export const getRuntimeApiKey = (): string | null => {
+  return runtimeApiKey || getGeminiKey();
+};
 
 // ===========================================
 // API KEY MANAGEMENT (Dual Mode: Server-Managed + BYOK)

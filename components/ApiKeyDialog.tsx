@@ -7,6 +7,8 @@ import { useState, useEffect } from 'react';
 import { KeyIcon, Trash2Icon, ShieldCheckIcon, ExternalLinkIcon } from './icons';
 // Removed storage imports for Strict BYOK
 
+import { setGeminiKey, clearGeminiKey } from '../utils/runtimeKeys';
+
 interface ApiKeyDialogProps {
   onSetKey: (key: string) => void;
   onClearKey: () => void;
@@ -75,6 +77,8 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
 
     if (trimmedKey) {
       if (validateKey(trimmedKey)) {
+        // Preview MVP: Persist key if in preview
+        setGeminiKey(trimmedKey);
         onSetKey(trimmedKey);
       }
     } else if (hasCustomKey) {
@@ -90,6 +94,10 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
     window.localStorage.removeItem('vertex_project_id');
     window.localStorage.removeItem('vertex_location');
     window.localStorage.removeItem('vertex_token');
+
+    // Preview MVP: Clear from storage
+    clearGeminiKey();
+
     setApiKeyInput('');
     setVertexProjectId('');
     setVertexToken('');
