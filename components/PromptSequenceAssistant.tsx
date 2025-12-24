@@ -87,6 +87,9 @@ interface PromptSequenceAssistantProps {
   // P0: Lift messages state to parent for persistence
   messages?: ChatMessage[];
   onMessagesChange?: (messages: ChatMessage[]) => void;
+  // Mode toggle: Plan Extensif / Découpage
+  sequenceMode?: 'plan-sequence' | 'decoupage';
+  onSequenceModeChange?: (mode: 'plan-sequence' | 'decoupage') => void;
 }
 
 
@@ -181,6 +184,9 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   // P0: Message persistence props
   messages: messagesProp,
   onMessagesChange,
+  // Mode toggle props
+  sequenceMode = 'plan-sequence',
+  onSequenceModeChange,
 }) => {
   // --- Merged State from PromptForm ---
   const [prompt, setPrompt] = useState(initialValues?.prompt ?? '');
@@ -236,28 +242,13 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
   );
 
   // --- Assistant-specific State ---
-  // P0: Use lifted messages from props if provided (controlled mode)
-  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
-  const messages = messagesProp ?? localMessages;
-  const setMessages = useCallback((newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    if (onMessagesChange) {
-      // Controlled mode: lift to parent
-      const resolved = typeof newMessages === 'function' ? newMessages(messages) : newMessages;
-      onMessagesChange(resolved);
-    } else {
-      // Uncontrolled mode: local state
-      setLocalMessages(newMessages as any);
-    }
-  }, [onMessagesChange, messages]);
-
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userInput, setUserInput] = useState('');
   const [duration, setDuration] = useState('8');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [finalResult, setFinalResult] = useState<AssistantResult | null>(null);
   const [isConfiguring, setIsConfiguring] = useState(false);
-  const [isDirectorMode, setIsDirectorMode] = useState(false); // Option B: Director Mode
-  const [sequenceIntent, setSequenceIntent] = useState<'plan-sequence' | 'decoupage' | null>(null); // Director Mode: User's sequence choice
   const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(
     null,
   );
@@ -452,38 +443,6 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
     // User can manually remove it with the X button if needed.
     // onAssistantImageChange(null); 
 
-    // Director Mode: Detect sequence intent
-    if (isDirectorMode && sequenceIntent === null) {
-      const userMessage = userInput.toLowerCase().trim();
-      if (userMessage.includes('plan-séquence') || userMessage.includes('plan sequence')) {
-        setSequenceIntent('plan-sequence');
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: '📹 Parfait ! **Plan-séquence** sélectionné.\n\nMaintenant, décrivez la scène. Je vais générer un **plan continu unique** avec des **extensions fluides** pour suivre l\'action sans coupe. Vous pourrez affiner chaque extension si nécessaire.',
-          image: null,
-        }]);
-        return;
-      } else if (userMessage.includes('découpage') || userMessage.includes('decoupage')) {
-        setSequenceIntent('decoupage');
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: '🎞️ Parfait ! **Découpage technique** sélectionné.\n\nMaintenant, décrivez la scène. Je vais proposer un **découpage professionnel** avec valeurs de plan, cadrages et mouvements. Vous pourrez **éditer chaque plan** avant génération.',
-          image: null,
-        }]);
-        return;
-      }
-    }
-
-    // CRITICAL: In Director Mode, BLOCK generation until user has chosen sequence type
-    if (isDirectorMode && sequenceIntent === null) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: '⚠️ **Veuillez d\'abord choisir le type de séquence** :\n\n📹 Tapez "plan-séquence" pour une caméra continue\n🎞️ Tapez "découpage" pour des plans multiples',
-        image: null,
-      }]);
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
 
@@ -494,9 +453,7 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
         parseInt(duration, 10),
         extensionContext,
         motionDescription,
-        apiKey || undefined, // P0.6: Pass API Key
-        // P1: Pass Director Mode context for tailored generation
-        isDirectorMode ? sequenceIntent : undefined
+        apiKey || undefined // P0.6: Pass API Key
       );
 
       if (typeof result === 'string') {
@@ -1218,51 +1175,55 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
             Manage
           </button>
         </div>
-
-        {/* OPTION B: Director Mode Toggle */}
-        <div className="flex items-center gap-2 mb-2">
-          <button
-            type="button"
-            onClick={() => {
-              setIsDirectorMode(!isDirectorMode);
-              if (!isDirectorMode) {
-                // CRITICAL: Ask sequence type FIRST
-                setMessages(prev => [...prev, {
-                  role: 'assistant',
-                  content: '🎬 **Mode Réalisateur activé.**\n\nQuel type de séquence voulez-vous créer?\n\n📹 **Plan-séquence** (caméra continue, mouvement fluide)\n🎞️ **Découpage** (plans multiples, montage)\n\nRépondez "plan-séquence" ou "découpage".',
-                  image: null,
-                }]);
-                setSequenceIntent(null); // Reset choice
-              } else {
-                setSequenceIntent(null); // Reset when turning off
-              }
-            }}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors border ${isDirectorMode
-              ? 'bg-purple-500/20 text-purple-300 border-purple-500/50'
-              : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'
-              }`}
-            title="Activer le mode Assistant Réalisateur pour un découpage guidé"
-          >
-            <VideoIcon className="w-3.5 h-3.5" />
-            {isDirectorMode ? 'Director ON' : 'Director OFF'}
-          </button>
-        </div>
         {!extensionContext && (
-          <div className="flex items-center gap-3 mb-3">
-            <label
-              htmlFor="duration-input"
-              className="text-sm font-medium text-gray-400">
-              Total Sequence Duration (seconds)
-            </label>
-            <input
-              id="duration-input"
-              type="number"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              min="8"
-              max="60"
-              className="w-20 bg-[#1f1f1f] border border-gray-600 rounded-lg p-2 text-center"
-            />
+          <div className="flex items-center gap-4 mb-3 flex-wrap">
+            {/* Duration input */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="duration-input"
+                className="text-sm font-medium text-gray-400">
+                Durée
+              </label>
+              <input
+                id="duration-input"
+                type="number"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                min="8"
+                max="60"
+                className="w-16 bg-[#1f1f1f] border border-gray-600 rounded-lg p-2 text-center text-sm"
+              />
+              <span className="text-xs text-gray-500">sec</span>
+            </div>
+
+            {/* Mode toggle */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-400">Mode:</span>
+              <div className="flex items-center bg-gray-900 rounded-lg p-0.5 border border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => onSequenceModeChange?.('plan-sequence')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${sequenceMode === 'plan-sequence'
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    }`}
+                  title="Extensions fluides, caméra continue"
+                >
+                  📹 Plan Extensif
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSequenceModeChange?.('decoupage')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${sequenceMode === 'decoupage'
+                      ? 'bg-purple-600 text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    }`}
+                  title="Plans multiples, montage classique"
+                >
+                  🎞️ Découpage
+                </button>
+              </div>
+            </div>
           </div>
         )}
         {assistantImage && (
@@ -1343,24 +1304,14 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
           dogma={activeDogma}
         />
       )}
-      {storyboard && startFrame && (
+      {storyboard && (
         <StoryboardPreviewModal
-          isOpen={!!storyboard}
+          storyboard={storyboard}
           onClose={() => setStoryboard(null)}
-          onApplyVariant={(payload) => {
-            // Handle applying the variant from the storyboard
-            if (payload.previewImage) {
-              setPrompt(payload.previewPrompt);
-              setStartFrame(payload.previewImage);
-              // You might want to update the storyboard state here or just close
-              setStoryboard(null);
-            }
-          }}
-          segmentIndex={0} // PromptAssistant context is typically root or single generation
-          baseImage={startFrame}
-          currentPrompt={prompt}
-          dogma={activeDogma}
-          mode="single-select"
+          onConfirm={handleConfirmStoryboard}
+          onRegenerate={() => handleGenerateStoryboard(prompt)}
+          startFrame={startFrame}
+          endFrame={endFrame}
         />
       )}
       {isFrameSelectorOpen && (

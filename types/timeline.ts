@@ -188,3 +188,51 @@ export interface TimelineState {
     currentlyGenerating?: { segmentId: string; revisionId: string };
     playheadSec: number;
 }
+
+// === COMPONENT PROPS ===
+
+export interface IterationThumbnailsProps {
+    iterations: SegmentRevision[];
+    activeRevisionId: string;
+    previewingRevisionId?: string;
+    onIterationClick: (revisionId: string) => void;
+    onIterationDelete: (revisionId: string) => void;
+}
+
+export interface VerticalSegmentCardProps {
+    segment: SegmentWithUI;
+    isSelected: boolean;
+    isExpanded: boolean;
+    onClick: () => void;
+    onExpand: () => void;
+    onCollapse: () => void;
+    onLock: () => void;
+    onUnlock: () => void;
+    onIterationClick: (revisionId: string) => void;
+    onIterationValidate: (revisionId: string) => void;
+    onIterationDelete: (revisionId: string) => void;
+}
+
+export interface VerticalTimelineStackProps {
+    segments: SegmentWithUI[];
+    selectedSegmentIds: string[];
+    expandedSegmentIds: string[];
+    onSegmentClick: (segmentId: string) => void;
+    onSegmentExpand: (segmentId: string) => void;
+    onSegmentCollapse: (segmentId: string) => void;
+    onIterationClick: (segmentId: string, revisionId: string) => void;
+    onIterationValidate: (segmentId: string, revisionId: string) => void;
+    onIterationDelete: (segmentId: string, revisionId: string) => void;
+    onSegmentLock: (segmentId: string) => void;
+    onSegmentUnlock: (segmentId: string) => void;
+    onReprompt: (segmentId: string, newPrompt: string) => void;
+}
+
+export interface SegmentIAPanelProps {
+    segment: SegmentWithUI | null;
+    activeRevision: SegmentRevision | null;
+    activeTab: 'prompt' | 'keyframes' | 'edit-image' | 'edit-video' | 'versions';
+    onTabChange: (tab: SegmentIAPanelProps['activeTab']) => void;
+    onReprompt: (newPrompt: string) => void;
+    onRegenerate: () => void;
+}

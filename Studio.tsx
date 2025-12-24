@@ -17,8 +17,6 @@ import {
   SparklesIcon,
   UsersIcon,
   UploadCloudIcon,
-  ArrowPathIcon,
-  DownloadIcon,
 } from './components/icons';
 import LoadingIndicator from './components/LoadingIndicator';
 import PromptEditorModal from './components/PromptEditorModal';
@@ -26,18 +24,14 @@ import PromptSequenceAssistant from './components/PromptSequenceAssistant';
 import SequenceManager from './components/SequenceManager';
 import ShotLibrary from './components/ShotLibrary';
 import StoryboardPreviewModal from './components/StoryboardPreviewModal';
-import ModeSelectionStep from './components/ModeSelectionStep';
+
 import { UserProfileModal } from './components/UserProfileModal'; // New
 import { SessionHistoryModal } from './components/SessionHistoryModal'; // New
-import { StorageSettings } from './components/StorageSettings'; // Storage configuration
-import { uploadToDrive } from './services/googleDriveClient'; // Google Drive operations
-import { LibraryMenu, ProjectMenu, ProfileMenu } from './components/HeaderMenus'; // New Header Menus
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
 import useLocalStorage from './hooks/useLocalStorage';
 import { useShotLibrary } from './hooks/useShotLibrary';
-import { useSessionPersistence } from './hooks/useSessionPersistence'; // New Hook
-import { useProjectPersistence } from './hooks/useProjectPersistence'; // Persistence Hook
+import { useSessionPersistence } from './hooks/useSessionPersistence'; // New // New Hook
 import {
   generateVideo,
   reviseFollowingPrompts,
@@ -48,23 +42,19 @@ import {
   setRuntimeApiKey, // New
 } from './services/geminiService';
 import { generatePreview as generateNanoPreview } from './services/nanoService';
-import { exportProjectToJSON, importProjectFromJSON, triggerImportFilePicker } from './services/exportService';
 import { useAuth } from './contexts/AuthContext';
 import {
   AppState,
   AppStage,
   Character,
-  ChatMessage,
   Dogma,
   GenerateVideoParams,
   GenerationMode,
   ImageFile,
   NanoApplyPayload,
-  AspectRatio,
   NanoEditorContext,
   PromptSequence,
   PromptSequenceStatus,
-  Resolution,
   SavedShot,
   SequenceProgress,
   SequenceVideoData,
@@ -72,10 +62,11 @@ import {
   VeoModel,
   VideoFile,
   VideoProvider,
-  Project,
-  ProjectState
 } from './types';
-import { ProjectService } from './services/projectService';
+
+import { TimelineState, SegmentWithUI, SegmentRevision } from './types/timeline';
+import VerticalTimelineStack from './components/VerticalTimelineStack';
+import SegmentIAPanel from './components/SegmentIAPanel';
 
 // ===================================================================
 // NEUTRAL DEFAULT: No hardcoded dogmas
@@ -108,10 +99,7 @@ const PromptConception: React.FC<{
   storyboardByIndex?: Record<number, StoryboardPreview>;
   // === IMAGE-FIRST: Keyframe generation status ===
   isGeneratingKeyframes?: boolean;
-  // === MODE SELECTION ===
-  sequenceMode?: 'pending' | 'plan-sequence' | 'decoupage';
-  onSelectPlanSequence?: () => void;
-  onSelectDecoupage?: () => void;
+
   apiKey?: string | null; // P0.6: BYOK Strict
 }> = ({
   motionDescription,
@@ -123,9 +111,7 @@ const PromptConception: React.FC<{
   promptSequence,
   storyboardByIndex = {},
   isGeneratingKeyframes = false,
-  sequenceMode = 'pending',
-  onSelectPlanSequence,
-  onSelectDecoupage,
+
   apiKey,
 }) => {
     const displayImage = activeChatImage || referenceImage;
@@ -179,7 +165,7 @@ const PromptConception: React.FC<{
           <SparklesIcon className="w-5 h-5 text-indigo-400" />
           {title}
         </h3>
-        <div className="flex-grow flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-300px)] scrollable-panel">
+        <div className="flex-grow flex flex-col gap-4 overflow-y-auto">
           {!hasContent ? (
             <div className="flex-grow flex flex-col items-center justify-center text-center p-4 border-2 border-dashed border-gray-800 rounded-xl bg-gray-900/50">
               <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mb-3 animate-pulse">
@@ -321,15 +307,7 @@ const PromptConception: React.FC<{
                 </div>
               )}
 
-              {/* === MODE SELECTION: Plan-séquence vs Découpage === */}
-              {storyboardByIndex[0] && sequenceMode === 'pending' && onSelectPlanSequence && onSelectDecoupage && (
-                <ModeSelectionStep
-                  keyframeImage={storyboardByIndex[0].previewImage}
-                  onSelectPlanSequence={onSelectPlanSequence}
-                  onSelectDecoupage={onSelectDecoupage}
-                  isGenerating={isGeneratingKeyframes}
-                />
-              )}
+
 
               {motionDescription && (
                 <div className="bg-gray-800 p-4 rounded-xl border border-green-500/30 flex-shrink-0 shadow-md">
@@ -395,12 +373,13 @@ const PromptConception: React.FC<{
   };
 
 const Studio: React.FC = () => {
-  const { user, signOut, signInWithGoogle } = useAuth(); // Inject User Context + Auth actions
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [currentStage, setCurrentStage] = useState<AppStage>(AppStage.PROMPTING);
+  const [activeTab, setActiveTab] = useState<'conception' | 'editing' | 'export'>('conception');
   const [resetKey, setResetKey] = useState(0); // For forcing component remounts on reset
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const [lastConfig, setLastConfig] = useState<GenerateVideoParams | null>(
     null,
   );
@@ -430,9 +409,6 @@ const Studio: React.FC = () => {
   >({});
   const [mainPromptConfig, setMainPromptConfig] =
     useState<GenerateVideoParams | null>(null);
-
-  // P0: Lift assistant messages to Studio for persistence across tab switches
-  const [assistantMessages, setAssistantMessages] = useState<ChatMessage[]>([]);
 
   // === NANO BANANA PRO: 12 Vignettes Modal ===
   const [storyboardModalContext, setStoryboardModalContext] = useState<{
@@ -509,8 +485,6 @@ const Studio: React.FC = () => {
     thumbnail?: string;
   } | null>(null);
 
-
-
   // === NANO BANANA PRO: Centralized editor context ===
   const [nanoEditorContext, setNanoEditorContext] = useState<NanoEditorContext | null>(null);
   const [storyboardByIndex, setStoryboardByIndex] = useState<Record<number, StoryboardPreview>>({});
@@ -520,12 +494,10 @@ const Studio: React.FC = () => {
   const [isGeneratingKeyframes, setIsGeneratingKeyframes] = useState(false);
 
   // === MODE SELECTION: Plan-séquence vs Découpage ===
-  type SequenceMode = 'pending' | 'plan-sequence' | 'decoupage';
-  const [sequenceMode, setSequenceMode] = useState<SequenceMode>('pending');
-
-  // === ROOT KEYFRAME PROTECTION ===
-  // Once user validates the root keyframe (by selecting a mode), it should not be auto-regenerated
-  const [rootKeyframeLocked, setRootKeyframeLocked] = useState(false);
+  type SequenceMode = 'plan-sequence' | 'decoupage';
+  const [sequenceMode, setSequenceMode] = useState<SequenceMode>('plan-sequence');
+  // P0: Lift messages for persistence
+  const [assistantMessages, setAssistantMessages] = useState<any[]>([]);
 
   // === SESSION PERSISTENCE ===
   const {
@@ -544,46 +516,20 @@ const Studio: React.FC = () => {
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-  const [isStorageSettingsOpen, setIsStorageSettingsOpen] = useState(false);
   const [historySessions, setHistorySessions] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  // --- Project Persistence (Correct Location) ---
-  const {
-    currentProject,
-    setCurrentProject,
-    saveProject,
-    loadProject,
-    isSaving: isProjectSaving
-  } = useProjectPersistence(
-    user,
-    {
-      promptSequence,
-      storyboardByIndex,
-      sequenceVideoData,
-      activeDogma: sequenceBoundDogma,
-      assistantMotionDescription,
-      assistantExtensionContext,
-      assistantImage,
-      assistantReferenceVideo,
-      mentionedCharacters,
-      // P0: Include assistant messages for full persistence
-      assistantMessages
-    },
-    {
-      setPromptSequence,
-      setStoryboardByIndex,
-      setSequenceVideoData,
-      setSequenceBoundDogma,
-      setAssistantMotionDescription,
-      setAssistantExtensionContext,
-      setAssistantImage,
-      setAssistantReferenceVideo,
-      setMentionedCharacters,
-      // P0: Setter for assistant messages
-      setAssistantMessages
-    }
-  );
+  // === TIMELINE STATE ===
+  const [timelineState, setTimelineState] = useState<TimelineState>({
+    project: null,
+    segments: [],
+    selectedSegmentIds: [],
+    expandedSegmentIds: [],
+    generationQueue: [],
+    playheadSec: 0
+  });
+  const [iaPanelTab, setIaPanelTab] = useState<"prompt" | "keyframes" | "edit-image" | "edit-video" | "versions">('prompt');
+  const [isVerticalToggle, setIsVerticalToggle] = useState(false);
 
   // Auto-open profile modal if no profile
   useEffect(() => {
@@ -602,26 +548,6 @@ const Studio: React.FC = () => {
       startNewSession();
     }
   }, [profile, sessionId, startNewSession]);
-
-  // Load API Key from profile on authentication
-  useEffect(() => {
-    const loadApiKeyFromProfile = async () => {
-      if (user?.id && !apiKey) { // Only load if user is authenticated and no key is set
-        try {
-          const profile = await ProjectService.getProfile(user.id);
-          if (profile?.api_key) {
-            setApiKey(profile.api_key);
-            setRuntimeApiKey(profile.api_key);
-            setHasCustomKey(true);
-            console.log('[API Key] Loaded from profile');
-          }
-        } catch (e) {
-          console.warn('[API Key] Failed to load from profile:', e);
-        }
-      }
-    };
-    loadApiKeyFromProfile();
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleProfileConfirm = async (identifier: string) => {
     setIsLoadingHistory(true);
@@ -642,31 +568,6 @@ const Studio: React.FC = () => {
       setHistorySessions(sessions);
     } finally {
       setIsLoadingHistory(false);
-    }
-  };
-
-  const handleCleanHistory = async () => {
-    if (!user) return;
-
-    const confirmed = window.confirm(
-      '⚠️ ATTENTION: Cette action va supprimer TOUS vos projets sauvegardés dans le cloud.\n\n' +
-      'Les projets corrompus ou anciens seront définitivement supprimés.\n\n' +
-      'Voulez-vous continuer?'
-    );
-
-    if (!confirmed) return;
-
-    try {
-      const projects = await ProjectService.listProjects(user.id);
-
-      for (const project of projects) {
-        await ProjectService.deleteProject(project.id);
-      }
-
-      alert(`✅ ${projects.length} projet(s) supprimé(s) avec succès.`);
-    } catch (error) {
-      console.error('[CleanHistory] Error cleaning projects:', error);
-      alert('❌ Erreur lors du nettoyage de l\'historique.');
     }
   };
 
@@ -862,7 +763,7 @@ const Studio: React.FC = () => {
 
         // If Root, we can now show the Mode Selection UI
         if (segmentIndex === 0) {
-          setSequenceMode('pending');
+          setSequenceMode('plan-sequence');
         }
       }
     } catch (err: any) {
@@ -932,29 +833,16 @@ const Studio: React.FC = () => {
           console.log('[Sequence] Root shot index=0 → mode=TEXT_TO_VIDEO (no base video)');
 
           // IMAGE-FIRST ENFORCEMENT
-          // If no keyframe exists AND no startFrame provided, generate one first via Nano
-          // This ensures we have a visual reference before video generation
-          const hasExistingKeyframe = storyboardByIndex[0] || effectiveParams.startFrame;
-          if (!hasExistingKeyframe) {
+          // If no keyframe exists for the root shot, we MUST generate one first via Nano
+          if (!storyboardByIndex[0]) {
             console.log('[ImageFirst] No keyframe found for root shot. Enforcing Nano preview.');
             // Generate keyframe using the prompt
             generateKeyframe(0, effectiveParams.prompt);
+            // Optionally set state to indicate we are in preview mode
+            // Inform user via temporary message (using error message slot for visibility, or console)
             console.log('[ImageFirst] Preview generation triggered. Pausing video generation.');
-            // Abort video generation - user must review keyframe first
+            // Abort video generation
             return;
-          }
-          console.log('[ImageFirst] Keyframe detected, proceeding with video generation.');
-
-          // AUTO-INJECT KEYFRAME: If storyboard has a keyframe but params don't have startFrame,
-          // use the keyframe as startFrame and switch to FRAMES_TO_VIDEO mode for better consistency
-          const keyframeImage = storyboardByIndex[0]?.previewImage;
-          if (keyframeImage && !effectiveParams.startFrame) {
-            console.log('[ImageFirst] Injecting storyboard keyframe as startFrame');
-            effectiveParams = {
-              ...effectiveParams,
-              startFrame: keyframeImage,
-              mode: GenerationMode.FRAMES_TO_VIDEO,
-            };
           }
 
           // Force TEXT_TO_VIDEO for root shot (unless using frames/references mode)
@@ -1079,16 +967,7 @@ const Studio: React.FC = () => {
             }
             setSequenceVideoData((prev) => ({
               ...prev,
-              [currentPromptIndex]: {
-                video,
-                blob,
-                url: objectUrl,
-                thumbnail,
-                prompt: promptSequence?.mainPrompt || '',
-                isExtension: currentPromptIndex > 0,
-                status: 'completed' as const,
-                createdAt: new Date().toISOString(),
-              },
+              [currentPromptIndex]: { video, blob, url: objectUrl, thumbnail },
             }));
           } catch (thumbError) {
             console.error(
@@ -1097,16 +976,7 @@ const Studio: React.FC = () => {
             );
             setSequenceVideoData((prev) => ({
               ...prev,
-              [currentPromptIndex]: {
-                video,
-                blob,
-                url: objectUrl,
-                thumbnail: '',
-                prompt: promptSequence?.mainPrompt || '',
-                isExtension: currentPromptIndex > 0,
-                status: 'completed' as const,
-                createdAt: new Date().toISOString(),
-              },
+              [currentPromptIndex]: { video, blob, url: objectUrl, thumbnail: '' },
             }));
           }
         }
@@ -1196,7 +1066,7 @@ const Studio: React.FC = () => {
         }
       }
     },
-    [promptSequence, activePromptIndex, assistantExtensionContext, storyboardByIndex, sequenceVideoData, apiKey, hasCustomKey],
+    [promptSequence, activePromptIndex, assistantExtensionContext],
   );
 
   const handleStartNewProject = useCallback(() => {
@@ -1296,20 +1166,8 @@ const Studio: React.FC = () => {
     });
 
     // Helper: Trigger background upgrade for vignettes
-    // IMPORTANT: Skip for extensions in plan-sequence mode (they use last frame of previous video)
     const triggerProUpgrade = async (idx: number) => {
-      // Only generate Nano previews for:
-      // 1. Root shot (idx === 0) - ALWAYS
-      // 2. Extensions (idx > 0) - ONLY in découpage mode (independent shots)
-      const isRoot = idx === 0;
-      const isExtensionInPlanSequence = idx > 0 && sequenceMode === 'plan-sequence';
-
-      if (isExtensionInPlanSequence) {
-        console.log(`[NanoUpgrade] SKIP: Extension ${idx} in plan-sequence mode uses last frame`);
-        return;
-      }
-
-      if (sequenceMode === 'decoupage' || isRoot) {
+      if (sequenceMode === 'decoupage' || payload.target === 'root') {
         console.log(`[NanoUpgrade] Upgrading segment ${idx} to Pro...`);
         try {
           const res = await generateNanoPreview({
@@ -1351,25 +1209,6 @@ const Studio: React.FC = () => {
       // === ROOT: Update mainPrompt + mark all extensions dirty ===
       if (!promptSequence) return;
 
-      // PROTECTION: If root keyframe is locked (user validated it by selecting mode),
-      // only allow explicit edits via Nano Editor, not auto-regeneration
-      if (rootKeyframeLocked && storyboardByIndex[0]) {
-        console.log('[RootProtection] Root keyframe is locked - updating prompt only, not keyframe');
-        // Update prompt only, keep existing keyframe
-        const extensionsCount = promptSequence.extensionPrompts.length;
-        const updatedSequence: PromptSequence = {
-          ...promptSequence,
-          mainPrompt: payload.previewPrompt,
-          status: extensionsCount > 0 ? PromptSequenceStatus.ROOT_MODIFIED : PromptSequenceStatus.CLEAN,
-          dirtyExtensions: extensionsCount > 0
-            ? Array.from({ length: extensionsCount }, (_, i) => i + 1)
-            : [],
-          rootModifiedAt: new Date().toISOString(),
-        };
-        setPromptSequence(updatedSequence);
-        return; // Don't update keyframe
-      }
-
       const extensionsCount = promptSequence.extensionPrompts.length;
       const updatedSequence: PromptSequence = {
         ...promptSequence,
@@ -1384,10 +1223,7 @@ const Studio: React.FC = () => {
 
       setPromptSequence(updatedSequence);
       setStoryboardByIndex(prev => ({ ...prev, [0]: storyboardEntry }));
-
-      // CRITICAL: Do NOT auto-regenerate after user edits!
-      // User explicitly edited this image in AIEditor - we must preserve it
-      // triggerProUpgrade(0); // REMOVED - was causing unwanted auto-regeneration
+      triggerProUpgrade(0);
 
       if (extensionsCount > 0) {
         setErrorMessage(`⚠️ Prompt root modifié. ${extensionsCount} extension(s) à régénérer.`);
@@ -1421,24 +1257,8 @@ const Studio: React.FC = () => {
       };
 
       setPromptSequence(updatedSequence);
-
-      // Extension keyframes: ONLY generate if in découpage mode
-      // In plan-séquence mode, extensions use the last frame of the previous video
-      const isExtension = payload.segmentIndex! > 0;
-      const shouldGenerateKeyframe = isExtension
-        ? sequenceMode === 'decoupage'  // Extensions only in découpage
-        : true;  // Root always gets a keyframe
-
-      if (shouldGenerateKeyframe) {
-        console.log(`[Extension] Generating keyframe for segment ${payload.segmentIndex} (${sequenceMode} mode)`);
-        setStoryboardByIndex(prev => ({ ...prev, [payload.segmentIndex!]: storyboardEntry }));
-
-        // CRITICAL: Do NOT auto-regenerate after user edits!
-        // User explicitly edited this image in AIEditor - we must preserve it
-        // triggerProUpgrade(payload.segmentIndex!); // REMOVED - was causing unwanted auto-regeneration
-      } else {
-        console.log(`[Extension] SKIPPING keyframe for extension ${payload.segmentIndex} (plan-séquence mode - uses last frame)`);
-      }
+      setStoryboardByIndex(prev => ({ ...prev, [payload.segmentIndex!]: storyboardEntry }));
+      triggerProUpgrade(payload.segmentIndex!);
 
     } else if (payload.target === 'character') {
       // === CHARACTER: Update character asset (no dirty logic) ===
@@ -1515,9 +1335,14 @@ const Studio: React.FC = () => {
     handleContinueFromFrame(newImage);
   };
 
+  const handleApplyNano = (newImage: ImageFile) => {
+    console.log('[Nano] Applying retouched image to current context');
+    setAssistantImage(newImage);
+  };
+
   // Handlers for API Key Dialog (BYOK Strict Mode)
   // Uses existing apiKey state (line 383) + Memory Vault
-  const handleApiKeySet = async (newKey: string) => {
+  const handleApiKeySet = (newKey: string) => {
     const trimmed = newKey.trim();
     if (trimmed.length >= 20) {
       setApiKey(trimmed);
@@ -1525,16 +1350,6 @@ const Studio: React.FC = () => {
       setShowApiKeyDialog(false);
       setApiKeyError(null);
       setHasCustomKey(true);
-
-      // Persist to Supabase profile if authenticated
-      if (user?.id) {
-        try {
-          await ProjectService.updateProfile(user.id, { api_key: trimmed });
-          console.log('[API Key] Saved to profile');
-        } catch (e) {
-          console.warn('[API Key] Failed to save to profile:', e);
-        }
-      }
     } else {
       setApiKeyError('Invalid API Key (too short)');
     }
@@ -1547,92 +1362,8 @@ const Studio: React.FC = () => {
     setHasCustomKey(false);
   };
 
-  // === JSON Export/Import Handlers ===
-  const handleExportProject = () => {
-    const state = {
-      promptSequence,
-      storyboardByIndex,
-      sequenceVideoData: {}, // Videos can't be serialized, will need regeneration
-      sequenceHistory: [],
-      activeDogma: sequenceBoundDogma,
-      assistants: {
-        motionDescription: assistantMotionDescription,
-        assistantExtensionContext,
-        assistantImage,
-        assistantReferenceVideo,
-        mentionedCharacters
-      }
-    };
-    const title = currentProject?.title || promptSequence?.mainPrompt?.slice(0, 30) || 'jenial_project';
-    exportProjectToJSON(state, title);
-  };
-
-  const handleImportProject = async () => {
-    const file = await triggerImportFilePicker();
-    if (!file) return;
-
-    try {
-      const { title, state } = await importProjectFromJSON(file);
-
-      // Restore state
-      setPromptSequence(state.promptSequence);
-      setStoryboardByIndex(state.storyboardByIndex || {});
-      setSequenceBoundDogma(state.activeDogma || null);
-      setAssistantMotionDescription(state.assistants?.motionDescription || null);
-      setAssistantExtensionContext(state.assistants?.assistantExtensionContext || null);
-      setAssistantImage(state.assistants?.assistantImage || null);
-      setAssistantReferenceVideo(state.assistants?.assistantReferenceVideo || null);
-      setMentionedCharacters(state.assistants?.mentionedCharacters || []);
-
-      // Clear current project association (this is a local import)
-      setCurrentProject(null);
-
-      alert(`Project "${title}" imported successfully!`);
-    } catch (error: any) {
-      alert(`Import failed: ${error.message}`);
-    }
-  };
-
-  const handleSaveShot = async (thumbnailBase64: string) => {
+  const handleSaveShot = (thumbnailBase64: string) => {
     if (lastConfig) {
-      // P1: Find the high-res keyframe from storyboard for better restoration
-      const rootKeyframe = storyboardByIndex[0]?.previewImage;
-
-      // Determine storage preference
-      const storagePreference = profile?.preferences?.videoStorage || 'local-download';
-      let driveData = undefined;
-
-      // Handle Storage based on preference
-      if (videoUrl) {
-        if (storagePreference === 'google-drive') {
-          try {
-            console.log('[Storage] Saving to Google Drive...');
-            const fileName = `${lastConfig.prompt.replace(/[^a-z0-9]/gi, '_').substring(0, 30)}_${Date.now()}.mp4`;
-            const res = await uploadToDrive(videoUrl, fileName);
-            if (res.success) {
-              console.log('[Storage] Saved to Drive:', res.fileId);
-              driveData = {
-                fileId: res.fileId,
-                webViewLink: res.webViewLink
-              };
-            } else {
-              console.warn('[Storage] Drive upload failed, falling back to local metadata');
-            }
-          } catch (error) {
-            console.error('[Storage] Error uploading to Drive:', error);
-          }
-        } else {
-          // Default: Local Download
-          console.log('[Storage] Triggering local download...');
-          const a = document.createElement('a');
-          a.href = videoUrl;
-          a.download = `Jenial_${Date.now()}.mp4`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        }
-      }
-
       const newShot: SavedShot = {
         id: `shot-${Date.now()}`,
         prompt: lastConfig.prompt,
@@ -1642,33 +1373,30 @@ const Studio: React.FC = () => {
         aspectRatio: lastConfig.aspectRatio,
         resolution: lastConfig.resolution,
         mode: lastConfig.mode,
-
-        // Medias
-        videoUrl: videoUrl || undefined,
-        previewImageBase64: rootKeyframe?.base64 || undefined,
-
-        // Metadata for storage restoration
-        videoStorage: driveData ? {
-          type: 'google-drive',
-          reference: driveData.fileId || '',
-          url: driveData.webViewLink
-        } : {
-          type: 'local-download',
-          reference: `Jenial_${Date.now()}.mp4`
-        }
       };
       handleSaveShotToLibrary(newShot);
       setIsCurrentVideoSaved(true);
     }
   };
 
+  const handleSequenceModeChange = (mode: 'plan-sequence' | 'decoupage') => {
+    setSequenceMode(mode);
+    if (mode === 'decoupage') {
+      console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
+      // Open StoryboardPreviewModal for 12 vignettes
+      if (storyboardByIndex[0]) {
+        setStoryboardModalContext({
+          segmentIndex: 0,
+          baseImage: storyboardByIndex[0].previewImage,
+        });
+      }
+    } else {
+      console.log('[Mode] Selected: Plan-séquence');
+    }
+  };
+
   const handleLoadShot = (shot: SavedShot) => {
     if (!confirmUnsavedVideo()) return;
-
-    // 1. Full reset
-    handleStartNewProject();
-
-    // 2. Prepare config
     const loadedConfig: GenerateVideoParams = {
       prompt: shot.prompt,
       model: shot.model,
@@ -1676,43 +1404,9 @@ const Studio: React.FC = () => {
       resolution: shot.resolution,
       mode: shot.mode,
     };
-
+    handleStartNewProject();
     setInitialFormValues(loadedConfig);
     setIsShotLibraryOpen(false);
-
-    // 3. Restore Media (Preview & Video)
-    if (shot.previewImageBase64) {
-      setStoryboardByIndex({
-        0: {
-          id: crypto.randomUUID(),
-          owner: 'root',
-          previewImage: {
-            base64: shot.previewImageBase64,
-          },
-          previewPrompt: shot.prompt,
-          segmentIndex: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }
-      });
-    }
-
-    if (shot.videoUrl) {
-      setVideoUrl(shot.videoUrl);
-      setAppState(AppState.SUCCESS); // Go straight to results view
-      setCurrentStage(AppStage.RESULT);
-
-      // Sync to sequenceVideoData for index 0 to enable extensions
-      setSequenceVideoData({
-        0: {
-          url: shot.videoUrl,
-          prompt: shot.prompt,
-          isExtension: false,
-          status: 'completed',
-          createdAt: new Date().toISOString()
-        }
-      });
-    }
   };
 
   const handleSequenceGenerated = (
@@ -1769,9 +1463,13 @@ const Studio: React.FC = () => {
         }
       };
 
-      // Generate root keyframe ONLY
-      // CRITICAL: Extensions should NOT have keyframes - they use last frame of previous video
+      // Generate root keyframe
       generateKeyframe(0, scopedSequence.mainPrompt);
+
+      // Generate first extension keyframe if exists
+      if (scopedSequence.extensionPrompts && scopedSequence.extensionPrompts[0]) {
+        generateKeyframe(1, scopedSequence.extensionPrompts[0]);
+      }
 
       // Mark generation complete after a delay
       setTimeout(() => setIsGeneratingKeyframes(false), 3000);
@@ -1871,21 +1569,11 @@ const Studio: React.FC = () => {
     if (!isMainPrompt) {
       console.log('[Sequence] Setting up Extension', index, 'with base video:', sequenceVideoData[index - 1]?.video);
     }
-
-    // For root shot (index=0), create default config if mainPromptConfig is null
-    const defaultRootConfig: GenerateVideoParams = {
-      prompt: '',
-      model: VeoModel.VEO,
-      aspectRatio: AspectRatio.LANDSCAPE,
-      resolution: Resolution.P720,
-      mode: GenerationMode.TEXT_TO_VIDEO,
-    };
-
     const baseConfig = isMainPrompt
-      ? (mainPromptConfig || defaultRootConfig)  // Use default if mainPromptConfig is null
+      ? mainPromptConfig
       : sequenceVideoData[index - 1]
         ? {
-          ...(mainPromptConfig || defaultRootConfig),
+          ...mainPromptConfig,
           mode: GenerationMode.EXTEND_VIDEO,
           inputVideoObject: sequenceVideoData[index - 1].video,
           prompt: '',
@@ -1899,7 +1587,6 @@ const Studio: React.FC = () => {
       };
       setInitialFormValues(newConfig);
       setActivePromptIndex(index);
-      console.log(`[Sequence] Selected prompt index=${index}, isMain=${isMainPrompt}, config ready`);
     } else {
       // GUARDRAIL 3: Block early selection of extensions
       console.warn(`[Sequence] Blocked selection of extension index=${index}: previous shot (index=${index - 1}) not ready`);
@@ -1987,7 +1674,7 @@ const Studio: React.FC = () => {
     setFrameToEdit(null);
 
     // Mode selection reset
-    setSequenceMode('pending');
+    setSequenceMode('plan-sequence');
 
     // Return to initial stage
     setCurrentStage(AppStage.PROMPTING);
@@ -2154,570 +1841,512 @@ const Studio: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="w-screen h-screen bg-gray-900 font-sans flex flex-col">
-        {showApiKeyDialog && <ApiKeyDialog
-          onSetKey={handleApiKeySet}
-          onClearKey={handleApiKeyClear}
-          onClose={() => setShowApiKeyDialog(false)}
-          hasCustomKey={hasCustomKey}
-          providerToken={providerToken}
-          errorMessage={apiKeyError || undefined}
-        />}
-        {/* Persistence Modals */}
-        <UserProfileModal
-          isOpen={isProfileModalOpen}
-          onClose={() => setIsProfileModalOpen(false)}
-          currentProject={currentProject}
-          onLoadProject={(p) => {
-            loadProject(p);
-            setIsProfileModalOpen(false);
-          }}
-          onNewProject={() => {
-            handleStartNewProject();
-            setCurrentProject(null);
-            setIsProfileModalOpen(false);
-          }}
-        />
-        <SessionHistoryModal
-          isOpen={isHistoryModalOpen}
-          onClose={() => setIsHistoryModalOpen(false)}
-          sessions={historySessions}
-          onRestore={handleRestoreSession}
-          isLoading={isLoadingHistory}
-        />
-        <StorageSettings
-          isOpen={isStorageSettingsOpen}
-          onClose={() => setIsStorageSettingsOpen(false)}
-        />
-        {isShotLibraryOpen && (
-          <ShotLibrary
-            isOpen={isShotLibraryOpen}
-            onClose={() => setIsShotLibraryOpen(false)}
-            shots={savedShots}
-            onLoadShot={handleLoadShot}
-            onDeleteShot={handleDeleteShot}
-            onUpdateShotTitle={handleUpdateShotTitle}
-          />
-        )}
-        {isCharacterManagerOpen && (
-          <CharacterManager
-            isOpen={isCharacterManagerOpen}
-            onClose={() => setIsCharacterManagerOpen(false)}
-            characters={characters}
-            onSaveCharacter={(character) => {
-              setCharacters((current) => {
-                const existing = current.find((c) => c.id === character.id);
-                if (existing) {
-                  return current.map((d) =>
-                    d.id === character.id ? { ...d, ...character } : d,
-                  );
-                }
-                return [{ ...character, id: `char-${Date.now()}` }, ...current];
-              });
-            }}
-            onDeleteCharacter={(id) =>
-              setCharacters((c) => c.filter((char) => char.id !== id))
-            }
-            onUseCharacter={(character) => {
-              handleStartNewProject();
-              setCharacterToInject(character);
-              setIsCharacterManagerOpen(false);
-            }}
-          />
-        )}
-        {isDogmaManagerOpen && (
-          <DogmaManager
-            isOpen={isDogmaManagerOpen}
-            onClose={() => setIsDogmaManagerOpen(false)}
-            dogmas={dogmas}
-            onSaveDogma={(dogma) => {
-              setDogmas((current) => {
-                const existing = current.find((d) => d.id === dogma.id);
-                if (existing) {
-                  return current.map((d) =>
-                    d.id === dogma.id ? { ...d, ...dogma } : d,
-                  );
-                }
-                return [{ ...dogma, id: `dogma-${Date.now()}` }, ...current];
-              });
-            }}
-            onDeleteDogma={(id) =>
-              setDogmas((c) => c.filter((d) => d.id !== id))
-            }
-            activeDogmaId={activeDogmaId}
-            onSetActiveDogmaId={setActiveDogmaId}
-          />
-        )}
-        {editingPromptDetails && (
-          <PromptEditorModal
-            originalPrompt={editingPromptDetails.prompt}
-            visualContextBase64={editingPromptDetails.thumbnail}
-            onClose={() => setEditingPromptDetails(null)}
-            onConfirm={(newPrompt) =>
-              handleConfirmPromptRevision(editingPromptDetails.index, newPrompt)
-            }
-            dogma={sequenceBoundDogma}  // Use sequence-bound dogma, NOT global!
-            promptBefore={
-              promptSequence
-                ? [
-                  promptSequence.mainPrompt,
-                  ...promptSequence.extensionPrompts,
-                ][editingPromptDetails.index - 1]
-                : undefined
-            }
-            promptAfter={
-              promptSequence
-                ? [
-                  promptSequence.mainPrompt,
-                  ...promptSequence.extensionPrompts,
-                ][editingPromptDetails.index + 1]
-                : undefined
-            }
-            onOpenNanoEditor={() => {
-              // Create base image from thumbnail for Nano editor
-              const baseImage = editingPromptDetails.thumbnail ? {
-                file: base64ToFile(editingPromptDetails.thumbnail, 'thumbnail.jpg', 'image/jpeg'),
-                base64: editingPromptDetails.thumbnail,
-              } : undefined;
-
-              openNanoEditor({
-                segmentIndex: editingPromptDetails.index,
-                baseImage,
-                initialPrompt: editingPromptDetails.prompt,
-              });
-            }}
-          />
-        )}
-
-        {/* NANO BANANA PRO: AI Editor Modal */}
-        {nanoEditorContext && nanoEditorContext.baseImage && (
-          <AIEditorModal
-            image={nanoEditorContext.baseImage}
-            onClose={closeNanoEditor}
-            onConfirm={(newImage) => {
-              // Image-only confirm - for non-prompt workflows
-              console.log('[NanoEditor] Image confirmed');
-              closeNanoEditor();
-            }}
-            dogma={nanoEditorContext.dogma}
-            onApply={handleNanoApply}
-            segmentIndex={nanoEditorContext.segmentIndex}
-            target={nanoEditorContext.target}
-            initialPrompt={nanoEditorContext.initialPrompt}
-          />
-        )}
-
-        {/* NANO BANANA PRO: 12 Vignettes Modal */}
-        {storyboardModalContext && (
-          <StoryboardPreviewModal
-            isOpen={true}
-            onClose={() => setStoryboardModalContext(null)}
-            onApplyVariant={handleNanoApply}
-            segmentIndex={storyboardModalContext.segmentIndex}
-            baseImage={storyboardModalContext.baseImage}
-            currentPrompt={
-              storyboardModalContext.segmentIndex === 0
-                ? promptSequence?.mainPrompt || ''
-                : promptSequence?.extensionPrompts[storyboardModalContext.segmentIndex - 1] || ''
-            }
-            dogma={sequenceBoundDogma ?? activeDogma}
-            // Pass mode based on current sequenceMode
-            mode={sequenceMode === 'decoupage' ? 'ordered-select' : 'single-select'}
-            onBuildTimeline={(shots) => {
-              console.log('[Découpage] Building timeline from shots:', shots);
-              // Create extension prompts from ordered shots
-              const orderedPrompts = shots.map((s, idx) =>
-                `[Plan ${idx + 1}] ${s.shotType}: ${s.prompt}`
-              );
-              // Update storyboard with ordered shot images
-              const newStoryboard: Record<number, StoryboardPreview> = {};
-              shots.forEach((shot, idx) => {
-                newStoryboard[idx] = {
-                  id: crypto.randomUUID(),
-                  owner: idx === 0 ? 'root' : 'extension',
-                  previewImage: shot.image,
-                  previewPrompt: shot.prompt,
-                  segmentIndex: idx,
-                  cameraNotes: shot.shotType,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                };
-              });
-              setStoryboardByIndex(newStoryboard);
-              // Create prompt sequence from ordered shots
-              if (shots.length > 0) {
-                const newSequence: PromptSequence = {
-                  id: crypto.randomUUID(),
-                  dogmaId: (sequenceBoundDogma ?? activeDogma)?.id ?? null,
-                  status: PromptSequenceStatus.CLEAN,
-                  createdAt: new Date().toISOString(),
-                  mainPrompt: orderedPrompts[0] || '',
-                  extensionPrompts: orderedPrompts.slice(1),
-                  dirtyExtensions: [],  // No dirty extensions initially
-                };
-                setPromptSequence(newSequence);
-                setActivePromptIndex(0);
-              }
-              setStoryboardModalContext(null);
-            }}
-          />
-        )}
-        <header className="flex justify-between items-center p-4 border-b border-gray-700/50 flex-shrink-0">
-          <div className="flex items-center gap-4">
+      <div className="bg-[#121212] text-gray-100 h-screen flex overflow-hidden selection:bg-indigo-500/30">
+        {/* SIDE NAVIGATION */}
+        <nav className="w-16 bg-[#1e1e1e] border-r border-[#3f3f46] flex flex-col items-center py-4 shrink-0 z-30">
+          <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl mb-8 shadow-lg shadow-indigo-600/30">J</div>
+          <div className="flex flex-col space-y-6 w-full items-center">
             <button
-              onClick={handleStartNewProject}
-              className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors"
-              title="Start New Project">
-              <CurvedArrowDownIcon className="w-6 h-6 rotate-90" />
-              <span className="hidden sm:inline">Back to start</span>
+              onClick={() => setActiveTab('conception')}
+              className={`group flex flex-col items-center justify-center gap-1 w-full relative transition-all ${activeTab === 'conception' ? 'text-indigo-400' : 'text-gray-500 hover:text-gray-300'}`}
+            >
+              {activeTab === 'conception' && <div className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 bg-indigo-600 rounded-r-full"></div>}
+              <div className={`p-2 rounded-lg transition-colors ${activeTab === 'conception' ? 'bg-indigo-500/10' : 'group-hover:bg-gray-800'}`}>
+                <span className="material-symbols-outlined text-2xl">design_services</span>
+              </div>
+              <span className="text-[9px] font-medium">Conception</span>
             </button>
-            <div className="w-px h-6 bg-gray-700"></div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              Veo Studio
-            </h1>
-            {isCloudEnabled && (
-              <div className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 rounded-full">
-                <UploadCloudIcon className="w-3 h-3 text-blue-400" />
-                <span className="text-xs text-blue-300 font-medium">Cloud Sync Active</span>
+            <button
+              onClick={() => setActiveTab('editing')}
+              className={`group flex flex-col items-center justify-center gap-1 w-full relative transition-all ${activeTab === 'editing' ? 'text-indigo-400' : 'text-gray-500 hover:text-gray-300'}`}
+            >
+              {activeTab === 'editing' && <div className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 bg-indigo-600 rounded-r-full"></div>}
+              <div className={`p-2 rounded-lg transition-colors ${activeTab === 'editing' ? 'bg-indigo-500/10' : 'group-hover:bg-gray-800'}`}>
+                <span className="material-symbols-outlined text-2xl">movie_edit</span>
               </div>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Libraries Menu */}
-            <LibraryMenu
-              onOpenShotLibrary={() => setIsShotLibraryOpen(true)}
-              onOpenCharacters={() => setIsCharacterManagerOpen(true)}
-              onOpenDogmas={() => setIsDogmaManagerOpen(true)}
-              activeDogma={activeDogma}
-            />
-
-            {/* Project Menu */}
-            <ProjectMenu
-              onNewProject={handleStartNewProject}
-              onSaveCloud={saveProject}
-              onLoadCloud={() => setIsProfileModalOpen(true)}
-              onExportJSON={handleExportProject}
-              onImportJSON={handleImportProject}
-              onOpenHistory={handleOpenHistory}
-              onCleanHistory={handleCleanHistory}
-              isSaving={isProjectSaving || isSaving}
-              isAuthenticated={!!user}
-            />
-
-            {/* Profile Menu */}
-            <ProfileMenu
-              user={user}
-              hasApiKey={hasCustomKey}
-              onOpenApiKey={() => setShowApiKeyDialog(true)}
-              onOpenProfile={() => setIsProfileModalOpen(true)}
-              onOpenStorageSettings={() => setIsStorageSettingsOpen(true)}
-              onSignOut={signOut}
-              onSignIn={signInWithGoogle}
-            />
-          </div>
-        </header>
-        <main className="flex-grow p-4 overflow-hidden">
-          <div className="w-full h-full mx-auto">
-            {appState === AppState.LOADING && (
-              <div className="w-full h-full flex items-center justify-center">
-                <LoadingIndicator onCancel={handleCancelGeneration} />
+              <span className="text-[9px] font-medium">Editing</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('export')}
+              className={`group flex flex-col items-center justify-center gap-1 w-full relative transition-all ${activeTab === 'export' ? 'text-indigo-400' : 'text-gray-500 hover:text-gray-300'}`}
+            >
+              {activeTab === 'export' && <div className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 bg-indigo-600 rounded-r-full"></div>}
+              <div className={`p-2 rounded-lg transition-colors ${activeTab === 'export' ? 'bg-indigo-500/10' : 'group-hover:bg-gray-800'}`}>
+                <span className="material-symbols-outlined text-2xl">high_quality</span>
               </div>
-            )}
-            {appState === AppState.ERROR && (
-              <div className="w-full h-full flex items-center justify-center text-center">
-                <div>
-                  <h2 className="text-2xl font-bold text-red-400 mb-4">
-                    An Error Occurred
-                  </h2>
-                  <p className="text-gray-300 bg-red-900/50 p-4 rounded-lg max-w-lg mx-auto">
-                    {errorMessage}
-                  </p>
-                  <button
-                    onClick={handleRetryLastPrompt}
-                    className="mt-6 flex items-center gap-2 mx-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors">
-                    <SparklesIcon className="w-5 h-5" />
-                    Try Again
-                  </button>
+              <span className="text-[9px] font-medium">Upscale</span>
+            </button>
+          </div>
+          <div className="mt-auto flex flex-col space-y-4 items-center mb-4">
+            <button
+              onClick={() => setShowApiKeyDialog(true)}
+              className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-all"
+              title="Settings"
+            >
+              <span className="material-symbols-outlined text-xl">settings</span>
+            </button>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-medium shadow-md text-xs cursor-pointer hover:scale-105 transition-transform">JK</div>
+          </div>
+        </nav>
+
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+          <main className="flex-grow p-4 overflow-hidden">
+            <div className="w-full h-full mx-auto">
+              {appState === AppState.LOADING && (
+                <div className="w-full h-full flex items-center justify-center">
+                  <LoadingIndicator onCancel={handleCancelGeneration} />
                 </div>
-              </div>
-            )}
-            {appState !== AppState.LOADING && appState !== AppState.ERROR && (
-              <div className="w-full h-full">
-                {currentStage === AppStage.PROMPTING && (
-                  <div className="grid grid-cols-3 gap-4 h-full">
-                    <div className="col-span-2 h-full min-h-0 overflow-hidden">
-                      <PromptSequenceAssistant
-                        onSequenceGenerated={handleSequenceGenerated}
-                        activeDogma={activeDogma}
-                        onOpenDogmaManager={() => setIsDogmaManagerOpen(true)}
-                        onOpenCharacterManager={() =>
-                          setIsCharacterManagerOpen(true)
-                        }
-                        initialValues={initialFormValues}
-                        onGenerate={handleGenerate}
-                        extensionContext={assistantExtensionContext}
-                        onStartExternalExtensionAssistant={
-                          handleStartExternalExtensionAssistant
-                        }
-                        onClearContext={handleStartNewProject}
-                        assistantImage={assistantImage}
-                        onAssistantImageChange={setAssistantImage}
-                        assistantReferenceVideo={assistantReferenceVideo}
-                        videoForExtension={lastVideoObject}
-                        characterToInject={characterToInject}
-                        onCharacterInjected={() => setCharacterToInject(null)}
-                        characters={characters}
-                        onMentionedCharactersChange={setMentionedCharacters}
-                        motionDescription={assistantMotionDescription}
-                        onProvisionalSequence={handleProvisionalSequence}
-                        apiKey={apiKey} // P0.6: Pass API Key
-                        // P0: Lift messages for persistence across tab switches
-                        messages={assistantMessages}
-                        onMessagesChange={setAssistantMessages}
-                      />
-                    </div>
-                    <div className="col-span-1 h-full min-h-0 overflow-hidden">
-                      {promptSequence ? (
-                        <SequenceManager
-                          sequence={promptSequence}
-                          activePromptIndex={activePromptIndex}
-                          onSelectPrompt={handleSelectPromptFromSequence}
-                          onClearSequence={handleClearSequence}
-                          onEditRequest={handleEditPromptFromSequence}
-                          revisingFromIndex={
-                            isRevisingSequence?.fromIndex ?? null
-                          }
-                          videoData={sequenceVideoData}
-                          storyboardByIndex={storyboardByIndex}
-                          onThumbnailClick={async (thumbnailBase64, index) => {
-                            // Get prompt for this segment
-                            const prompt = index === 0
-                              ? promptSequence.mainPrompt
-                              : promptSequence.extensionPrompts[index - 1] || '';
-
-                            // If we have an image, open Nano editor for retouching
-                            const existingImage = thumbnailBase64
-                              ? { file: base64ToFile(thumbnailBase64, `keyframe_${index}.png`, 'image/png'), base64: thumbnailBase64 }
-                              : storyboardByIndex[index]?.previewImage;
-
-                            if (existingImage) {
-                              openNanoEditor({ segmentIndex: index, baseImage: existingImage, initialPrompt: prompt });
-                            } else {
-                              // CRITICAL: Extensions in plan-séquence mode should NOT generate keyframes
-                              const isExtension = index > 0;
-                              const isBlockedExtension = isExtension && sequenceMode === 'plan-sequence';
-
-                              if (isBlockedExtension) {
-                                console.log(`[ImageFirst] BLOCKED: Extension ${index} in plan-séquence mode cannot generate keyframe`);
-                                setErrorMessage(`❌ Les extensions en mode plan-séquence n'ont pas de keyframe propre. Utilisez la dernière frame de la vidéo précédente.`);
-                                return;
+              )}
+              {appState === AppState.ERROR && (
+                <div className="w-full h-full flex items-center justify-center text-center">
+                  <div>
+                    <h2 className="text-2xl font-bold text-red-400 mb-4">
+                      An Error Occurred
+                    </h2>
+                    <p className="text-gray-300 bg-red-900/50 p-4 rounded-lg max-w-lg mx-auto">
+                      {errorMessage}
+                    </p>
+                    <button
+                      onClick={handleRetryLastPrompt}
+                      className="mt-6 flex items-center gap-2 mx-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors">
+                      <SparklesIcon className="w-5 h-5" />
+                      Try Again
+                    </button>
+                  </div>
+                </div>
+              )}
+              {appState !== AppState.LOADING && appState !== AppState.ERROR && (
+                <div className="w-full h-full">
+                  {/* TAB CONTENT: CONCEPTION */}
+                  {activeTab === 'conception' && (
+                    <div className="w-full h-full p-4">
+                      {currentStage === AppStage.PROMPTING && (
+                        <div className="grid grid-cols-3 gap-4 h-full">
+                          <div className="col-span-2 h-full">
+                            <PromptSequenceAssistant
+                              onSequenceGenerated={handleSequenceGenerated}
+                              activeDogma={activeDogma}
+                              onOpenDogmaManager={() => setIsDogmaManagerOpen(true)}
+                              onOpenCharacterManager={() =>
+                                setIsCharacterManagerOpen(true)
                               }
-
-                              // No image - generate a new preview
-                              console.log(`[ImageFirst] Generating preview for segment ${index}`);
-                              try {
-                                const result = await generateNanoPreview({
-                                  textPrompt: prompt,
-                                  dogma: sequenceBoundDogma,
-                                  quality: 'pro', // Single shot generation = Pro
-                                  target: index === 0 ? 'root' : 'extension',
-                                  apiKey: apiKey || undefined,
-                                });
-                                if (result.previewImage) {
-                                  setStoryboardByIndex(prev => ({
-                                    ...prev,
-                                    [index]: {
-                                      id: crypto.randomUUID(),
-                                      owner: index === 0 ? 'root' : 'extension',
-                                      previewImage: result.previewImage,
-                                      previewPrompt: result.previewPrompt || prompt,
-                                      segmentIndex: index,
-                                      cameraNotes: result.cameraNotes,
-                                      movementNotes: result.movementNotes,
-                                      createdAt: new Date().toISOString(),
-                                      updatedAt: new Date().toISOString(),
-                                    }
-                                  }));
-                                  console.log(`[ImageFirst] Preview generated for segment ${index}`);
+                              initialValues={initialFormValues}
+                              onGenerate={handleGenerate}
+                              extensionContext={assistantExtensionContext}
+                              onStartExternalExtensionAssistant={
+                                handleStartExternalExtensionAssistant
+                              }
+                              onClearContext={handleStartNewProject}
+                              assistantImage={assistantImage}
+                              onAssistantImageChange={setAssistantImage}
+                              assistantReferenceVideo={assistantReferenceVideo}
+                              videoForExtension={lastVideoObject}
+                              characterToInject={characterToInject}
+                              onCharacterInjected={() => setCharacterToInject(null)}
+                              characters={characters}
+                              onMentionedCharactersChange={setMentionedCharacters}
+                              motionDescription={assistantMotionDescription}
+                              onProvisionalSequence={handleProvisionalSequence}
+                              apiKey={apiKey} // P0.6: Pass API Key
+                              // P0: Persistence
+                              messages={assistantMessages}
+                              onMessagesChange={setAssistantMessages}
+                              sequenceMode={sequenceMode}
+                              onSequenceModeChange={handleSequenceModeChange}
+                            />
+                          </div>
+                          <div className="col-span-1 h-full max-h-[calc(100vh-160px)] overflow-auto">
+                            {promptSequence ? (
+                              <SequenceManager
+                                sequence={promptSequence}
+                                activePromptIndex={activePromptIndex}
+                                onSelectPrompt={handleSelectPromptFromSequence}
+                                onClearSequence={handleClearSequence}
+                                onEditRequest={handleEditPromptFromSequence}
+                                revisingFromIndex={
+                                  isRevisingSequence?.fromIndex ?? null
                                 }
-                              } catch (err) {
-                                console.error(`[ImageFirst] Failed to generate preview:`, err);
-                                setErrorMessage(err instanceof Error ? err.message : 'Failed to generate preview.');
-                              }
-                            }
-                          }}
-                          // P2.4: Regenerate keyframe action
-                          onRegenerateKeyframe={async (segmentIndex) => {
-                            // CRITICAL: Extensions in plan-séquence mode should NOT have keyframes
-                            const isExtension = segmentIndex > 0;
-                            const isBlockedExtension = isExtension && sequenceMode === 'plan-sequence';
+                                videoData={sequenceVideoData}
+                                storyboardByIndex={storyboardByIndex}
+                                onThumbnailClick={async (thumbnailBase64, index) => {
+                                  // Get prompt for this segment
+                                  const prompt = index === 0
+                                    ? promptSequence.mainPrompt
+                                    : promptSequence.extensionPrompts[index - 1] || '';
 
-                            if (isBlockedExtension) {
-                              console.log(`[ImageFirst] BLOCKED: Cannot regenerate keyframe for extension ${segmentIndex} in plan-séquence mode`);
-                              setErrorMessage(`❌ Les extensions en mode plan-séquence n'ont pas de keyframe. Utilisez le dernier frame de la vidéo précédente.`);
-                              return;
-                            }
+                                  // If we have an image, open Nano editor for retouching
+                                  const existingImage = thumbnailBase64
+                                    ? { file: base64ToFile(thumbnailBase64, `keyframe_${index}.png`, 'image/png'), base64: thumbnailBase64 }
+                                    : storyboardByIndex[index]?.previewImage;
 
-                            console.log(`[ImageFirst] Regenerating keyframe for segment ${segmentIndex}`);
-                            const prompt = segmentIndex === 0
-                              ? promptSequence.mainPrompt
-                              : promptSequence.extensionPrompts[segmentIndex - 1] || '';
-                            try {
-                              const result = await generateNanoPreview({
-                                textPrompt: prompt,
-                                dogma: sequenceBoundDogma,
-                                quality: 'pro', // Single shot regeneration = Pro
-                                target: segmentIndex === 0 ? 'root' : 'extension',
-                                apiKey: apiKey || undefined,
-                              });
-                              if (result.previewImage) {
-                                setStoryboardByIndex(prev => ({
-                                  ...prev,
-                                  [segmentIndex]: {
-                                    id: crypto.randomUUID(),
-                                    owner: segmentIndex === 0 ? 'root' : 'extension',
-                                    previewImage: result.previewImage,
-                                    previewPrompt: result.previewPrompt || prompt,
-                                    segmentIndex,
-                                    cameraNotes: result.cameraNotes,
-                                    movementNotes: result.movementNotes,
-                                    createdAt: new Date().toISOString(),
-                                    updatedAt: new Date().toISOString(),
+                                  if (existingImage) {
+                                    openNanoEditor({ segmentIndex: index, baseImage: existingImage, initialPrompt: prompt });
+                                  } else {
+                                    // No image - generate a new preview
+                                    console.log(`[ImageFirst] Generating preview for segment ${index}`);
+                                    try {
+                                      const result = await generateNanoPreview({
+                                        textPrompt: prompt,
+                                        dogma: sequenceBoundDogma,
+                                        quality: 'pro', // Single shot generation = Pro
+                                        target: index === 0 ? 'root' : 'extension',
+                                        apiKey: apiKey || undefined,
+                                      });
+                                      if (result.previewImage) {
+                                        setStoryboardByIndex(prev => ({
+                                          ...prev,
+                                          [index]: {
+                                            id: crypto.randomUUID(),
+                                            owner: index === 0 ? 'root' : 'extension',
+                                            previewImage: result.previewImage,
+                                            previewPrompt: result.previewPrompt || prompt,
+                                            segmentIndex: index,
+                                            cameraNotes: result.cameraNotes,
+                                            movementNotes: result.movementNotes,
+                                            createdAt: new Date().toISOString(),
+                                            updatedAt: new Date().toISOString(),
+                                          }
+                                        }));
+                                        console.log(`[ImageFirst] Preview generated for segment ${index}`);
+                                      }
+                                    } catch (err) {
+                                      console.error(`[ImageFirst] Failed to generate preview:`, err);
+                                      setErrorMessage(err instanceof Error ? err.message : 'Failed to generate preview.');
+                                    }
                                   }
-                                }));
-                              }
-                            } catch (err) {
-                              console.error(`[ImageFirst] Regenerate failed:`, err);
-                              setErrorMessage(err instanceof Error ? err.message : 'Failed to regenerate keyframe.');
-                            }
-                          }}
-                          // P2.4: Use keyframe as base image for video generation
-                          onUseKeyframeAsBase={(segmentIndex, image) => {
-                            console.log(`[ImageFirst] Using keyframe ${segmentIndex} as base`);
-                            const imageFile: ImageFile = {
-                              file: base64ToFile(image.base64, `keyframe_${segmentIndex}.png`, 'image/png'),
-                              base64: image.base64,
-                            };
-                            setAssistantImage(imageFile);
-                            // Set the prompt as active
-                            const prompt = segmentIndex === 0
-                              ? promptSequence.mainPrompt
-                              : promptSequence.extensionPrompts[segmentIndex - 1] || '';
-                            setActivePromptIndex(segmentIndex);
-                            setInitialFormValues(prev => prev ? { ...prev, prompt } : null);
-                          }}
-                          // MODE SELECTION: Plan-séquence vs Découpage
-                          sequenceMode={sequenceMode}
-                          onSelectPlanSequence={() => {
-                            setSequenceMode('plan-sequence');
-                            setRootKeyframeLocked(true);
-                            console.log('[Mode] Selected: Plan-séquence - Root keyframe locked');
-                          }}
-                          onSelectDecoupage={() => {
-                            setSequenceMode('decoupage');
-                            setRootKeyframeLocked(true);
-                            console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
-                            if (storyboardByIndex[0]) {
-                              setStoryboardModalContext({
-                                segmentIndex: 0,
-                                baseImage: storyboardByIndex[0].previewImage,
-                              });
-                            }
-                          }}
-                        />
-                      ) : (
-                        <PromptConception
-                          apiKey={apiKey} // P0.6: Pass local API key
-                          key={resetKey} // Force remount on new project to clear assistant context
-                          motionDescription={assistantMotionDescription}
-                          referenceImage={assistantExtensionContext}
-                          activeChatImage={assistantImage}
-                          mentionedCharacters={mentionedCharacters}
-                          // Sequence history must be numerically sorted by segment index
-                          sequenceHistory={sortedSequenceHistory}
-                          // Nano Banana Pro: Thumbnail Retouche
-                          onOpenNanoEditor={(segmentIndex, baseImage, initialPrompt) => {
+                                }}
+                                // P2.4: Regenerate keyframe action
+                                onRegenerateKeyframe={async (segmentIndex) => {
+                                  console.log(`[ImageFirst] Regenerating keyframe for segment ${segmentIndex}`);
+                                  const prompt = segmentIndex === 0
+                                    ? promptSequence.mainPrompt
+                                    : promptSequence.extensionPrompts[segmentIndex - 1] || '';
+                                  try {
+                                    const result = await generateNanoPreview({
+                                      textPrompt: prompt,
+                                      dogma: sequenceBoundDogma,
+                                      quality: 'pro', // Single shot regeneration = Pro
+                                      target: segmentIndex === 0 ? 'root' : 'extension',
+                                      apiKey: apiKey || undefined,
+                                    });
+                                    if (result.previewImage) {
+                                      setStoryboardByIndex(prev => ({
+                                        ...prev,
+                                        [segmentIndex]: {
+                                          id: crypto.randomUUID(),
+                                          owner: segmentIndex === 0 ? 'root' : 'extension',
+                                          previewImage: result.previewImage,
+                                          previewPrompt: result.previewPrompt || prompt,
+                                          segmentIndex,
+                                          cameraNotes: result.cameraNotes,
+                                          movementNotes: result.movementNotes,
+                                          createdAt: new Date().toISOString(),
+                                          updatedAt: new Date().toISOString(),
+                                        }
+                                      }));
+                                    }
+                                  } catch (err) {
+                                    console.error(`[ImageFirst] Regenerate failed:`, err);
+                                    setErrorMessage(err instanceof Error ? err.message : 'Failed to regenerate keyframe.');
+                                  }
+                                }}
+                                // P2.4: Use keyframe as base image for video generation
+                                onUseKeyframeAsBase={(segmentIndex, image) => {
+                                  console.log(`[ImageFirst] Using keyframe ${segmentIndex} as base`);
+                                  const imageFile: ImageFile = {
+                                    file: base64ToFile(image.base64, `keyframe_${segmentIndex}.png`, 'image/png'),
+                                    base64: image.base64,
+                                  };
+                                  setAssistantImage(imageFile);
+                                  // Set the prompt as active
+                                  const prompt = segmentIndex === 0
+                                    ? promptSequence.mainPrompt
+                                    : promptSequence.extensionPrompts[segmentIndex - 1] || '';
+                                  setActivePromptIndex(segmentIndex);
+                                  setInitialFormValues(prev => prev ? { ...prev, prompt } : null);
+                                }}
+                              />
+                            ) : (
+                              <PromptConception
+                                apiKey={apiKey} // P0.6: Pass local API key
+                                key={resetKey} // Force remount on new project to clear assistant context
+                                motionDescription={assistantMotionDescription}
+                                referenceImage={assistantExtensionContext}
+                                activeChatImage={assistantImage}
+                                mentionedCharacters={mentionedCharacters}
+                                // Sequence history must be numerically sorted by segment index
+                                sequenceHistory={sortedSequenceHistory}
+                                // Nano Banana Pro: Thumbnail Retouche
+                                onOpenNanoEditor={(segmentIndex, baseImage, initialPrompt) => {
+                                  openNanoEditor({ segmentIndex, baseImage, initialPrompt });
+                                }}
+                                promptSequence={promptSequence}
+                                storyboardByIndex={storyboardByIndex}
+                                isGeneratingKeyframes={isGeneratingKeyframes}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {currentStage === AppStage.RESULT && videoUrl && (
+                        <VideoResult
+                          videoUrl={videoUrl}
+                          lastConfig={lastConfig}
+                          onRetry={handleRetryLastPrompt}
+                          onStartNewProject={handleStartNewProject}
+                          onExtendVideo={handleExtendVideo}
+                          canExtend={lastConfig?.model !== VeoModel.VEO}
+                          onContinueFromFrame={handleContinueFromFrame}
+                          onEditCapturedFrame={handleEditCapturedFrame}
+                          sequenceProgress={sequenceProgress}
+                          onSaveShot={handleSaveShot}
+                          onContinueSequence={handleContinueSequence}
+                          originalVideoForExtension={originalVideoForExtension}
+                          onStartExtensionAssistant={handleStartExtensionAssistant}
+                          activeDogma={activeDogma}
+                          onPromptRevised={handlePromptRevised}
+                          // Nano Banana Pro: Drift Control
+                          onRecalNano={(segmentIndex, baseImage, initialPrompt) => {
                             openNanoEditor({ segmentIndex, baseImage, initialPrompt });
                           }}
                           promptSequence={promptSequence}
-                          storyboardByIndex={storyboardByIndex}
-                          isGeneratingKeyframes={isGeneratingKeyframes}
-                          // Mode Selection
-                          sequenceMode={sequenceMode}
-                          onSelectPlanSequence={() => {
-                            setSequenceMode('plan-sequence');
-                            setRootKeyframeLocked(true); // Lock root keyframe
-                            console.log('[Mode] Selected: Plan-séquence - Root keyframe locked');
-                          }}
-                          onSelectDecoupage={() => {
-                            setSequenceMode('decoupage');
-                            setRootKeyframeLocked(true); // Lock root keyframe
-                            console.log('[Mode] Selected: Découpage - Opening 12 vignettes');
-                            // Open StoryboardPreviewModal for 12 vignettes
-                            if (storyboardByIndex[0]) {
-                              setStoryboardModalContext({
-                                segmentIndex: 0,
-                                baseImage: storyboardByIndex[0].previewImage,
-                              });
-                            }
-                          }}
+                          activePromptIndex={activePromptIndex}
                         />
                       )}
+                      {currentStage === AppStage.EDITING && frameToEdit && (
+                        <div className="grid grid-cols-3 gap-4 h-full">
+                          <div className="col-span-2 h-full">
+                            <AIEditorModal
+                              image={frameToEdit}
+                              onClose={() => setCurrentStage(AppStage.RESULT)}
+                              onConfirm={handleFrameEditConfirm}
+                              dogma={activeDogma}
+                            />
+                          </div>
+                          <div className="col-span-1 h-full">
+                            <VisualContextViewer
+                              image={frameToEdit}
+                              stage={currentStage}
+                              onEditRequest={() => {
+                                /* Already in editor */
+                              }}
+                              onApplyNano={handleApplyNano}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
-                {currentStage === AppStage.RESULT && videoUrl && (
-                  <VideoResult
-                    videoUrl={videoUrl}
-                    lastConfig={lastConfig}
-                    onRetry={handleRetryLastPrompt}
-                    onStartNewProject={handleStartNewProject}
-                    onExtendVideo={handleExtendVideo}
-                    canExtend={lastConfig?.model !== VeoModel.VEO}
-                    onContinueFromFrame={handleContinueFromFrame}
-                    onEditCapturedFrame={handleEditCapturedFrame}
-                    sequenceProgress={sequenceProgress}
-                    onSaveShot={handleSaveShot}
-                    onContinueSequence={handleContinueSequence}
-                    originalVideoForExtension={originalVideoForExtension}
-                    onStartExtensionAssistant={handleStartExtensionAssistant}
-                    activeDogma={activeDogma}
-                    onPromptRevised={handlePromptRevised}
-                    // Nano Banana Pro: Drift Control
-                    onRecalNano={(segmentIndex, baseImage, initialPrompt) => {
-                      openNanoEditor({ segmentIndex, baseImage, initialPrompt });
-                    }}
-                    promptSequence={promptSequence}
-                    activePromptIndex={activePromptIndex}
-                  />
-                )}
-                {currentStage === AppStage.EDITING && frameToEdit && (
-                  <div className="grid grid-cols-3 gap-4 h-full">
-                    <div className="col-span-2 h-full min-h-0 overflow-hidden">
-                      <AIEditorModal
-                        image={frameToEdit}
-                        onClose={() => setCurrentStage(AppStage.RESULT)}
-                        onConfirm={handleFrameEditConfirm}
-                        dogma={activeDogma}
-                      />
+                  )}
+
+                  {/* TAB CONTENT: EDITING (Timeline) */}
+                  {activeTab === 'editing' && (
+                    <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#121212]">
+                      <div className="flex-1 flex min-h-0">
+                        {/* ASIDE: Bin Manager */}
+                        <aside className="w-72 flex flex-col bg-[#161616] border-r border-[#3f3f46] shrink-0 z-20">
+                          <div className="h-14 border-b border-[#3f3f46] flex items-center px-4 justify-between bg-[#1e1e1e]">
+                            <h2 className="font-semibold text-sm text-gray-200">Bin Manager</h2>
+                            <div className="flex gap-2">
+                              <button className="text-gray-400 hover:text-white"><span className="material-symbols-outlined text-lg">cloud_upload</span></button>
+                            </div>
+                          </div>
+                          <div className="p-3 border-b border-[#3f3f46] bg-[#1a1a1a]">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex bg-black/40 rounded p-0.5 border border-[#3f3f46]">
+                                <button className="px-3 py-1 text-xs font-medium rounded-sm bg-gray-700 text-white shadow-sm">Rushes</button>
+                                <button className="px-3 py-1 text-xs font-medium rounded-sm text-gray-500 hover:text-gray-300 hover:bg-gray-800/50">Générés</button>
+                              </div>
+                              <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-400 border border-gray-700 px-2 py-1 rounded hover:border-indigo-400 transition-colors">
+                                <span>Import</span>
+                                <span className="material-symbols-outlined text-sm">expand_more</span>
+                              </button>
+                            </div>
+                            <div className="relative">
+                              <span className="absolute left-2 top-1.5 text-gray-500 material-symbols-outlined text-sm">search</span>
+                              <input className="w-full pl-8 pr-2 py-1.5 text-xs bg-black/40 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:ring-1 focus:ring-indigo-500" placeholder="Filter media..." type="text" />
+                            </div>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-3 content-start bg-[#121212]">
+                            <div className="col-span-2 border-2 border-dashed border-gray-800 rounded-lg h-24 flex flex-col items-center justify-center text-gray-600 hover:border-gray-500 transition-colors cursor-pointer bg-gray-900/20 mb-2">
+                              <span className="material-symbols-outlined text-2xl mb-1">add_circle_outline</span>
+                              <span className="text-[10px]">Double-click to upload</span>
+                            </div>
+                            {/* Placeholder Assets */}
+                            {[1, 2, 3, 4].map(i => (
+                              <div key={i} className="group relative aspect-video bg-gray-800 rounded overflow-hidden border border-transparent hover:border-indigo-500 cursor-pointer ring-1 ring-white/5">
+                                <div className="w-full h-full flex items-center justify-center bg-gray-900/50">
+                                  <span className="material-symbols-outlined text-gray-700 text-3xl">movie</span>
+                                </div>
+                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-1.5 pt-4">
+                                  <p className="text-[10px] text-white truncate font-medium">Rush_{i}.mp4</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </aside>
+
+                        {/* MAIN: Player Area */}
+                        <div className="flex-1 bg-black flex flex-col min-w-0 relative border-r border-[#3f3f46]">
+                          <div className="h-10 bg-[#1e1e1e] border-b border-[#3f3f46] flex items-center justify-between px-4 shrink-0">
+                            <div className="flex items-center gap-4">
+                              <span className="text-xs font-mono text-gray-400">Master Sequence • 4K 16:9</span>
+                              <div className="h-3 w-px bg-gray-700"></div>
+                              <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-green-500 font-mono">LIVE PREVIEW</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="material-symbols-outlined text-gray-500 text-sm cursor-pointer hover:text-white">settings_overscan</span>
+                            </div>
+                          </div>
+                          <div className="flex-1 relative flex items-center justify-center bg-[#0a0a0a]">
+                            <div className="aspect-video w-full h-full max-h-[90%] max-w-[95%] relative shadow-2xl bg-black flex items-center justify-center border border-gray-800/30">
+                              {/* Player Placeholder */}
+                              <div className="text-gray-600 text-xl font-display italic">Master Project Preview</div>
+                              <div className="absolute top-4 right-4 text-sm font-mono bg-black/70 px-3 py-1.5 rounded text-white border border-white/10 tracking-widest z-10">
+                                00:00:16:03
+                              </div>
+                              <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex items-center space-x-6 bg-gray-900/90 backdrop-blur-md px-6 py-2 rounded-full border border-gray-700 shadow-xl group z-10 hover:bg-gray-800 transition-colors">
+                                <button className="text-gray-400 hover:text-white"><span className="material-symbols-outlined text-xl">first_page</span></button>
+                                <button className="text-gray-300 hover:text-indigo-400"><span className="material-symbols-outlined text-2xl">skip_previous</span></button>
+                                <button className="text-white hover:text-indigo-400 transform hover:scale-110 transition-transform"><span className="material-symbols-outlined text-4xl fill-1">play_circle</span></button>
+                                <button className="text-gray-300 hover:text-indigo-400"><span className="material-symbols-outlined text-2xl">skip_next</span></button>
+                                <button className="text-gray-400 hover:text-white"><span className="material-symbols-outlined text-xl">last_page</span></button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ASIDE: Vertical Stack & IA Panel */}
+                        <aside className="w-[380px] bg-[#1e1e1e] flex flex-col shrink-0">
+                          <div className="flex-1 flex flex-col min-h-0 border-b border-[#3f3f46]">
+                            <div className="h-10 border-b border-[#3f3f46] flex items-center justify-between px-3 bg-[#1a1a1a] shrink-0">
+                              <div className="flex items-center gap-2">
+                                <span className="material-symbols-outlined text-gray-400 text-sm">view_timeline</span>
+                                <span className="font-semibold text-[10px] text-gray-200 uppercase tracking-widest">Vertical Timeline Stack</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="material-symbols-outlined text-sm text-gray-500 cursor-pointer hover:text-white">north</span>
+                                <span className="material-symbols-outlined text-sm text-gray-400 cursor-pointer hover:text-white">south</span>
+                              </div>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-2 bg-[#121212]">
+                              <VerticalTimelineStack
+                                segments={timelineState.segments}
+                                selectedSegmentIds={timelineState.selectedSegmentIds}
+                                expandedSegmentIds={timelineState.expandedSegmentIds}
+                                onSegmentClick={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
+                                onSegmentExpand={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: [...s.expandedSegmentIds, id] }))}
+                                onSegmentCollapse={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: s.expandedSegmentIds.filter(x => x !== id) }))}
+                                onIterationClick={() => { }}
+                                onIterationValidate={() => { }}
+                                onIterationDelete={() => { }}
+                                onSegmentLock={() => { }}
+                                onSegmentUnlock={() => { }}
+                                onReprompt={() => { }}
+                              />
+                            </div>
+                          </div>
+                          {/* IA Panel */}
+                          <div className="h-[380px] bg-[#2a2a2a] flex flex-col shrink-0 border-t border-[#3f3f46] shadow-[0_-4px_20px_rgba(0,0,0,0.3)] z-10">
+                            <SegmentIAPanel
+                              activeTab={iaPanelTab}
+                              onTabChange={setIaPanelTab}
+                              segment={timelineState.segments.find(s => timelineState.selectedSegmentIds.includes(s.id)) || null}
+                              activeRevision={null}
+                              onReprompt={() => { }}
+                              onRegenerate={() => { }}
+                            />
+                          </div>
+                        </aside>
+                      </div>
+
+                      {/* BOTTOM: Horizontal Timeline */}
+                      <div className="h-64 bg-[#121212] border-t border-[#3f3f46] flex flex-col shrink-0 relative z-20">
+                        <div className="h-8 bg-[#1f1f1f] border-b border-[#3f3f46] flex items-center px-4 justify-between shrink-0">
+                          <div className="flex items-center space-x-4">
+                            <div className="flex space-x-2">
+                              <button className="text-gray-400 hover:text-white" title="Undo"><span className="material-symbols-outlined text-sm">undo</span></button>
+                              <button className="text-gray-400 hover:text-white" title="Redo"><span className="material-symbols-outlined text-sm">redo</span></button>
+                            </div>
+                            <div className="h-4 w-px bg-gray-700"></div>
+                            <div className="flex items-center space-x-1 text-gray-400 hover:text-white cursor-pointer bg-gray-800 px-2 py-0.5 rounded">
+                              <span className="material-symbols-outlined text-sm">cut</span>
+                              <span className="text-[10px]">Split</span>
+                            </div>
+                            <div className="flex items-center space-x-1 text-indigo-400 hover:text-white cursor-pointer bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/20">
+                              <span className="material-symbols-outlined text-sm">apps</span>
+                              <span className="text-[10px]">Snap</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center">
+                            <span className="text-[10px] text-gray-500 mr-2">Zoom</span>
+                            <span className="material-symbols-outlined text-gray-500 text-sm cursor-pointer hover:text-white">remove</span>
+                            <input className="w-24 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer mx-2 accent-indigo-500" type="range" />
+                            <span className="material-symbols-outlined text-gray-500 text-sm cursor-pointer hover:text-white">add</span>
+                          </div>
+                        </div>
+                        <div className="flex-1 overflow-x-auto overflow-y-hidden relative flex flex-col bg-[#161616]">
+                          {/* Ruler */}
+                          <div className="h-6 bg-[#181818] border-b border-[#333] sticky top-0 z-10 flex text-[9px] text-gray-500 font-mono select-none overflow-hidden timeline-ruler-bg w-full min-w-full">
+                            <span className="ml-1 mt-1">00:00</span>
+                            <span className="absolute left-[100px] top-1 ml-1">00:05</span>
+                            <span className="absolute left-[200px] top-1 ml-1">00:10</span>
+                            <span className="absolute left-[300px] top-1 ml-1">00:15</span>
+                          </div>
+                          {/* Playhead */}
+                          <div className="absolute top-0 bottom-0 w-px bg-red-500 z-30 left-[320px] pointer-events-none h-full">
+                            <div className="absolute -top-[0px] -left-[5px] border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-red-500"></div>
+                          </div>
+                          <div className="relative flex-1 min-w-[1200px] mt-2 space-y-1">
+                            {/* Tracks placeholder */}
+                            <div className="h-16 relative flex items-center px-4 bg-gray-900/50 border-y border-gray-800/50">
+                              <div className="absolute left-2 text-[10px] text-gray-600 font-bold w-4 -ml-2 select-none">V1</div>
+                              <div className="absolute left-4 h-14 w-[300px] rounded-sm bg-indigo-900/20 border border-indigo-500/30 overflow-hidden flex flex-col group cursor-pointer hover:bg-indigo-900/30">
+                                <div className="h-4 bg-indigo-900/40 px-1 flex items-center">
+                                  <span className="text-[9px] text-indigo-300 font-medium truncate">Example_Segment_01</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="h-10 relative flex items-center px-4 bg-gray-900/30 border-b border-gray-800/50 mt-1">
+                              <div className="absolute left-2 text-[10px] text-gray-600 font-bold w-4 -ml-2 select-none">A1</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="col-span-1 h-full min-h-0 overflow-hidden">
-                      <VisualContextViewer
-                        image={frameToEdit}
-                        stage={currentStage}
-                        onEditRequest={() => {
-                          /* Already in editor */
-                        }}
-                      />
+                  )}
+
+                  {/* TAB CONTENT: EXPORT */}
+                  {activeTab === 'export' && (
+                    <div className="w-full h-full p-12 flex flex-col items-center justify-center text-center bg-[#121212]">
+                      <div className="max-w-lg w-full bg-[#1a1a1a] border border-gray-800 p-12 rounded-[2.5rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.5)]">
+                        <div className="w-24 h-24 bg-indigo-600/10 rounded-3xl flex items-center justify-center mx-auto mb-10 rotate-3 hover:rotate-0 transition-transform duration-500">
+                          <UploadCloudIcon className="w-12 h-12 text-indigo-500" />
+                        </div>
+                        <h2 className="text-3xl font-bold text-white mb-4 tracking-tight">Prêt pour l'Export ?</h2>
+                        <p className="text-gray-500 text-base mb-12 max-w-sm mx-auto leading-relaxed">Finalisez votre montage et exportez les métadonnées pour vos outils de post-production.</p>
+                        <div className="grid gap-4">
+                          <button className="w-full py-5 bg-gray-800/50 hover:bg-gray-800 text-white rounded-3xl border border-gray-800 flex items-center justify-between px-8 transition-all group opacity-60 cursor-not-allowed">
+                            <div className="text-left">
+                              <div className="text-sm font-bold">XML (Premiere Pro / FCP)</div>
+                              <div className="text-[11px] text-gray-500">Générer le fichier de montage avec assets</div>
+                            </div>
+                            <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-full uppercase font-black tracking-widest">V2</span>
+                          </button>
+                          <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-3xl shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3 transition-all font-bold text-lg group">
+                            <SparklesIcon className="w-6 h-6 group-hover:animate-sparkle" />
+                            <span>Générer Package Studio (.json)</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </main>
-      </div >
-    </ErrorBoundary >
+                  )}
+                </div>
+              )}
+            </div>
+          </main>
+        </div>
+      </div>
+    </ErrorBoundary>
   );
 };
 
