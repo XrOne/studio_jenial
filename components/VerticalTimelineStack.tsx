@@ -38,8 +38,14 @@ export default function VerticalTimelineStack({
   onSegmentLock,
   onSegmentUnlock,
   onReprompt,
-  onReorder, // New prop
-}: VerticalTimelineStackProps & { onReorder?: (newOrder: SegmentWithUI[]) => void }) {
+  onReorder,
+  onSegmentDelete,
+  onSegmentDuplicate,
+}: VerticalTimelineStackProps & {
+  onReorder?: (newOrder: SegmentWithUI[]) => void;
+  onSegmentDelete?: (segmentId: string) => void;
+  onSegmentDuplicate?: (segmentId: string) => void;
+}) {
 
   return (
     <div className="flex flex-col w-full h-full bg-[#1e1e1e] overflow-hidden">
@@ -75,10 +81,9 @@ export default function VerticalTimelineStack({
                   onIterationClick={(revisionId) => onIterationClick(segment.id, revisionId)}
                   onIterationValidate={(revisionId) => onIterationValidate(segment.id, revisionId)}
                   onIterationDelete={(revisionId) => onIterationDelete(segment.id, revisionId)}
-                  // Pass drag controls or use internal handle logic
-                  // Note: Reorder.Item handles drag logic if dragListener is true or controls are passed.
-                  // For simple implementation, we can let framer-motion handle it via a specific handle class.
                   enableDragHandle={true}
+                  onDelete={() => onSegmentDelete?.(segment.id)}
+                  onDuplicate={() => onSegmentDuplicate?.(segment.id)}
                 />
               </Reorder.Item>
             ))}

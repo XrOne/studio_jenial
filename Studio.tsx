@@ -685,6 +685,110 @@ const Studio: React.FC = () => {
     }
   }, []);
 
+  // === TIMELINE HANDLERS (Phase B) ===
+  const handleSegmentReorder = useCallback((newSegments: SegmentWithUI[]) => {
+    setTimelineState(prev => ({ ...prev, segments: newSegments }));
+  }, []);
+
+  const handleSegmentDelete = useCallback((segmentId: string) => {
+    setTimelineState(prev => ({
+      ...prev,
+      segments: prev.segments.filter(s => s.id !== segmentId),
+      selectedSegmentIds: prev.selectedSegmentIds.filter(id => id !== segmentId)
+    }));
+  }, []);
+
+  const handleSegmentDuplicate = useCallback((segmentId: string) => {
+    setTimelineState(prev => {
+      const segmentIndex = prev.segments.findIndex(s => s.id === segmentId);
+      if (segmentIndex === -1) return prev;
+
+      const original = prev.segments[segmentIndex];
+      const duplicate: SegmentWithUI = {
+        ...original,
+        id: crypto.randomUUID(),
+        label: `${original.label || 'Segment'} (Copy)`,
+        createdAt: new Date().toISOString(),
+        uiState: 'idle'
+      };
+
+      const newSegments = [...prev.segments];
+      newSegments.splice(segmentIndex + 1, 0, duplicate);
+      return { ...prev, segments: newSegments };
+    });
+  }, []);
+
+  // === KEYBOARD SHORTCUTS (NLE) ===
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Only active on Editing tab
+      if (activeTab !== 'editing') return;
+
+      const { selectedSegmentIds, segments, playheadSec } = timelineState;
+      const selectedId = selectedSegmentIds.length > 0 ? selectedSegmentIds[0] : null;
+
+      switch (e.key.toLowerCase()) {
+        case 'x': // CUT/SPLIT
+          if (selectedId) {
+            console.log(`[Shortcut] X: Split segment ${selectedId} at playhead`);
+            // TODO: Implement actual split logic (requires modifying segment in/out)
+            e.preventDefault();
+          }
+          break;
+        case 'i': // MARK IN
+          if (selectedId) {
+            setTimelineState(prev => ({
+              ...prev,
+              segments: prev.segments.map(s => s.id === selectedId
+                ? { ...s, inSec: playheadSec, durationSec: s.outSec - playheadSec }
+                : s)
+            }));
+            e.preventDefault();
+          }
+          break;
+        case 'o': // MARK OUT
+          if (selectedId) {
+            setTimelineState(prev => ({
+              ...prev,
+              segments: prev.segments.map(s => s.id === selectedId
+                ? { ...s, outSec: playheadSec, durationSec: playheadSec - s.inSec }
+                : s)
+            }));
+            e.preventDefault();
+          }
+          break;
+        case 'v': // INSERT (duplicate as placeholder)
+          if (selectedId) {
+            handleSegmentDuplicate(selectedId);
+            e.preventDefault();
+          }
+          break;
+        case 'b': // OVERWRITE (placeholder)
+          if (selectedId) {
+            console.log(`[Shortcut] B: Overwrite segment ${selectedId}`);
+            e.preventDefault();
+          }
+          break;
+        case 'delete':
+        case 'backspace':
+          if (selectedId && confirm('Delete selected segment?')) {
+            handleSegmentDelete(selectedId);
+            e.preventDefault();
+          }
+          break;
+        case ' ': // PLAY/PAUSE
+          console.log('[Shortcut] Space: Toggle Play');
+          e.preventDefault();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [timelineState, activeTab, handleSegmentDelete, handleSegmentDuplicate]);
+
   const generateThumbnail = async (videoBlob: Blob): Promise<string> => {
     const objectUrl = URL.createObjectURL(videoBlob);
     return new Promise((resolve, reject) => {
@@ -2235,6 +2339,7 @@ const Studio: React.FC = () => {
                                 onSegmentClick={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
                                 onSegmentExpand={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: [...s.expandedSegmentIds, id] }))}
                                 onSegmentCollapse={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: s.expandedSegmentIds.filter(x => x !== id) }))}
+                                onIterationClick={() => { }}
                                 onIterationValidate={() => { }}
                                 onIterationDelete={() => { }}
                                 onSegmentLock={() => { }}
