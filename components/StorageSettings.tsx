@@ -41,8 +41,8 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ isOpen, onClos
                 if (profile?.preferences?.videoStorage) {
                     setStorageMode(profile.preferences.videoStorage);
                 } else {
-                    // No preference saved: default to local-download (always works)
-                    setStorageMode('local-download');
+                    // Default to Google Drive as requested regarding storage costs
+                    setStorageMode('google-drive');
                 }
             }
         } catch (error) {

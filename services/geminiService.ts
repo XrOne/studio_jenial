@@ -21,10 +21,14 @@ import {
 } from './supabaseClient';
 import { VideoStorageFactory } from './VideoStorageProvider';
 import { SupabaseVideoStorage } from './storage/SupabaseVideoStorage';
+import { GoogleDriveVideoStorage } from './storage/GoogleDriveVideoStorage';
 
 // Initialize Storage Providers
 // Verify we are not re-registering on hot reloads if possible, or Factory handles overwrites
+// Initialize Storage Providers
 VideoStorageFactory.register(new SupabaseVideoStorage());
+VideoStorageFactory.register(new GoogleDriveVideoStorage());
+// Drive is preferred if available (isAvailable check handles logic)
 
 // ===========================================
 // IMAGE COMPRESSION (to reduce payload size for Vercel 4.5MB limit)

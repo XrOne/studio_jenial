@@ -7,6 +7,36 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
 /**
+ * GET /api/projects/:id/segments
+ * 
+ * Fetches all segments for a project with their revisions.
+ */
+router.get('/segments', async (req, res, next) => {
+    try {
+        const { id } = req.params; // Project ID
+
+        const scopedClient = createClient(supabaseUrl, supabaseKey, {
+            global: { headers: { Authorization: req.headers.authorization } }
+        });
+
+        const { data: segments, error } = await scopedClient
+            .from('segments')
+            .select(`
+                *,
+                segment_revisions (*)
+            `)
+            .eq('project_id', id)
+            .order('order_index', { ascending: true });
+
+        if (error) throw error;
+
+        res.json({ success: true, segments: segments || [] });
+    } catch (err) {
+        next(err);
+    }
+});
+
+/**
  * POST /api/projects/:id/build-timeline
  * 
  * Converts a PromptSequence (client-side draft) into persisted Segments.

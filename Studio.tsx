@@ -67,6 +67,8 @@ import {
 import { TimelineState, SegmentWithUI, SegmentRevision } from './types/timeline';
 import VerticalTimelineStack from './components/VerticalTimelineStack';
 import SegmentIAPanel from './components/SegmentIAPanel';
+import { TimelineService } from './services/timelineService';
+import HorizontalTimeline from './components/HorizontalTimeline';
 
 // ===================================================================
 // NEUTRAL DEFAULT: No hardcoded dogmas
@@ -685,38 +687,80 @@ const Studio: React.FC = () => {
     }
   }, []);
 
-  // === TIMELINE HANDLERS (Phase B) ===
-  const handleSegmentReorder = useCallback((newSegments: SegmentWithUI[]) => {
+  // === TIMELINE HANDLERS (Phase A Integration) ===
+  const handleSegmentReorder = useCallback(async (newSegments: SegmentWithUI[]) => {
+    // Optimistic update
     setTimelineState(prev => ({ ...prev, segments: newSegments }));
-  }, []);
 
-  const handleSegmentDelete = useCallback((segmentId: string) => {
+    // Persist to backend
+    const projectId = timelineState.project?.id;
+    if (projectId) {
+      try {
+        const orders = Object.fromEntries(newSegments.map((s, i) => [s.id, i + 1]));
+        await TimelineService.reorderSegments(projectId, orders);
+        console.log('[Timeline] Reorder persisted');
+      } catch (err) {
+        console.error('[Timeline] Reorder failed:', err);
+        // Could revert here if needed
+      }
+    }
+  }, [timelineState.project]);
+
+  const handleSegmentDelete = useCallback(async (segmentId: string) => {
+    // Optimistic update
     setTimelineState(prev => ({
       ...prev,
       segments: prev.segments.filter(s => s.id !== segmentId),
       selectedSegmentIds: prev.selectedSegmentIds.filter(id => id !== segmentId)
     }));
+
+    // Persist to backend
+    try {
+      await TimelineService.deleteSegment(segmentId);
+      console.log('[Timeline] Segment deleted:', segmentId);
+    } catch (err) {
+      console.error('[Timeline] Delete failed:', err);
+    }
   }, []);
 
-  const handleSegmentDuplicate = useCallback((segmentId: string) => {
-    setTimelineState(prev => {
-      const segmentIndex = prev.segments.findIndex(s => s.id === segmentId);
-      if (segmentIndex === -1) return prev;
+  const handleSegmentDuplicate = useCallback(async (segmentId: string) => {
+    const segment = timelineState.segments.find(s => s.id === segmentId);
+    if (!segment) return;
 
-      const original = prev.segments[segmentIndex];
-      const duplicate: SegmentWithUI = {
-        ...original,
-        id: crypto.randomUUID(),
-        label: `${original.label || 'Segment'} (Copy)`,
-        createdAt: new Date().toISOString(),
-        uiState: 'idle'
-      };
+    try {
+      // Persist to backend first
+      const newSegment = await TimelineService.duplicateSegment(segment);
+      const duplicateWithUI: SegmentWithUI = { ...newSegment, uiState: 'idle' };
 
-      const newSegments = [...prev.segments];
-      newSegments.splice(segmentIndex + 1, 0, duplicate);
-      return { ...prev, segments: newSegments };
-    });
-  }, []);
+      // Update local state
+      setTimelineState(prev => {
+        const segmentIndex = prev.segments.findIndex(s => s.id === segmentId);
+        if (segmentIndex === -1) return prev;
+        const newSegments = [...prev.segments];
+        newSegments.splice(segmentIndex + 1, 0, duplicateWithUI);
+        return { ...prev, segments: newSegments };
+      });
+      console.log('[Timeline] Segment duplicated:', newSegment.id);
+    } catch (err) {
+      console.error('[Timeline] Duplicate failed:', err);
+      // Fallback to local-only duplicate
+      setTimelineState(prev => {
+        const segmentIndex = prev.segments.findIndex(s => s.id === segmentId);
+        if (segmentIndex === -1) return prev;
+        const original = prev.segments[segmentIndex];
+        const duplicate: SegmentWithUI = {
+          ...original,
+          id: crypto.randomUUID(),
+          label: `${original.label || 'Segment'} (Copy)`,
+          createdAt: new Date().toISOString(),
+          uiState: 'idle'
+        };
+        const newSegments = [...prev.segments];
+        newSegments.splice(segmentIndex + 1, 0, duplicate);
+        return { ...prev, segments: newSegments };
+      });
+    }
+  }, [timelineState.segments]);
 
   // === KEYBOARD SHORTCUTS (NLE) ===
   useEffect(() => {
@@ -2366,58 +2410,20 @@ const Studio: React.FC = () => {
                       </div>
 
                       {/* BOTTOM: Horizontal Timeline */}
-                      <div className="h-64 bg-[#121212] border-t border-[#3f3f46] flex flex-col shrink-0 relative z-20">
-                        <div className="h-8 bg-[#1f1f1f] border-b border-[#3f3f46] flex items-center px-4 justify-between shrink-0">
-                          <div className="flex items-center space-x-4">
-                            <div className="flex space-x-2">
-                              <button className="text-gray-400 hover:text-white" title="Undo"><span className="material-symbols-outlined text-sm">undo</span></button>
-                              <button className="text-gray-400 hover:text-white" title="Redo"><span className="material-symbols-outlined text-sm">redo</span></button>
-                            </div>
-                            <div className="h-4 w-px bg-gray-700"></div>
-                            <div className="flex items-center space-x-1 text-gray-400 hover:text-white cursor-pointer bg-gray-800 px-2 py-0.5 rounded">
-                              <span className="material-symbols-outlined text-sm">cut</span>
-                              <span className="text-[10px]">Split</span>
-                            </div>
-                            <div className="flex items-center space-x-1 text-indigo-400 hover:text-white cursor-pointer bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/20">
-                              <span className="material-symbols-outlined text-sm">apps</span>
-                              <span className="text-[10px]">Snap</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center">
-                            <span className="text-[10px] text-gray-500 mr-2">Zoom</span>
-                            <span className="material-symbols-outlined text-gray-500 text-sm cursor-pointer hover:text-white">remove</span>
-                            <input className="w-24 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer mx-2 accent-indigo-500" type="range" />
-                            <span className="material-symbols-outlined text-gray-500 text-sm cursor-pointer hover:text-white">add</span>
-                          </div>
-                        </div>
-                        <div className="flex-1 overflow-x-auto overflow-y-hidden relative flex flex-col bg-[#161616]">
-                          {/* Ruler */}
-                          <div className="h-6 bg-[#181818] border-b border-[#333] sticky top-0 z-10 flex text-[9px] text-gray-500 font-mono select-none overflow-hidden timeline-ruler-bg w-full min-w-full">
-                            <span className="ml-1 mt-1">00:00</span>
-                            <span className="absolute left-[100px] top-1 ml-1">00:05</span>
-                            <span className="absolute left-[200px] top-1 ml-1">00:10</span>
-                            <span className="absolute left-[300px] top-1 ml-1">00:15</span>
-                          </div>
-                          {/* Playhead */}
-                          <div className="absolute top-0 bottom-0 w-px bg-red-500 z-30 left-[320px] pointer-events-none h-full">
-                            <div className="absolute -top-[0px] -left-[5px] border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-red-500"></div>
-                          </div>
-                          <div className="relative flex-1 min-w-[1200px] mt-2 space-y-1">
-                            {/* Tracks placeholder */}
-                            <div className="h-16 relative flex items-center px-4 bg-gray-900/50 border-y border-gray-800/50">
-                              <div className="absolute left-2 text-[10px] text-gray-600 font-bold w-4 -ml-2 select-none">V1</div>
-                              <div className="absolute left-4 h-14 w-[300px] rounded-sm bg-indigo-900/20 border border-indigo-500/30 overflow-hidden flex flex-col group cursor-pointer hover:bg-indigo-900/30">
-                                <div className="h-4 bg-indigo-900/40 px-1 flex items-center">
-                                  <span className="text-[9px] text-indigo-300 font-medium truncate">Example_Segment_01</span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="h-10 relative flex items-center px-4 bg-gray-900/30 border-b border-gray-800/50 mt-1">
-                              <div className="absolute left-2 text-[10px] text-gray-600 font-bold w-4 -ml-2 select-none">A1</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+                      <HorizontalTimeline
+                        segments={timelineState.segments}
+                        selectedSegmentIds={timelineState.selectedSegmentIds}
+                        playheadSec={timelineState.playheadSec}
+                        onPlayheadChange={(sec) => setTimelineState(s => ({ ...s, playheadSec: sec }))}
+                        onSegmentClick={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
+                        onSegmentDoubleClick={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: [...s.expandedSegmentIds, id] }))}
+                        onCut={() => console.log('[Timeline] Cut at playhead')}
+                        onRippleDelete={() => {
+                          const id = timelineState.selectedSegmentIds[0];
+                          if (id) handleSegmentDelete(id);
+                        }}
+                        className="h-48 shrink-0"
+                      />
                     </div>
                   )}
 

@@ -76,47 +76,96 @@ export const exchangeCodeForTokens = async (code) => {
     return tokens;
 };
 
+import fs from 'fs';
+import path from 'path';
+
+// Local token storage path
+const TOKEN_PATH = path.join(process.cwd(), '.drivetokens.json');
+
 /**
- * Save tokens for a user in database
+ * Helper to read local tokens
+ */
+const readLocalTokens = () => {
+    try {
+        if (fs.existsSync(TOKEN_PATH)) {
+            const data = fs.readFileSync(TOKEN_PATH, 'utf8');
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        console.warn('Failed to read local tokens:', e);
+    }
+    return {};
+};
+
+/**
+ * Helper to write local tokens
+ */
+const writeLocalTokens = (tokens) => {
+    try {
+        fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2));
+    } catch (e) {
+        console.warn('Failed to write local tokens:', e);
+    }
+};
+
+/**
+ * Save tokens for a user in database (with local fallback)
  */
 export const saveTokensForUser = async (userId, tokens) => {
     const { access_token, refresh_token, expiry_date } = tokens;
 
-    const { data, error } = await supabase
-        .from('user_google_drive_tokens')
-        .upsert({
-            user_id: userId,
-            access_token,
-            refresh_token,
-            expiry_date,
-            updated_at: new Date().toISOString()
-        }, {
-            onConflict: 'user_id'
-        });
+    // Try Supabase first
+    if (supabase) {
+        const { data, error } = await supabase
+            .from('user_google_drive_tokens')
+            .upsert({
+                user_id: userId,
+                access_token,
+                refresh_token,
+                expiry_date,
+                updated_at: new Date().toISOString()
+            }, {
+                onConflict: 'user_id'
+            });
 
-    if (error) {
-        console.error('Error saving Drive tokens:', error.message);
-        throw error;
+        if (!error) return data;
+        console.warn('Supabase save failed, falling back to local storage:', error.message);
     }
 
-    return data;
+    // Fallback to local file
+    const allTokens = readLocalTokens();
+    allTokens[userId] = { access_token, refresh_token, expiry_date, updated_at: new Date().toISOString() };
+    writeLocalTokens(allTokens);
+    console.log(`[Drive] Tokens saved locally for user ${userId}`);
+    return allTokens[userId];
 };
 
 /**
- * Get tokens for a user from database
+ * Get tokens for a user from database (with local fallback)
  */
 export const getTokensForUser = async (userId) => {
-    const { data, error } = await supabase
-        .from('user_google_drive_tokens')
-        .select('access_token, refresh_token, expiry_date')
-        .eq('user_id', userId)
-        .single();
+    // Try Supabase first
+    if (supabase) {
+        const { data, error } = await supabase
+            .from('user_google_drive_tokens')
+            .select('access_token, refresh_token, expiry_date')
+            .eq('user_id', userId)
+            .single();
 
-    if (error || !data) {
-        return null;
+        if (data && !error) return data;
+        console.warn('Supabase fetch failed/empty, checking local storage...');
     }
 
-    return data;
+    // Fallback to local file
+    const allTokens = readLocalTokens();
+    const userTokens = allTokens[userId];
+
+    if (userTokens) {
+        console.log(`[Drive] Tokens found locally for user ${userId}`);
+        return userTokens;
+    }
+
+    return null;
 };
 
 /**
@@ -258,4 +307,54 @@ export const disconnectDrive = async (userId) => {
         console.error('Error disconnecting Drive:', error.message);
         throw error;
     }
+};
+
+/**
+ * Create a Resumable Upload Session for a file
+ * Returns the session URI (uploadUrl) that the frontend can PUT to directly
+ */
+export const createResumableUpload = async (userId, fileName, mimeType) => {
+    const tokens = await getTokensForUser(userId);
+    if (!tokens) throw new Error('DRIVE_NOT_CONNECTED');
+
+    // Manually ensure folder (using raw API calls since we need the ID)
+    // We can reuse ensureStudioFolder if we already have the drive client,
+    // but here we might want to avoid full client overhead if we are just doing raw fetch? 
+    // Actually, let's just use createDriveClient -> ensureStudioFolder because it handles logic well.
+    const drive = await createDriveClient(userId);
+    const folderId = await ensureStudioFolder(drive, userId);
+
+    const metadata = {
+        name: fileName,
+        mimeType: mimeType
+    };
+
+    if (folderId) {
+        metadata.parents = [folderId];
+    }
+
+    // Initiate Resumable Upload
+    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${tokens.access_token}`,
+            'Content-Type': 'application/json',
+            'X-Upload-Content-Type': mimeType,
+            'X-Upload-Content-Length': '' // Unknown length initially is fine, or pass if known
+        },
+        body: JSON.stringify(metadata)
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Failed to initiate upload: ${response.status} ${errText}`);
+    }
+
+    // The upload URL is in the Location header
+    const uploadUrl = response.headers.get('Location');
+    if (!uploadUrl) {
+        throw new Error('No upload URL returned from Drive API');
+    }
+
+    return uploadUrl;
 };
