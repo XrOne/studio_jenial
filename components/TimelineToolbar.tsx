@@ -16,7 +16,9 @@ interface TimelineToolbarProps {
     onRippleDelete?: () => void;
     onInsert?: () => void;
     onOverwrite?: () => void;
-    onExport?: () => void; // New prop
+    onExport?: () => void;
+    onSaveJson?: () => void; // New
+    onLoadJson?: () => void; // New
     pixelsPerSecond: number;
     onZoomChange: (pps: number) => void;
     canUndo?: boolean;
@@ -30,7 +32,7 @@ interface ToolButton {
     shortcut?: string;
     action?: () => void;
     disabled?: boolean;
-    primary?: boolean; // New prop for styling
+    primary?: boolean;
 }
 
 /**
@@ -46,6 +48,8 @@ export default function TimelineToolbar({
     onInsert,
     onOverwrite,
     onExport,
+    onSaveJson,
+    onLoadJson,
     pixelsPerSecond,
     onZoomChange,
     canUndo = false,
@@ -119,6 +123,25 @@ export default function TimelineToolbar({
                         <span className="material-symbols-outlined text-lg">{tool.icon}</span>
                     </button>
                 ))}
+
+                <div className="w-px h-5 bg-[#333] mx-2" />
+
+                {/* JSON Backup Buttons */}
+                <button
+                    onClick={onLoadJson}
+                    className="p-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded transition-colors"
+                    title="Load Project Backup (JSON)"
+                >
+                    <span className="material-symbols-outlined text-lg">upload_file</span>
+                </button>
+                <button
+                    onClick={onSaveJson}
+                    className="p-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded transition-colors"
+                    title="Save Project Backup (JSON)"
+                >
+                    <span className="material-symbols-outlined text-lg">save</span>
+                </button>
+
             </div>
 
             {/* Right tools - Zoom & Export */}

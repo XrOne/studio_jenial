@@ -27,6 +27,7 @@ import StoryboardPreviewModal from './components/StoryboardPreviewModal';
 
 import { UserProfileModal } from './components/UserProfileModal'; // New
 import { SessionHistoryModal } from './components/SessionHistoryModal'; // New
+import { ExportDialog } from './components/ExportDialog';
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
 import useLocalStorage from './hooks/useLocalStorage';
@@ -381,6 +382,7 @@ const Studio: React.FC = () => {
   const [resetKey, setResetKey] = useState(0); // For forcing component remounts on reset
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 
   const [lastConfig, setLastConfig] = useState<GenerateVideoParams | null>(
     null,
@@ -688,11 +690,66 @@ const Studio: React.FC = () => {
   }, []);
 
   // === TIMELINE HANDLERS (Phase A Integration) ===
+
+  // === EMERGENCY BACKUP: JSON SAVE/LOAD ===
+  const handleSaveProjectJson = useCallback(() => {
+    const backupData = {
+      version: '1.0',
+      timestamp: new Date().toISOString(),
+      timelineState,
+      promptSequence,
+      sequenceVideoData // Also save existing video references
+    };
+
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `project_backup_${new Date().getTime()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [timelineState, promptSequence, sequenceVideoData]);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLoadProjectJson = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (json.timelineState) {
+          setTimelineState(json.timelineState);
+          console.log('[Backup] Timeline restored');
+        }
+        if (json.promptSequence) {
+          setPromptSequence(json.promptSequence);
+          console.log('[Backup] PromptSequence restored');
+        }
+        if (json.sequenceVideoData) {
+          setSequenceVideoData(json.sequenceVideoData);
+          console.log('[Backup] VideoData restored');
+        }
+        alert('Projet restauré avec succès !');
+      } catch (err) {
+        console.error('Failed to parse backup', err);
+        alert('Erreur: Fichier de sauvegarde invalide.');
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
+  }, []);
+
   const handleSegmentReorder = useCallback(async (newSegments: SegmentWithUI[]) => {
     // Optimistic update
     setTimelineState(prev => ({ ...prev, segments: newSegments }));
 
-    // Persist to backend
+    // Persist to backend json backup if needed, but here strictly local
     const projectId = timelineState.project?.id;
     if (projectId) {
       try {
@@ -2422,7 +2479,19 @@ const Studio: React.FC = () => {
                           const id = timelineState.selectedSegmentIds[0];
                           if (id) handleSegmentDelete(id);
                         }}
+                        onExport={() => setIsExportDialogOpen(true)}
+                        onSaveJson={handleSaveProjectJson}
+                        onLoadJson={() => fileInputRef.current?.click()}
                         className="h-48 shrink-0"
+                      />
+
+                      {/* Hidden Input for JSON Load */}
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        style={{ display: 'none' }}
+                        accept=".json"
+                        onChange={handleLoadProjectJson}
                       />
                     </div>
                   )}
@@ -2437,16 +2506,18 @@ const Studio: React.FC = () => {
                         <h2 className="text-3xl font-bold text-white mb-4 tracking-tight">Prêt pour l'Export ?</h2>
                         <p className="text-gray-500 text-base mb-12 max-w-sm mx-auto leading-relaxed">Finalisez votre montage et exportez les métadonnées pour vos outils de post-production.</p>
                         <div className="grid gap-4">
-                          <button className="w-full py-5 bg-gray-800/50 hover:bg-gray-800 text-white rounded-3xl border border-gray-800 flex items-center justify-between px-8 transition-all group opacity-60 cursor-not-allowed">
-                            <div className="text-left">
-                              <div className="text-sm font-bold">XML (Premiere Pro / FCP)</div>
-                              <div className="text-[11px] text-gray-500">Générer le fichier de montage avec assets</div>
-                            </div>
-                            <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-full uppercase font-black tracking-widest">V2</span>
-                          </button>
-                          <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-3xl shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3 transition-all font-bold text-lg group">
+                          <button
+                            onClick={() => setIsExportDialogOpen(true)}
+                            className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-3xl shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3 transition-all font-bold text-lg group"
+                          >
                             <SparklesIcon className="w-6 h-6 group-hover:animate-sparkle" />
-                            <span>Générer Package Studio (.json)</span>
+                            <span>Exporter le MP4 (Final)</span>
+                          </button>
+                          <button
+                            onClick={handleSaveProjectJson}
+                            className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-3xl border border-gray-700 font-medium text-sm"
+                          >
+                            Sauvegarder le Projet (.json)
                           </button>
                         </div>
                       </div>
@@ -2458,6 +2529,14 @@ const Studio: React.FC = () => {
           </main>
         </div>
       </div>
+
+      {/* GLOBAL DIALOGS */}
+      <ExportDialog
+        isOpen={isExportDialogOpen}
+        onClose={() => setIsExportDialogOpen(false)}
+        segments={timelineState.segments}
+      />
+
     </ErrorBoundary>
   );
 };

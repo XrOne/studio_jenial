@@ -521,6 +521,72 @@ app.get('/api/google/drive/status', async (req, res) => {
   }
 });
 
+app.post('/api/video/combine', async (req, res) => {
+  try {
+    const { videoUrls, width, height, fps, aiUpscale } = req.body;
+    if (!videoUrls || !Array.isArray(videoUrls) || videoUrls.length === 0) {
+      return res.status(400).json({ error: 'No videoUrls provided' });
+    }
+
+    console.log(`[API] Combining ${videoUrls.length} videos. Settings: ${width}x${height} @ ${fps}fps, AI: ${aiUpscale}`);
+
+    // Import services dynamically
+    const { concatenateVideos } = await import('./services/videoService.js');
+
+    // First: Concatenate videos with FFmpeg scaling
+    const { path: mergedPath, cleanup: cleanupMerge } = await concatenateVideos(videoUrls, 'merged.mp4', { width, height, fps });
+
+    let finalPath = mergedPath;
+    let cleanupFinal = cleanupMerge;
+
+    // If AI Upscale requested, run through Real-ESRGAN
+    if (aiUpscale) {
+      const { isAIUpscaleAvailable, upscaleVideo } = await import('./services/upscaleService.js');
+
+      if (!isAIUpscaleAvailable()) {
+        cleanupMerge();
+        return res.status(503).json({ error: 'AI_UPSCALE_NOT_AVAILABLE', details: 'Real-ESRGAN binary not found' });
+      }
+
+      console.log('[API] Running AI Upscale...');
+      const { path: upscaledPath, cleanup: cleanupUpscale } = await upscaleVideo(mergedPath, null, {
+        scale: 2, // 2x upscale
+        fps: fps || 30
+      });
+
+      // Clean up the merged (non-upscaled) file
+      cleanupMerge();
+
+      finalPath = upscaledPath;
+      cleanupFinal = cleanupUpscale;
+    }
+
+    res.download(finalPath, 'export.mp4', (err) => {
+      if (err) console.error('[API] Download error:', err);
+      // Cleanup after download finishes
+      cleanupFinal();
+    });
+
+  } catch (error) {
+    console.error('[API] Combine error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// AI Upscale availability check
+app.get('/api/video/ai-upscale-status', async (req, res) => {
+  try {
+    const { isAIUpscaleAvailable, getAvailableModels } = await import('./services/upscaleService.js');
+    res.json({
+      available: isAIUpscaleAvailable(),
+      models: getAvailableModels()
+    });
+  } catch (error) {
+    res.json({ available: false, error: error.message });
+  }
+});
+
+
 app.get('/api/google/drive/auth', async (req, res) => {
   try {
     const driveService = await getDriveService();

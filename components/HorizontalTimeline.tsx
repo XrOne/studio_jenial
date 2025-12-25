@@ -25,7 +25,9 @@ export interface HorizontalTimelineProps {
     onRedo?: () => void;
     onCut?: () => void;
     onRippleDelete?: () => void;
-    onExport?: () => void; // New prop
+    onExport?: () => void;
+    onSaveJson?: () => void; // New
+    onLoadJson?: () => void; // New
     className?: string;
 }
 
@@ -54,6 +56,8 @@ export default function HorizontalTimeline({
     onCut,
     onRippleDelete,
     onExport,
+    onSaveJson,
+    onLoadJson,
     className = '',
 }: HorizontalTimelineProps) {
     const [pixelsPerSecond, setPixelsPerSecond] = React.useState(DEFAULT_PIXELS_PER_SECOND);
@@ -89,6 +93,8 @@ export default function HorizontalTimeline({
                 onCut={onCut}
                 onRippleDelete={onRippleDelete}
                 onExport={onExport}
+                onSaveJson={onSaveJson}
+                onLoadJson={onLoadJson}
                 hasSelection={selectedSegmentIds.length > 0}
             />
 
