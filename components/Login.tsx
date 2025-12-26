@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Loader2, Lock, ArrowRight, CheckCircle } from 'lucide-react';
+import { Loader2, Lock, ArrowRight, CheckCircle, Wifi, WifiOff } from 'lucide-react';
 
 export const Login: React.FC = () => {
-    const { signInWithGoogle, user, isBetaTester, loading } = useAuth();
+    const { signInWithGoogle, signInOffline, isOfflineMode, user, isBetaTester, loading } = useAuth();
     const [requestEmail, setRequestEmail] = useState('');
     const [requestStatus, setRequestStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
 
@@ -130,6 +130,19 @@ export const Login: React.FC = () => {
                         </svg>
                         Sign in with Google
                     </button>
+
+                    {/* OFFLINE MODE BUTTON */}
+                    <button
+                        onClick={signInOffline}
+                        className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white font-medium py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-3 border border-gray-700 hover:border-gray-600"
+                    >
+                        <WifiOff className="w-5 h-5" />
+                        Entrer en Mode Hors-Ligne
+                    </button>
+
+                    <p className="text-xs text-gray-600">
+                        Le mode hors-ligne permet de tester localement sans authentification.
+                    </p>
 
                     <div className="relative">
                         <div className="absolute inset-0 flex items-center">

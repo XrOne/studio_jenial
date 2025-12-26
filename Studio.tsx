@@ -28,6 +28,9 @@ import StoryboardPreviewModal from './components/StoryboardPreviewModal';
 import { UserProfileModal } from './components/UserProfileModal'; // New
 import { SessionHistoryModal } from './components/SessionHistoryModal'; // New
 import { ExportDialog } from './components/ExportDialog';
+import { BinManager } from './components/BinManager';
+import { SourceViewer } from './components/SourceViewer';
+import { TimelinePreview } from './components/TimelinePreview';
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
 import useLocalStorage from './hooks/useLocalStorage';
@@ -535,6 +538,12 @@ const Studio: React.FC = () => {
   const [iaPanelTab, setIaPanelTab] = useState<"prompt" | "keyframes" | "edit-image" | "edit-video" | "versions">('prompt');
   const [isVerticalToggle, setIsVerticalToggle] = useState(false);
 
+  // === SOURCE VIEWER STATE (NLE workflow) ===
+  const [sourceMedia, setSourceMedia] = useState<import('./types/media').RushMedia | null>(null);
+
+  // === TIMELINE PLAYBACK STATE ===
+  const [isPlaying, setIsPlaying] = useState(false);
+
   // Auto-open profile modal if no profile
   useEffect(() => {
     // Delay slightly to allow auto-login check in hook
@@ -819,26 +828,139 @@ const Studio: React.FC = () => {
     }
   }, [timelineState.segments]);
 
+  // === SPLIT SEGMENT HANDLER ===
+  const handleSplitSegment = useCallback((segmentId: string, atSec: number) => {
+    setTimelineState(prev => {
+      const segmentIndex = prev.segments.findIndex(s => s.id === segmentId);
+      if (segmentIndex === -1) return prev;
+
+      const original = prev.segments[segmentIndex];
+
+      // Don't split if at edges
+      if (atSec <= original.inSec || atSec >= original.outSec) return prev;
+
+      // Create two new segments from the split
+      const leftSegment: SegmentWithUI = {
+        ...original,
+        id: `${original.id}_left_${Date.now()}`,
+        outSec: atSec,
+        durationSec: atSec - original.inSec,
+        label: `${original.label || 'Segment'} (1)`,
+        updatedAt: new Date().toISOString()
+      };
+
+      const rightSegment: SegmentWithUI = {
+        ...original,
+        id: `${original.id}_right_${Date.now()}`,
+        inSec: atSec,
+        durationSec: original.outSec - atSec,
+        label: `${original.label || 'Segment'} (2)`,
+        order: original.order + 1,
+        updatedAt: new Date().toISOString()
+      };
+
+      // Replace original with two new segments
+      const newSegments = [...prev.segments];
+      newSegments.splice(segmentIndex, 1, leftSegment, rightSegment);
+
+      // Update order for subsequent segments
+      const reorderedSegments = newSegments.map((s, i) => ({ ...s, order: i }));
+
+      console.log(`[Timeline] Split segment ${segmentId} at ${atSec.toFixed(2)}s`);
+
+      return {
+        ...prev,
+        segments: reorderedSegments,
+        selectedSegmentIds: [rightSegment.id] // Select the right part
+      };
+    });
+  }, []);
+
   // === KEYBOARD SHORTCUTS (NLE) ===
+  const FPS = 30; // Project FPS
+  const frameStep = 1 / FPS;
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       // Only active on Editing tab
       if (activeTab !== 'editing') return;
+      // Ignore if SourceViewer is open (it has its own shortcuts)
+      if (sourceMedia) return;
 
       const { selectedSegmentIds, segments, playheadSec } = timelineState;
       const selectedId = selectedSegmentIds.length > 0 ? selectedSegmentIds[0] : null;
 
-      switch (e.key.toLowerCase()) {
-        case 'x': // CUT/SPLIT
-          if (selectedId) {
-            console.log(`[Shortcut] X: Split segment ${selectedId} at playhead`);
-            // TODO: Implement actual split logic (requires modifying segment in/out)
-            e.preventDefault();
+      // Calculate total duration
+      const totalDuration = segments.length > 0
+        ? Math.max(...segments.map(s => s.outSec))
+        : 30;
+
+      switch (e.key) {
+        // === FRAME NAVIGATION ===
+        case 'ArrowLeft':
+          e.preventDefault();
+          const stepBack = e.shiftKey ? 1 : frameStep;
+          setTimelineState(prev => ({
+            ...prev,
+            playheadSec: Math.max(0, prev.playheadSec - stepBack)
+          }));
+          break;
+
+        case 'ArrowRight':
+          e.preventDefault();
+          const stepForward = e.shiftKey ? 1 : frameStep;
+          setTimelineState(prev => ({
+            ...prev,
+            playheadSec: Math.min(totalDuration, prev.playheadSec + stepForward)
+          }));
+          break;
+
+        case 'Home':
+          e.preventDefault();
+          setTimelineState(prev => ({ ...prev, playheadSec: 0 }));
+          break;
+
+        case 'End':
+          e.preventDefault();
+          setTimelineState(prev => ({ ...prev, playheadSec: totalDuration }));
+          break;
+
+        // === SPLIT (X) ===
+        case 'x':
+        case 'X':
+          e.preventDefault();
+          // Find segment at playhead
+          const segmentAtPlayhead = segments.find(s =>
+            playheadSec > s.inSec && playheadSec < s.outSec
+          );
+          if (segmentAtPlayhead && !segmentAtPlayhead.locked) {
+            handleSplitSegment(segmentAtPlayhead.id, playheadSec);
           }
           break;
-        case 'i': // MARK IN
+
+        // === DELETE (Delete/Backspace) ===
+        case 'Delete':
+        case 'Backspace':
+          e.preventDefault();
+          if (selectedId) {
+            const segment = segments.find(s => s.id === selectedId);
+            if (segment && !segment.locked) {
+              handleSegmentDelete(selectedId);
+            }
+          }
+          break;
+
+        // === PLAY/PAUSE (Space) ===
+        case ' ':
+          e.preventDefault();
+          setIsPlaying(prev => !prev);
+          break;
+
+        // === MARK IN/OUT (I/O) - for selected segment ===
+        case 'i':
+        case 'I':
           if (selectedId) {
             setTimelineState(prev => ({
               ...prev,
@@ -849,7 +971,9 @@ const Studio: React.FC = () => {
             e.preventDefault();
           }
           break;
-        case 'o': // MARK OUT
+
+        case 'o':
+        case 'O':
           if (selectedId) {
             setTimelineState(prev => ({
               ...prev,
@@ -860,35 +984,12 @@ const Studio: React.FC = () => {
             e.preventDefault();
           }
           break;
-        case 'v': // INSERT (duplicate as placeholder)
-          if (selectedId) {
-            handleSegmentDuplicate(selectedId);
-            e.preventDefault();
-          }
-          break;
-        case 'b': // OVERWRITE (placeholder)
-          if (selectedId) {
-            console.log(`[Shortcut] B: Overwrite segment ${selectedId}`);
-            e.preventDefault();
-          }
-          break;
-        case 'delete':
-        case 'backspace':
-          if (selectedId && confirm('Delete selected segment?')) {
-            handleSegmentDelete(selectedId);
-            e.preventDefault();
-          }
-          break;
-        case ' ': // PLAY/PAUSE
-          console.log('[Shortcut] Space: Toggle Play');
-          e.preventDefault();
-          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [timelineState, activeTab, handleSegmentDelete, handleSegmentDuplicate]);
+  }, [timelineState, activeTab, sourceMedia, handleSegmentDelete, handleSplitSegment, frameStep]);
 
   const generateThumbnail = async (videoBlob: Blob): Promise<string> => {
     const objectUrl = URL.createObjectURL(videoBlob);
@@ -2347,77 +2448,107 @@ const Studio: React.FC = () => {
                     <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#121212]">
                       <div className="flex-1 flex min-h-0">
                         {/* ASIDE: Bin Manager */}
-                        <aside className="w-72 flex flex-col bg-[#161616] border-r border-[#3f3f46] shrink-0 z-20">
-                          <div className="h-14 border-b border-[#3f3f46] flex items-center px-4 justify-between bg-[#1e1e1e]">
-                            <h2 className="font-semibold text-sm text-gray-200">Bin Manager</h2>
-                            <div className="flex gap-2">
-                              <button className="text-gray-400 hover:text-white"><span className="material-symbols-outlined text-lg">cloud_upload</span></button>
-                            </div>
-                          </div>
-                          <div className="p-3 border-b border-[#3f3f46] bg-[#1a1a1a]">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex bg-black/40 rounded p-0.5 border border-[#3f3f46]">
-                                <button className="px-3 py-1 text-xs font-medium rounded-sm bg-gray-700 text-white shadow-sm">Rushes</button>
-                                <button className="px-3 py-1 text-xs font-medium rounded-sm text-gray-500 hover:text-gray-300 hover:bg-gray-800/50">Générés</button>
-                              </div>
-                              <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-400 border border-gray-700 px-2 py-1 rounded hover:border-indigo-400 transition-colors">
-                                <span>Import</span>
-                                <span className="material-symbols-outlined text-sm">expand_more</span>
-                              </button>
-                            </div>
-                            <div className="relative">
-                              <span className="absolute left-2 top-1.5 text-gray-500 material-symbols-outlined text-sm">search</span>
-                              <input className="w-full pl-8 pr-2 py-1.5 text-xs bg-black/40 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:ring-1 focus:ring-indigo-500" placeholder="Filter media..." type="text" />
-                            </div>
-                          </div>
-                          <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-3 content-start bg-[#121212]">
-                            <div className="col-span-2 border-2 border-dashed border-gray-800 rounded-lg h-24 flex flex-col items-center justify-center text-gray-600 hover:border-gray-500 transition-colors cursor-pointer bg-gray-900/20 mb-2">
-                              <span className="material-symbols-outlined text-2xl mb-1">add_circle_outline</span>
-                              <span className="text-[10px]">Double-click to upload</span>
-                            </div>
-                            {/* Placeholder Assets */}
-                            {[1, 2, 3, 4].map(i => (
-                              <div key={i} className="group relative aspect-video bg-gray-800 rounded overflow-hidden border border-transparent hover:border-indigo-500 cursor-pointer ring-1 ring-white/5">
-                                <div className="w-full h-full flex items-center justify-center bg-gray-900/50">
-                                  <span className="material-symbols-outlined text-gray-700 text-3xl">movie</span>
-                                </div>
-                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-1.5 pt-4">
-                                  <p className="text-[10px] text-white truncate font-medium">Rush_{i}.mp4</p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </aside>
+                        <BinManager
+                          onMediaSelect={(media) => setSourceMedia(media)}
+                          onAddToTimeline={(media) => {
+                            console.log('[Studio] Add to timeline:', media.name);
+                            // TODO: Create segment from imported media
+                          }}
+                        />
 
-                        {/* MAIN: Player Area */}
-                        <div className="flex-1 bg-black flex flex-col min-w-0 relative border-r border-[#3f3f46]">
-                          <div className="h-10 bg-[#1e1e1e] border-b border-[#3f3f46] flex items-center justify-between px-4 shrink-0">
-                            <div className="flex items-center gap-4">
-                              <span className="text-xs font-mono text-gray-400">Master Sequence • 4K 16:9</span>
-                              <div className="h-3 w-px bg-gray-700"></div>
-                              <span className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-green-500 font-mono">LIVE PREVIEW</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="material-symbols-outlined text-gray-500 text-sm cursor-pointer hover:text-white">settings_overscan</span>
-                            </div>
-                          </div>
-                          <div className="flex-1 relative flex items-center justify-center bg-[#0a0a0a]">
-                            <div className="aspect-video w-full h-full max-h-[90%] max-w-[95%] relative shadow-2xl bg-black flex items-center justify-center border border-gray-800/30">
-                              {/* Player Placeholder */}
-                              <div className="text-gray-600 text-xl font-display italic">Master Project Preview</div>
-                              <div className="absolute top-4 right-4 text-sm font-mono bg-black/70 px-3 py-1.5 rounded text-white border border-white/10 tracking-widest z-10">
-                                00:00:16:03
-                              </div>
-                              <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex items-center space-x-6 bg-gray-900/90 backdrop-blur-md px-6 py-2 rounded-full border border-gray-700 shadow-xl group z-10 hover:bg-gray-800 transition-colors">
-                                <button className="text-gray-400 hover:text-white"><span className="material-symbols-outlined text-xl">first_page</span></button>
-                                <button className="text-gray-300 hover:text-indigo-400"><span className="material-symbols-outlined text-2xl">skip_previous</span></button>
-                                <button className="text-white hover:text-indigo-400 transform hover:scale-110 transition-transform"><span className="material-symbols-outlined text-4xl fill-1">play_circle</span></button>
-                                <button className="text-gray-300 hover:text-indigo-400"><span className="material-symbols-outlined text-2xl">skip_next</span></button>
-                                <button className="text-gray-400 hover:text-white"><span className="material-symbols-outlined text-xl">last_page</span></button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+                        {/* MAIN: Player Area or Source Viewer */}
+                        {sourceMedia ? (
+                          <SourceViewer
+                            media={sourceMedia}
+                            onClose={() => setSourceMedia(null)}
+                            onInsert={(media, inPoint, outPoint) => {
+                              const clipDuration = outPoint - inPoint;
+                              const playheadPos = timelineState.playheadSec;
+                              console.log(`[Studio] INSERT at ${playheadPos.toFixed(2)}s: ${media.name} (${clipDuration.toFixed(2)}s)`);
+
+                              // Create new segment starting at playhead position
+                              const newSegment: import('./types/timeline').SegmentWithUI = {
+                                id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                                projectId: timelineState.project?.id || 'local',
+                                order: timelineState.segments.length,
+                                inSec: playheadPos,
+                                outSec: playheadPos + clipDuration,
+                                durationSec: clipDuration,
+                                locked: false,
+                                label: media.name.replace(/\.[^/.]+$/, ''),
+                                createdAt: new Date().toISOString(),
+                                updatedAt: new Date().toISOString(),
+                                uiState: 'idle',
+                                activeRevision: {
+                                  id: `rev_${Date.now()}`,
+                                  segmentId: `seg_${Date.now()}`,
+                                  videoUrl: media.localUrl,
+                                  thumbnailUrl: media.thumbnail || '',
+                                  status: 'succeeded',
+                                  createdAt: new Date().toISOString()
+                                }
+                              };
+
+                              // Insert and move playhead to end of new segment
+                              setTimelineState(prev => ({
+                                ...prev,
+                                segments: [...prev.segments, newSegment],
+                                selectedSegmentIds: [newSegment.id],
+                                playheadSec: playheadPos + clipDuration // Move playhead to end
+                              }));
+
+                              console.log(`[Studio] Created segment: ${newSegment.id}`);
+                              setSourceMedia(null);
+                            }}
+                            onOverwrite={(media, inPoint, outPoint) => {
+                              const clipDuration = outPoint - inPoint;
+                              const playheadPos = timelineState.playheadSec;
+                              console.log(`[Studio] OVERWRITE at ${playheadPos.toFixed(2)}s: ${media.name} (${clipDuration.toFixed(2)}s)`);
+
+                              // Create new segment at playhead position
+                              const newSegment: import('./types/timeline').SegmentWithUI = {
+                                id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                                projectId: timelineState.project?.id || 'local',
+                                order: timelineState.segments.length,
+                                inSec: playheadPos,
+                                outSec: playheadPos + clipDuration,
+                                durationSec: clipDuration,
+                                locked: false,
+                                label: media.name.replace(/\.[^/.]+$/, ''),
+                                createdAt: new Date().toISOString(),
+                                updatedAt: new Date().toISOString(),
+                                uiState: 'idle',
+                                activeRevision: {
+                                  id: `rev_${Date.now()}`,
+                                  segmentId: `seg_${Date.now()}`,
+                                  videoUrl: media.localUrl,
+                                  thumbnailUrl: media.thumbnail || '',
+                                  status: 'succeeded',
+                                  createdAt: new Date().toISOString()
+                                }
+                              };
+
+                              setTimelineState(prev => ({
+                                ...prev,
+                                segments: [...prev.segments, newSegment],
+                                selectedSegmentIds: [newSegment.id],
+                                playheadSec: playheadPos + clipDuration
+                              }));
+
+                              console.log(`[Studio] Created segment (overwrite): ${newSegment.id}`);
+                              setSourceMedia(null);
+                            }}
+                          />
+                        ) : (
+                          <TimelinePreview
+                            segments={timelineState.segments}
+                            playheadSec={timelineState.playheadSec}
+                            isPlaying={isPlaying}
+                            onPlayPause={() => setIsPlaying(prev => !prev)}
+                            onSeek={(sec) => setTimelineState(prev => ({ ...prev, playheadSec: sec }))}
+                            fps={FPS}
+                          />
+                        )}
 
                         {/* ASIDE: Vertical Stack & IA Panel */}
                         <aside className="w-[380px] bg-[#1e1e1e] flex flex-col shrink-0">

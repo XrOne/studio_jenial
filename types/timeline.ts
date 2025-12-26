@@ -58,11 +58,15 @@ export interface SegmentRevision {
     id: string;
     segmentId: string;
     parentRevisionId?: string;
-    provider: Provider;
+    provider?: Provider;
     status: RevisionStatus;
-    promptJson: SegmentPrompt;
+    promptJson?: SegmentPrompt;
+    // For generated content
     baseAssetId?: string;
     outputAssetId?: string;
+    // For imported media
+    videoUrl?: string;
+    thumbnailUrl?: string;
     metricsJson?: {
         cost?: number;
         latencyMs?: number;

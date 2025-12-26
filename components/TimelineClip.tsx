@@ -49,8 +49,10 @@ export default function TimelineClip({
     const width = segment.durationSec * pixelsPerSecond;
     const left = segment.inSec * pixelsPerSecond;
 
-    // Get thumbnail from active revision if available
-    const thumbnailUrl = segment.activeRevision?.outputAsset?.url;
+    // Get thumbnail from active revision - check both outputAsset (generated) and thumbnailUrl (imported)
+    const thumbnailUrl = segment.activeRevision?.thumbnailUrl
+        || segment.activeRevision?.outputAsset?.url
+        || segment.activeRevision?.videoUrl; // Fallback to video URL if no thumbnail
     const status = segment.activeRevision?.status || 'draft';
 
     return (
