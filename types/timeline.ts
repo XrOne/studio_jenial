@@ -99,18 +99,25 @@ export interface Track {
 }
 
 // === SEGMENT ===
+export type MediaKind = 'generated' | 'rush';
+
 export interface Segment {
     id: string;
     projectId: string;
     trackId: string;   // Reference to parent track
     order: number;
-    inSec: number;
-    outSec: number;
+    inSec: number;     // Timeline position start
+    outSec: number;    // Timeline position end
     activeRevisionId?: string;
     label?: string;
     locked: boolean;
     createdAt: string;
     updatedAt: string;
+    // Media source (for rush imports)
+    mediaKind?: MediaKind;
+    mediaSrc?: string;      // URL to source media file
+    sourceInSec?: number;   // In point within source media
+    sourceOutSec?: number;  // Out point within source media
     // Computed
     durationSec: number;
     // Joined

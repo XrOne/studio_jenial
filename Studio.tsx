@@ -940,8 +940,12 @@ const Studio: React.FC = () => {
           const segmentAtPlayhead = segments.find(s =>
             playheadSec > s.inSec && playheadSec < s.outSec
           );
-          if (segmentAtPlayhead && !segmentAtPlayhead.locked) {
-            handleSplitSegment(segmentAtPlayhead.id, playheadSec);
+          if (segmentAtPlayhead) {
+            // Check both segment.locked and track.locked
+            const segTrack = timelineState.tracks.find(t => t.id === segmentAtPlayhead.trackId);
+            if (!segmentAtPlayhead.locked && !segTrack?.locked) {
+              handleSplitSegment(segmentAtPlayhead.id, playheadSec);
+            }
           }
           break;
 
@@ -951,8 +955,12 @@ const Studio: React.FC = () => {
           e.preventDefault();
           if (selectedId) {
             const segment = segments.find(s => s.id === selectedId);
-            if (segment && !segment.locked) {
-              handleSegmentDelete(selectedId);
+            if (segment) {
+              // Check both segment.locked and track.locked
+              const segTrack = timelineState.tracks.find(t => t.id === segment.trackId);
+              if (!segment.locked && !segTrack?.locked) {
+                handleSegmentDelete(selectedId);
+              }
             }
           }
           break;
@@ -2469,14 +2477,17 @@ const Studio: React.FC = () => {
                             onInsert={(media, inPoint, outPoint) => {
                               const clipDuration = outPoint - inPoint;
                               const playheadPos = timelineState.playheadSec;
+                              const timestamp = Date.now();
+                              const segId = `seg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+
                               console.log(`[Studio] INSERT at ${playheadPos.toFixed(2)}s: ${media.name} (${clipDuration.toFixed(2)}s)`);
 
-                              // Create new segment starting at playhead position
-                              const newSegment: import('./types/timeline').SegmentWithUI = {
-                                id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                              // Create VIDEO segment on V1
+                              const videoSegment: import('./types/timeline').SegmentWithUI = {
+                                id: `${segId}_v`,
                                 projectId: timelineState.project?.id || 'local',
-                                trackId: timelineState.selectedTrackId || 'v1',
-                                order: timelineState.segments.length,
+                                trackId: 'v1',
+                                order: timelineState.segments.filter(s => s.trackId === 'v1').length,
                                 inSec: playheadPos,
                                 outSec: playheadPos + clipDuration,
                                 durationSec: clipDuration,
@@ -2485,9 +2496,14 @@ const Studio: React.FC = () => {
                                 createdAt: new Date().toISOString(),
                                 updatedAt: new Date().toISOString(),
                                 uiState: 'idle',
+                                // Rush media source
+                                mediaKind: 'rush',
+                                mediaSrc: media.localUrl,
+                                sourceInSec: inPoint,
+                                sourceOutSec: outPoint,
                                 activeRevision: {
-                                  id: `rev_${Date.now()}`,
-                                  segmentId: `seg_${Date.now()}`,
+                                  id: `rev_${timestamp}_v`,
+                                  segmentId: `${segId}_v`,
                                   videoUrl: media.localUrl,
                                   thumbnailUrl: media.thumbnail || '',
                                   status: 'succeeded',
@@ -2495,28 +2511,52 @@ const Studio: React.FC = () => {
                                 }
                               };
 
-                              // Insert and move playhead to end of new segment
+                              // Create AUDIO segment on A1 (same timing)
+                              const audioSegment: import('./types/timeline').SegmentWithUI = {
+                                id: `${segId}_a`,
+                                projectId: timelineState.project?.id || 'local',
+                                trackId: 'a1',
+                                order: timelineState.segments.filter(s => s.trackId === 'a1').length,
+                                inSec: playheadPos,
+                                outSec: playheadPos + clipDuration,
+                                durationSec: clipDuration,
+                                locked: false,
+                                label: `${media.name.replace(/\.[^/.]+$/, '')} (Audio)`,
+                                createdAt: new Date().toISOString(),
+                                updatedAt: new Date().toISOString(),
+                                uiState: 'idle',
+                                // Rush media source (audio from same file)
+                                mediaKind: 'rush',
+                                mediaSrc: media.localUrl,
+                                sourceInSec: inPoint,
+                                sourceOutSec: outPoint
+                              };
+
+                              // Insert both segments and move playhead
                               setTimelineState(prev => ({
                                 ...prev,
-                                segments: [...prev.segments, newSegment],
-                                selectedSegmentIds: [newSegment.id],
-                                playheadSec: playheadPos + clipDuration // Move playhead to end
+                                segments: [...prev.segments, videoSegment, audioSegment],
+                                selectedSegmentIds: [videoSegment.id],
+                                playheadSec: playheadPos + clipDuration
                               }));
 
-                              console.log(`[Studio] Created segment: ${newSegment.id}`);
+                              console.log(`[Studio] Created V1 segment: ${videoSegment.id}, A1 segment: ${audioSegment.id}`);
                               setSourceMedia(null);
                             }}
                             onOverwrite={(media, inPoint, outPoint) => {
                               const clipDuration = outPoint - inPoint;
                               const playheadPos = timelineState.playheadSec;
+                              const timestamp = Date.now();
+                              const segId = `seg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+
                               console.log(`[Studio] OVERWRITE at ${playheadPos.toFixed(2)}s: ${media.name} (${clipDuration.toFixed(2)}s)`);
 
-                              // Create new segment at playhead position
-                              const newSegment: import('./types/timeline').SegmentWithUI = {
-                                id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                              // Create VIDEO segment on V1
+                              const videoSegment: import('./types/timeline').SegmentWithUI = {
+                                id: `${segId}_v`,
                                 projectId: timelineState.project?.id || 'local',
-                                trackId: timelineState.selectedTrackId || 'v1',
-                                order: timelineState.segments.length,
+                                trackId: 'v1',
+                                order: timelineState.segments.filter(s => s.trackId === 'v1').length,
                                 inSec: playheadPos,
                                 outSec: playheadPos + clipDuration,
                                 durationSec: clipDuration,
@@ -2525,9 +2565,13 @@ const Studio: React.FC = () => {
                                 createdAt: new Date().toISOString(),
                                 updatedAt: new Date().toISOString(),
                                 uiState: 'idle',
+                                mediaKind: 'rush',
+                                mediaSrc: media.localUrl,
+                                sourceInSec: inPoint,
+                                sourceOutSec: outPoint,
                                 activeRevision: {
-                                  id: `rev_${Date.now()}`,
-                                  segmentId: `seg_${Date.now()}`,
+                                  id: `rev_${timestamp}_v`,
+                                  segmentId: `${segId}_v`,
                                   videoUrl: media.localUrl,
                                   thumbnailUrl: media.thumbnail || '',
                                   status: 'succeeded',
@@ -2535,19 +2579,40 @@ const Studio: React.FC = () => {
                                 }
                               };
 
+                              // Create AUDIO segment on A1
+                              const audioSegment: import('./types/timeline').SegmentWithUI = {
+                                id: `${segId}_a`,
+                                projectId: timelineState.project?.id || 'local',
+                                trackId: 'a1',
+                                order: timelineState.segments.filter(s => s.trackId === 'a1').length,
+                                inSec: playheadPos,
+                                outSec: playheadPos + clipDuration,
+                                durationSec: clipDuration,
+                                locked: false,
+                                label: `${media.name.replace(/\.[^/.]+$/, '')} (Audio)`,
+                                createdAt: new Date().toISOString(),
+                                updatedAt: new Date().toISOString(),
+                                uiState: 'idle',
+                                mediaKind: 'rush',
+                                mediaSrc: media.localUrl,
+                                sourceInSec: inPoint,
+                                sourceOutSec: outPoint
+                              };
+
                               setTimelineState(prev => ({
                                 ...prev,
-                                segments: [...prev.segments, newSegment],
-                                selectedSegmentIds: [newSegment.id],
+                                segments: [...prev.segments, videoSegment, audioSegment],
+                                selectedSegmentIds: [videoSegment.id],
                                 playheadSec: playheadPos + clipDuration
                               }));
 
-                              console.log(`[Studio] Created segment (overwrite): ${newSegment.id}`);
+                              console.log(`[Studio] Created V1+A1 segments (overwrite): ${videoSegment.id}, ${audioSegment.id}`);
                               setSourceMedia(null);
                             }}
                           />
                         ) : (
                           <TimelinePreview
+                            tracks={timelineState.tracks}
                             segments={timelineState.segments}
                             playheadSec={timelineState.playheadSec}
                             isPlaying={isPlaying}

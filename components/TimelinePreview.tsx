@@ -1,13 +1,14 @@
 /**
  * TimelinePreview Component
  * Real-time video preview synchronized with timeline playhead
- * Shows the current frame at the playhead position
+ * Supports multi-track video stacking with correct source seek
  */
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { SegmentWithUI } from '../types/timeline';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { SegmentWithUI, Track } from '../types/timeline';
 
 interface TimelinePreviewProps {
+    tracks: Track[];
     segments: SegmentWithUI[];
     playheadSec: number;
     isPlaying: boolean;
@@ -16,7 +17,14 @@ interface TimelinePreviewProps {
     fps: number;
 }
 
+interface ActiveVideoLayer {
+    segment: SegmentWithUI;
+    zIndex: number;
+    seekPosition: number;
+}
+
 export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
+    tracks,
     segments,
     playheadSec,
     isPlaying,
@@ -24,9 +32,10 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
     onSeek,
     fps
 }) => {
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const [currentSegment, setCurrentSegment] = useState<SegmentWithUI | null>(null);
-    const [videoUrl, setVideoUrl] = useState<string | null>(null);
+    const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+    const audioRef = useRef<HTMLAudioElement>(null);
+    const [activeVideoLayers, setActiveVideoLayers] = useState<ActiveVideoLayer[]>([]);
+    const [activeAudioSegment, setActiveAudioSegment] = useState<SegmentWithUI | null>(null);
 
     // Format timecode (HH:MM:SS:FF)
     const formatTimecode = (seconds: number): string => {
@@ -37,74 +46,129 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${f.toString().padStart(2, '0')}`;
     };
 
-    // Find segment at current playhead position
+    // Get video tracks sorted by order (highest priority first = lowest order)
+    const videoTracks = useMemo(() =>
+        tracks.filter(t => t.type === 'video' && t.visible).sort((a, b) => a.order - b.order),
+        [tracks]
+    );
+
+    const audioTracks = useMemo(() =>
+        tracks.filter(t => t.type === 'audio' && !t.muted),
+        [tracks]
+    );
+
+    // Find active video segments at playhead for each video track
     useEffect(() => {
-        const segment = segments.find(s =>
-            playheadSec >= s.inSec && playheadSec < s.outSec
-        );
+        const layers: ActiveVideoLayer[] = [];
 
-        if (segment !== currentSegment) {
-            setCurrentSegment(segment || null);
+        for (const track of videoTracks) {
+            const segment = segments.find(s =>
+                s.trackId === track.id &&
+                playheadSec >= s.inSec &&
+                playheadSec < s.outSec
+            );
 
-            // Get video URL from segment
-            if (segment?.activeRevision?.videoUrl) {
-                setVideoUrl(segment.activeRevision.videoUrl);
-            } else if (segment?.activeRevision?.outputAsset?.url) {
-                setVideoUrl(segment.activeRevision.outputAsset.url);
-            } else {
-                setVideoUrl(null);
+            if (segment) {
+                // Calculate position within source media
+                const positionInSegment = playheadSec - segment.inSec;
+                const seekPosition = (segment.sourceInSec ?? 0) + positionInSegment;
+
+                // Get video URL from mediaSrc or activeRevision
+                const hasVideo = segment.mediaSrc || segment.activeRevision?.videoUrl;
+
+                if (hasVideo) {
+                    layers.push({
+                        segment,
+                        zIndex: videoTracks.length - track.order, // Top track has highest z-index
+                        seekPosition
+                    });
+                }
             }
         }
-    }, [segments, playheadSec, currentSegment]);
 
-    // Sync video position with playhead
-    useEffect(() => {
-        const video = videoRef.current;
-        if (!video || !currentSegment || !videoUrl) return;
+        setActiveVideoLayers(layers);
 
-        // Calculate position within the segment
-        const positionInSegment = playheadSec - currentSegment.inSec;
-
-        // Only seek if not playing and position differs significantly
-        if (!isPlaying && Math.abs(video.currentTime - positionInSegment) > 0.05) {
-            video.currentTime = positionInSegment;
+        // Find active audio segment
+        for (const track of audioTracks) {
+            const audioSeg = segments.find(s =>
+                s.trackId === track.id &&
+                playheadSec >= s.inSec &&
+                playheadSec < s.outSec
+            );
+            if (audioSeg) {
+                setActiveAudioSegment(audioSeg);
+                break;
+            }
         }
-    }, [playheadSec, currentSegment, isPlaying, videoUrl]);
+    }, [segments, playheadSec, videoTracks, audioTracks]);
 
-    // Handle play/pause
+    // Sync video positions with playhead
     useEffect(() => {
-        const video = videoRef.current;
-        if (!video) return;
+        if (isPlaying) return; // Don't seek while playing
 
-        if (isPlaying) {
-            video.play().catch(() => { });
-        } else {
-            video.pause();
+        for (const layer of activeVideoLayers) {
+            const video = videoRefs.current.get(layer.segment.id);
+            if (video && Math.abs(video.currentTime - layer.seekPosition) > 0.05) {
+                video.currentTime = layer.seekPosition;
+            }
+        }
+    }, [playheadSec, activeVideoLayers, isPlaying]);
+
+    // Handle play/pause for all videos
+    useEffect(() => {
+        for (const [, video] of videoRefs.current) {
+            if (isPlaying) {
+                video.play().catch(() => { });
+            } else {
+                video.pause();
+            }
         }
     }, [isPlaying]);
 
-    // Handle video time update during playback
-    const handleTimeUpdate = useCallback(() => {
-        if (!isPlaying || !currentSegment) return;
-        const video = videoRef.current;
+    // Handle video time update during playback (from top layer)
+    const handleTimeUpdate = useCallback((segmentId: string) => {
+        if (!isPlaying) return;
+        const topLayer = activeVideoLayers[0];
+        if (!topLayer || topLayer.segment.id !== segmentId) return;
+
+        const video = videoRefs.current.get(segmentId);
         if (!video) return;
 
-        const newPlayheadPos = currentSegment.inSec + video.currentTime;
+        // Calculate timeline position from source position
+        const sourceOffset = video.currentTime - (topLayer.segment.sourceInSec ?? 0);
+        const newPlayheadPos = topLayer.segment.inSec + sourceOffset;
         onSeek(newPlayheadPos);
-    }, [isPlaying, currentSegment, onSeek]);
+    }, [isPlaying, activeVideoLayers, onSeek]);
 
     // Handle video ended
     const handleEnded = useCallback(() => {
-        // Find next segment
-        if (!currentSegment) return;
-        const currentIndex = segments.findIndex(s => s.id === currentSegment.id);
-        if (currentIndex < segments.length - 1) {
-            const nextSegment = segments[currentIndex + 1];
-            onSeek(nextSegment.inSec);
+        const topLayer = activeVideoLayers[0];
+        if (!topLayer) {
+            onPlayPause();
+            return;
+        }
+
+        // Find next segment on same track
+        const currentIndex = segments.findIndex(s => s.id === topLayer.segment.id);
+        const sameTrackSegments = segments.filter(s => s.trackId === topLayer.segment.trackId);
+        const nextInTrack = sameTrackSegments.find(s => s.inSec >= topLayer.segment.outSec);
+
+        if (nextInTrack) {
+            onSeek(nextInTrack.inSec);
         } else {
             onPlayPause(); // Stop at end
         }
-    }, [currentSegment, segments, onSeek, onPlayPause]);
+    }, [activeVideoLayers, segments, onSeek, onPlayPause]);
+
+    const getVideoUrl = (segment: SegmentWithUI): string | null => {
+        return segment.mediaSrc || segment.activeRevision?.videoUrl || segment.activeRevision?.outputAsset?.url || null;
+    };
+
+    const topLayer = activeVideoLayers[0];
+    const totalDuration = useMemo(() => {
+        if (segments.length === 0) return 30;
+        return Math.max(...segments.map(s => s.outSec));
+    }, [segments]);
 
     return (
         <div className="flex-1 bg-black flex flex-col min-w-0 relative border-r border-[#3f3f46]">
@@ -112,46 +176,69 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
             <div className="h-10 bg-[#1e1e1e] border-b border-[#3f3f46] flex items-center justify-between px-4 shrink-0">
                 <div className="flex items-center gap-4">
                     <span className="text-xs font-mono text-gray-400 truncate max-w-[200px]">
-                        {currentSegment?.label || 'Timeline Preview'}
+                        {topLayer?.segment.label || 'Program Monitor'}
                     </span>
                     <div className="h-3 w-px bg-gray-700"></div>
                     <span className="text-[10px] px-1.5 py-0.5 bg-purple-600 rounded text-white font-mono">PROGRAM</span>
+                    {activeVideoLayers.length > 1 && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-blue-600 rounded text-white font-mono">
+                            {activeVideoLayers.length} LAYERS
+                        </span>
+                    )}
                 </div>
                 <div className="flex items-center gap-3">
                     <span className="text-xs text-gray-500">{segments.length} segments</span>
                 </div>
             </div>
 
-            {/* Video Display */}
+            {/* Video Display - Stacked layers */}
             <div className="flex-1 relative flex items-center justify-center bg-[#0a0a0a]">
-                {videoUrl && currentSegment ? (
-                    <div className="aspect-video w-full h-full max-h-[90%] max-w-[95%] relative shadow-2xl bg-black">
-                        <video
-                            ref={videoRef}
-                            src={videoUrl}
-                            className="w-full h-full object-contain"
-                            onClick={onPlayPause}
-                            onTimeUpdate={handleTimeUpdate}
-                            onEnded={handleEnded}
-                            muted={false}
-                        />
+                {activeVideoLayers.length > 0 ? (
+                    <div className="aspect-video w-full h-full max-h-[90%] max-w-[95%] relative shadow-2xl bg-black overflow-hidden">
+                        {/* Render all video layers */}
+                        {activeVideoLayers.map((layer, index) => {
+                            const url = getVideoUrl(layer.segment);
+                            if (!url) return null;
+
+                            return (
+                                <video
+                                    key={layer.segment.id}
+                                    ref={el => {
+                                        if (el) videoRefs.current.set(layer.segment.id, el);
+                                        else videoRefs.current.delete(layer.segment.id);
+                                    }}
+                                    src={url}
+                                    className="absolute inset-0 w-full h-full object-contain"
+                                    style={{ zIndex: layer.zIndex }}
+                                    onClick={index === 0 ? onPlayPause : undefined}
+                                    onTimeUpdate={() => handleTimeUpdate(layer.segment.id)}
+                                    onEnded={index === 0 ? handleEnded : undefined}
+                                    muted={index !== 0} // Only top layer has audio
+                                />
+                            );
+                        })}
 
                         {/* Timecode Display */}
-                        <div className="absolute top-4 right-4 text-sm font-mono bg-black/70 px-3 py-1.5 rounded text-white border border-white/10 tracking-widest z-10">
+                        <div className="absolute top-4 right-4 text-sm font-mono bg-black/70 px-3 py-1.5 rounded text-white border border-white/10 tracking-widest z-50">
                             {formatTimecode(playheadSec)}
                         </div>
 
                         {/* Segment Info */}
-                        <div className="absolute top-4 left-4 flex gap-2 z-10">
+                        <div className="absolute top-4 left-4 flex gap-2 z-50">
                             <div className="text-xs font-mono bg-purple-600/80 px-2 py-1 rounded text-white">
-                                {currentSegment.label}
+                                {topLayer?.segment.label}
                             </div>
+                            {topLayer?.segment.mediaKind === 'rush' && (
+                                <div className="text-xs font-mono bg-green-600/80 px-2 py-1 rounded text-white">
+                                    RUSH
+                                </div>
+                            )}
                         </div>
 
                         {/* Play/Pause Overlay */}
                         {!isPlaying && (
                             <div
-                                className="absolute inset-0 flex items-center justify-center bg-black/20 cursor-pointer"
+                                className="absolute inset-0 flex items-center justify-center bg-black/20 cursor-pointer z-40"
                                 onClick={onPlayPause}
                             >
                                 <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
@@ -163,7 +250,7 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                 ) : (
                     <div className="flex flex-col items-center justify-center text-gray-600">
                         <span className="material-symbols-outlined text-6xl mb-4">movie</span>
-                        <p className="text-lg font-medium">Timeline Preview</p>
+                        <p className="text-lg font-medium">Program Monitor</p>
                         <p className="text-sm mt-1">Ajoutez des segments à la timeline</p>
                         <p className="text-xs mt-4 text-gray-700">
                             ←/→ navigation frame • X split • Suppr delete
@@ -182,10 +269,11 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                     <span className="material-symbols-outlined text-lg">first_page</span>
                 </button>
                 <button
-                    onClick={() => onSeek(Math.max(0, playheadSec - 5))}
+                    onClick={() => onSeek(Math.max(0, playheadSec - 1 / fps))}
                     className="p-1.5 text-gray-400 hover:text-white transition-colors"
+                    title="Previous frame (←)"
                 >
-                    <span className="material-symbols-outlined text-lg">fast_rewind</span>
+                    <span className="material-symbols-outlined text-lg">skip_previous</span>
                 </button>
                 <button
                     onClick={onPlayPause}
@@ -196,16 +284,14 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                     </span>
                 </button>
                 <button
-                    onClick={() => onSeek(playheadSec + 5)}
+                    onClick={() => onSeek(Math.min(totalDuration, playheadSec + 1 / fps))}
                     className="p-1.5 text-gray-400 hover:text-white transition-colors"
+                    title="Next frame (→)"
                 >
-                    <span className="material-symbols-outlined text-lg">fast_forward</span>
+                    <span className="material-symbols-outlined text-lg">skip_next</span>
                 </button>
                 <button
-                    onClick={() => {
-                        const lastSegment = segments[segments.length - 1];
-                        if (lastSegment) onSeek(lastSegment.outSec);
-                    }}
+                    onClick={() => onSeek(totalDuration)}
                     className="p-1.5 text-gray-400 hover:text-white transition-colors"
                     title="Go to end (End)"
                 >

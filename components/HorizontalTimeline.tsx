@@ -123,26 +123,23 @@ export default function HorizontalTimeline({
 
             {/* Timeline area with synchronized scroll */}
             <div className="flex-1 flex overflow-hidden">
-                {/* Track labels column */}
+                {/* Track labels column with TrackHeader */}
                 <div className="flex-shrink-0 bg-[#1a1a1a] border-r border-[#333]" style={{ width: TRACK_LABEL_WIDTH }}>
                     {/* Ruler spacer */}
                     <div className="h-7 border-b border-[#333]" />
 
-                    {/* V1 label */}
-                    <div
-                        className="flex items-center justify-center border-b border-[#333] text-[10px] font-bold text-gray-500"
-                        style={{ height: TRACK_HEIGHT }}
-                    >
-                        V1
-                    </div>
-
-                    {/* A1 label (placeholder) */}
-                    <div
-                        className="flex items-center justify-center border-b border-[#333] text-[10px] font-bold text-gray-600"
-                        style={{ height: 32 }}
-                    >
-                        A1
-                    </div>
+                    {/* Dynamic track headers */}
+                    {tracks.map(track => (
+                        <TrackHeader
+                            key={track.id}
+                            track={track}
+                            isSelected={selectedTrackId === track.id}
+                            onSelect={() => onTrackSelect?.(track.id)}
+                            onToggleLock={() => onTrackToggleLock?.(track.id)}
+                            onToggleMute={() => onTrackToggleMute?.(track.id)}
+                            onToggleVisible={() => onTrackToggleVisible?.(track.id)}
+                        />
+                    ))}
                 </div>
 
                 {/* Scrollable timeline content */}
@@ -157,56 +154,62 @@ export default function HorizontalTimeline({
                             pixelsPerSecond={pixelsPerSecond}
                         />
 
-                        {/* Video Track V1 */}
-                        <div
-                            className="relative bg-[#1e1e1e] border-b border-[#333] cursor-pointer"
-                            style={{ height: TRACK_HEIGHT, minWidth: `${totalWidth}px` }}
-                            onClick={handleTrackClick}
-                        >
-                            {/* Grid lines */}
-                            <div
-                                className="absolute inset-0 pointer-events-none"
-                                style={{
-                                    backgroundImage: `repeating-linear-gradient(
-                    to right,
-                    transparent,
-                    transparent ${pixelsPerSecond * 5 - 1}px,
-                    #2a2a2a ${pixelsPerSecond * 5 - 1}px,
-                    #2a2a2a ${pixelsPerSecond * 5}px
-                  )`,
-                                }}
-                            />
+                        {/* Dynamic tracks with segments */}
+                        {tracks.map(track => {
+                            const trackSegments = segments.filter(s => s.trackId === track.id);
+                            const isVideoTrack = track.type === 'video';
 
-                            {/* Clips */}
-                            {segments.map((segment) => (
-                                <TimelineClip
-                                    key={segment.id}
-                                    segment={segment}
-                                    isSelected={selectedSegmentIds.includes(segment.id)}
-                                    pixelsPerSecond={pixelsPerSecond}
-                                    trackHeight={TRACK_HEIGHT}
-                                    onClick={() => onSegmentClick(segment.id)}
-                                    onDoubleClick={onSegmentDoubleClick ? () => onSegmentDoubleClick(segment.id) : undefined}
-                                />
-                            ))}
-                        </div>
+                            return (
+                                <div
+                                    key={track.id}
+                                    className={`relative border-b border-[#333] cursor-pointer ${isVideoTrack ? 'bg-[#1e1e1e]' : 'bg-[#161616]'
+                                        } ${track.locked ? 'opacity-60' : ''} ${!track.visible && isVideoTrack ? 'opacity-30' : ''
+                                        }`}
+                                    style={{ height: track.height, minWidth: `${totalWidth}px` }}
+                                    onClick={handleTrackClick}
+                                >
+                                    {/* Grid lines */}
+                                    <div
+                                        className="absolute inset-0 pointer-events-none"
+                                        style={{
+                                            backgroundImage: `repeating-linear-gradient(
+                                                to right,
+                                                transparent,
+                                                transparent ${pixelsPerSecond * 5 - 1}px,
+                                                #2a2a2a ${pixelsPerSecond * 5 - 1}px,
+                                                #2a2a2a ${pixelsPerSecond * 5}px
+                                            )`,
+                                        }}
+                                    />
 
-                        {/* Audio Track A1 */}
-                        <div
-                            className="relative bg-[#161616] border-b border-[#333] cursor-pointer"
-                            style={{ height: 32, minWidth: `${totalWidth}px` }}
-                            onClick={handleTrackClick}
-                        >
-                            <div className="absolute inset-0 flex items-center justify-center text-gray-700 text-[9px] pointer-events-none">
-                                Audio track (A1)
-                            </div>
-                        </div>
+                                    {/* Segments for this track */}
+                                    {trackSegments.map((segment) => (
+                                        <TimelineClip
+                                            key={segment.id}
+                                            segment={segment}
+                                            isSelected={selectedSegmentIds.includes(segment.id)}
+                                            pixelsPerSecond={pixelsPerSecond}
+                                            trackHeight={track.height}
+                                            onClick={() => onSegmentClick(segment.id)}
+                                            onDoubleClick={onSegmentDoubleClick ? () => onSegmentDoubleClick(segment.id) : undefined}
+                                        />
+                                    ))}
+
+                                    {/* Audio waveform placeholder for audio tracks */}
+                                    {!isVideoTrack && trackSegments.length === 0 && (
+                                        <div className="absolute inset-0 flex items-center justify-center text-gray-700 text-[9px] pointer-events-none">
+                                            Audio {track.muted ? '(muted)' : ''}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
 
                         {/* Playhead - spans entire height */}
                         <TimelinePlayhead
                             positionSec={playheadSec}
                             pixelsPerSecond={pixelsPerSecond}
-                            height={TRACK_HEIGHT + 32 + 28} // V1 + A1 + ruler
+                            height={tracks.reduce((h, t) => h + t.height, 0) + 28} // All tracks + ruler
                             onDrag={onPlayheadChange}
                         />
                     </div>
