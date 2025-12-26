@@ -191,13 +191,14 @@ export default function HorizontalTimeline({
                             ))}
                         </div>
 
-                        {/* Audio Track A1 (placeholder) */}
+                        {/* Audio Track A1 */}
                         <div
-                            className="relative bg-[#161616] border-b border-[#333]"
+                            className="relative bg-[#161616] border-b border-[#333] cursor-pointer"
                             style={{ height: 32, minWidth: `${totalWidth}px` }}
+                            onClick={handleTrackClick}
                         >
-                            <div className="absolute inset-0 flex items-center justify-center text-gray-700 text-[9px]">
-                                Audio track (coming soon)
+                            <div className="absolute inset-0 flex items-center justify-center text-gray-700 text-[9px] pointer-events-none">
+                                Audio track (A1)
                             </div>
                         </div>
 
