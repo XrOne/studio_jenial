@@ -8,32 +8,44 @@
 'use client';
 
 import * as React from 'react';
-import { SegmentWithUI } from '../types/timeline';
+import { SegmentWithUI, Track } from '../types/timeline';
 import TimelineRuler from './TimelineRuler';
 import TimelinePlayhead from './TimelinePlayhead';
 import TimelineClip from './TimelineClip';
 import TimelineToolbar from './TimelineToolbar';
+import TrackHeader from './TrackHeader';
 
 export interface HorizontalTimelineProps {
+    tracks: Track[];
     segments: SegmentWithUI[];
     selectedSegmentIds: string[];
+    selectedTrackId: string | null;
     playheadSec: number;
     onPlayheadChange: (sec: number) => void;
     onSegmentClick: (id: string) => void;
     onSegmentDoubleClick?: (id: string) => void;
+    onTrackSelect?: (trackId: string) => void;
+    onTrackToggleLock?: (trackId: string) => void;
+    onTrackToggleMute?: (trackId: string) => void;
+    onTrackToggleVisible?: (trackId: string) => void;
+    onSegmentTrim?: (segmentId: string, edge: 'start' | 'end', newTime: number) => void;
+    onSegmentMove?: (segmentId: string, newInSec: number) => void;
+    onDeleteGap?: (atSec: number, trackId: string) => void;
     onUndo?: () => void;
     onRedo?: () => void;
     onCut?: () => void;
     onRippleDelete?: () => void;
     onExport?: () => void;
-    onSaveJson?: () => void; // New
-    onLoadJson?: () => void; // New
+    onSaveJson?: () => void;
+    onLoadJson?: () => void;
+    canUndo?: boolean;
+    canRedo?: boolean;
     className?: string;
 }
 
 const DEFAULT_PIXELS_PER_SECOND = 60;
 const TRACK_HEIGHT = 56;
-const TRACK_LABEL_WIDTH = 48;
+const TRACK_LABEL_WIDTH = 60;
 
 /**
  * HorizontalTimeline
@@ -41,16 +53,25 @@ const TRACK_LABEL_WIDTH = 48;
  * NLE-style horizontal timeline with:
  * - Toolbar with editing controls
  * - Time ruler with marks
- * - Video track (V1) with clips
+ * - Multi-track support (V1, V2, A1, A2)
  * - Draggable playhead
  */
 export default function HorizontalTimeline({
+    tracks,
     segments,
     selectedSegmentIds,
+    selectedTrackId,
     playheadSec,
     onPlayheadChange,
     onSegmentClick,
     onSegmentDoubleClick,
+    onTrackSelect,
+    onTrackToggleLock,
+    onTrackToggleMute,
+    onTrackToggleVisible,
+    onSegmentTrim,
+    onSegmentMove,
+    onDeleteGap,
     onUndo,
     onRedo,
     onCut,
@@ -58,6 +79,8 @@ export default function HorizontalTimeline({
     onExport,
     onSaveJson,
     onLoadJson,
+    canUndo = false,
+    canRedo = false,
     className = '',
 }: HorizontalTimelineProps) {
     const [pixelsPerSecond, setPixelsPerSecond] = React.useState(DEFAULT_PIXELS_PER_SECOND);

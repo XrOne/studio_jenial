@@ -84,10 +84,25 @@ export interface SegmentRevision {
     keyframes?: Keyframe[];
 }
 
+// === TRACK ===
+export type TrackType = 'video' | 'audio';
+
+export interface Track {
+    id: string;
+    type: TrackType;
+    name: string;      // e.g. "V1", "V2", "A1"
+    order: number;     // Display order (0 = top)
+    locked: boolean;   // Locked tracks cannot be edited
+    muted: boolean;    // For audio tracks
+    visible: boolean;  // For video tracks
+    height: number;    // Track height in pixels
+}
+
 // === SEGMENT ===
 export interface Segment {
     id: string;
     projectId: string;
+    trackId: string;   // Reference to parent track
     order: number;
     inSec: number;
     outSec: number;
@@ -185,8 +200,10 @@ export interface SegmentWithUI extends Segment {
 
 export interface TimelineState {
     project: Project | null;
+    tracks: Track[];
     segments: SegmentWithUI[];
     selectedSegmentIds: string[];
+    selectedTrackId: string | null;
     expandedSegmentIds: string[];
     generationQueue: { segmentId: string; revisionId: string }[];
     currentlyGenerating?: { segmentId: string; revisionId: string };

@@ -529,8 +529,13 @@ const Studio: React.FC = () => {
   // === TIMELINE STATE ===
   const [timelineState, setTimelineState] = useState<TimelineState>({
     project: null,
+    tracks: [
+      { id: 'v1', type: 'video', name: 'V1', order: 0, locked: false, muted: false, visible: true, height: 56 },
+      { id: 'a1', type: 'audio', name: 'A1', order: 1, locked: false, muted: false, visible: true, height: 32 },
+    ],
     segments: [],
     selectedSegmentIds: [],
+    selectedTrackId: 'v1',
     expandedSegmentIds: [],
     generationQueue: [],
     playheadSec: 0
@@ -2470,6 +2475,7 @@ const Studio: React.FC = () => {
                               const newSegment: import('./types/timeline').SegmentWithUI = {
                                 id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                                 projectId: timelineState.project?.id || 'local',
+                                trackId: timelineState.selectedTrackId || 'v1',
                                 order: timelineState.segments.length,
                                 inSec: playheadPos,
                                 outSec: playheadPos + clipDuration,
@@ -2509,6 +2515,7 @@ const Studio: React.FC = () => {
                               const newSegment: import('./types/timeline').SegmentWithUI = {
                                 id: `seg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                                 projectId: timelineState.project?.id || 'local',
+                                trackId: timelineState.selectedTrackId || 'v1',
                                 order: timelineState.segments.length,
                                 inSec: playheadPos,
                                 outSec: playheadPos + clipDuration,
@@ -2599,13 +2606,86 @@ const Studio: React.FC = () => {
 
                       {/* BOTTOM: Horizontal Timeline */}
                       <HorizontalTimeline
+                        tracks={timelineState.tracks}
                         segments={timelineState.segments}
                         selectedSegmentIds={timelineState.selectedSegmentIds}
+                        selectedTrackId={timelineState.selectedTrackId}
                         playheadSec={timelineState.playheadSec}
                         onPlayheadChange={(sec) => setTimelineState(s => ({ ...s, playheadSec: sec }))}
                         onSegmentClick={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
                         onSegmentDoubleClick={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: [...s.expandedSegmentIds, id] }))}
-                        onCut={() => console.log('[Timeline] Cut at playhead')}
+                        onTrackSelect={(trackId) => setTimelineState(s => ({ ...s, selectedTrackId: trackId }))}
+                        onTrackToggleLock={(trackId) => setTimelineState(s => ({
+                          ...s,
+                          tracks: s.tracks.map(t => t.id === trackId ? { ...t, locked: !t.locked } : t)
+                        }))}
+                        onTrackToggleMute={(trackId) => setTimelineState(s => ({
+                          ...s,
+                          tracks: s.tracks.map(t => t.id === trackId ? { ...t, muted: !t.muted } : t)
+                        }))}
+                        onTrackToggleVisible={(trackId) => setTimelineState(s => ({
+                          ...s,
+                          tracks: s.tracks.map(t => t.id === trackId ? { ...t, visible: !t.visible } : t)
+                        }))}
+                        onSegmentTrim={(segmentId, edge, newTime) => {
+                          setTimelineState(prev => ({
+                            ...prev,
+                            segments: prev.segments.map(s => {
+                              if (s.id !== segmentId) return s;
+                              if (edge === 'start') {
+                                return { ...s, inSec: newTime, durationSec: s.outSec - newTime };
+                              } else {
+                                return { ...s, outSec: newTime, durationSec: newTime - s.inSec };
+                              }
+                            })
+                          }));
+                        }}
+                        onSegmentMove={(segmentId, newInSec) => {
+                          setTimelineState(prev => ({
+                            ...prev,
+                            segments: prev.segments.map(s => {
+                              if (s.id !== segmentId) return s;
+                              return { ...s, inSec: newInSec, outSec: newInSec + s.durationSec };
+                            })
+                          }));
+                        }}
+                        onDeleteGap={(atSec, trackId) => {
+                          // Find segments on this track and close gaps
+                          setTimelineState(prev => {
+                            const trackSegments = prev.segments
+                              .filter(s => s.trackId === trackId)
+                              .sort((a, b) => a.inSec - b.inSec);
+
+                            // Find gap at this position and close it
+                            for (let i = 0; i < trackSegments.length - 1; i++) {
+                              const current = trackSegments[i];
+                              const next = trackSegments[i + 1];
+                              const gapStart = current.outSec;
+                              const gapEnd = next.inSec;
+
+                              if (atSec >= gapStart && atSec < gapEnd) {
+                                const gapSize = gapEnd - gapStart;
+                                // Shift all subsequent segments left
+                                return {
+                                  ...prev,
+                                  segments: prev.segments.map(s => {
+                                    if (s.trackId !== trackId || s.inSec < gapEnd) return s;
+                                    return { ...s, inSec: s.inSec - gapSize, outSec: s.outSec - gapSize };
+                                  })
+                                };
+                              }
+                            }
+                            return prev;
+                          });
+                        }}
+                        onCut={() => {
+                          const segmentAtPlayhead = timelineState.segments.find(s =>
+                            timelineState.playheadSec > s.inSec && timelineState.playheadSec < s.outSec
+                          );
+                          if (segmentAtPlayhead) {
+                            handleSplitSegment(segmentAtPlayhead.id, timelineState.playheadSec);
+                          }
+                        }}
                         onRippleDelete={() => {
                           const id = timelineState.selectedSegmentIds[0];
                           if (id) handleSegmentDelete(id);
