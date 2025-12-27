@@ -2813,6 +2813,83 @@ const Studio: React.FC = () => {
         segments={timelineState.segments}
       />
 
+      {/* API KEY DIALOG (BYOK) */}
+      {showApiKeyDialog && (
+        <ApiKeyDialog
+          onSetKey={(key) => {
+            setApiKey(key);
+            setRuntimeApiKey(key);
+            setHasCustomKey(true);
+            setShowApiKeyDialog(false);
+          }}
+          onClearKey={() => {
+            setApiKey(null);
+            setRuntimeApiKey(null);
+            setHasCustomKey(false);
+          }}
+          onClose={() => setShowApiKeyDialog(false)}
+          hasCustomKey={hasCustomKey}
+          providerToken={providerToken}
+        />
+      )}
+
+      {/* DOGMA MANAGER */}
+      {isDogmaManagerOpen && (
+        <DogmaManager
+          isOpen={isDogmaManagerOpen}
+          dogmas={dogmas}
+          onSaveDogma={(dogma) => {
+            if (dogma.id) {
+              setDogmas(prev => prev.map(d => d.id === dogma.id ? { ...d, ...dogma } as Dogma : d));
+            } else {
+              const newDogma: Dogma = { ...dogma, id: crypto.randomUUID() } as Dogma;
+              setDogmas(prev => [...prev, newDogma]);
+            }
+          }}
+          onDeleteDogma={(dogmaId) => {
+            setDogmas(prev => prev.filter(d => d.id !== dogmaId));
+            if (activeDogmaId === dogmaId) setActiveDogmaId(null);
+          }}
+          activeDogmaId={activeDogmaId}
+          onSetActiveDogmaId={setActiveDogmaId}
+          onClose={() => setIsDogmaManagerOpen(false)}
+        />
+      )}
+
+      {/* CHARACTER MANAGER */}
+      {isCharacterManagerOpen && (
+        <CharacterManager
+          isOpen={isCharacterManagerOpen}
+          characters={characters}
+          onSaveCharacter={(character) => {
+            if (character.id) {
+              setCharacters(prev => prev.map(c => c.id === character.id ? { ...c, ...character } as Character : c));
+            } else {
+              const newChar: Character = { ...character, id: crypto.randomUUID() } as Character;
+              setCharacters(prev => [...prev, newChar]);
+            }
+          }}
+          onDeleteCharacter={(charId) => setCharacters(prev => prev.filter(c => c.id !== charId))}
+          onClose={() => setIsCharacterManagerOpen(false)}
+          onUseCharacter={setCharacterToInject}
+        />
+      )}
+
+      {/* SHOT LIBRARY */}
+      {isShotLibraryOpen && (
+        <ShotLibrary
+          isOpen={isShotLibraryOpen}
+          shots={savedShots}
+          onClose={() => setIsShotLibraryOpen(false)}
+          onDeleteShot={handleDeleteShot}
+          onUpdateShotTitle={handleUpdateShotTitle}
+          onLoadShot={(shot) => {
+            console.log('[ShotLibrary] Loading shot:', shot.id);
+            setIsShotLibraryOpen(false);
+          }}
+        />
+      )}
+
     </ErrorBoundary>
   );
 };
