@@ -4,6 +4,7 @@
  * 
  * TimelineRuler - Time ruler with second markers
  * Displays timecode marks (00:00, 00:05, etc.)
+ * Clickable to position playhead
  */
 'use client';
 
@@ -13,6 +14,7 @@ interface TimelineRulerProps {
     durationSec: number;
     pixelsPerSecond: number;
     scrollLeft?: number;
+    onClick?: (sec: number) => void;
 }
 
 /**
@@ -29,32 +31,43 @@ const formatTimecode = (seconds: number): string => {
  * 
  * Displays time markers along the top of the timeline.
  * Shows major marks every 5 seconds and minor marks every second.
+ * Clicking on the ruler moves the playhead to that position.
  */
 export default function TimelineRuler({
     durationSec,
     pixelsPerSecond,
+    onClick,
 }: TimelineRulerProps) {
     // Generate marks every 5 seconds
     const majorInterval = 5; // seconds
     const totalWidth = durationSec * pixelsPerSecond;
     const markCount = Math.ceil(durationSec / majorInterval) + 1;
 
+    const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!onClick) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const newSec = Math.max(0, x / pixelsPerSecond);
+        onClick(newSec);
+    };
+
     return (
         <div
-            className="h-7 bg-[#1a1a1a] border-b border-[#333] relative select-none overflow-hidden"
+            className="h-7 bg-[#1a1a1a] border-b border-[#333] relative select-none overflow-hidden cursor-pointer"
             style={{ minWidth: `${totalWidth}px` }}
+            onClick={handleClick}
         >
             {/* Background pattern for minor marks */}
             <div
-                className="absolute inset-0"
+                className="absolute inset-0 pointer-events-none"
                 style={{
                     backgroundImage: `repeating-linear-gradient(
-            to right,
-            transparent,
-            transparent ${pixelsPerSecond - 1}px,
-            #2a2a2a ${pixelsPerSecond - 1}px,
-            #2a2a2a ${pixelsPerSecond}px
-          )`,
+                        to right,
+                        transparent,
+                        transparent ${pixelsPerSecond - 1}px,
+                        #2a2a2a ${pixelsPerSecond - 1}px,
+                        #2a2a2a ${pixelsPerSecond}px
+                    )`,
                 }}
             />
 
@@ -66,7 +79,7 @@ export default function TimelineRuler({
                 return (
                     <div
                         key={seconds}
-                        className="absolute top-0 bottom-0 flex flex-col items-start"
+                        className="absolute top-0 bottom-0 flex flex-col items-start pointer-events-none"
                         style={{ left: `${position}px` }}
                     >
                         {/* Vertical line */}

@@ -95,13 +95,19 @@ export default function HorizontalTimeline({
 
     const totalWidth = totalDuration * pixelsPerSecond;
 
-    // Handle click on empty track area to move playhead
-    const handleTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
-        const target = e.currentTarget;
-        const rect = target.getBoundingClientRect();
-        const scrollLeft = scrollContainerRef.current?.scrollLeft || 0;
-        const x = e.clientX - rect.left + scrollLeft - TRACK_LABEL_WIDTH;
+    // Handle click on track area or ruler to move playhead
+    const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        // Get the scrollable container's rect
+        const scrollContainer = scrollContainerRef.current;
+        if (!scrollContainer) return;
+
+        const rect = scrollContainer.getBoundingClientRect();
+        const scrollLeft = scrollContainer.scrollLeft;
+
+        // Calculate x position relative to timeline start
+        const x = e.clientX - rect.left + scrollLeft;
         const newSec = Math.max(0, x / pixelsPerSecond);
+
         onPlayheadChange(newSec);
     };
 
@@ -148,10 +154,11 @@ export default function HorizontalTimeline({
                     className="flex-1 overflow-x-auto overflow-y-hidden relative"
                 >
                     <div style={{ minWidth: `${totalWidth}px` }}>
-                        {/* Ruler */}
+                        {/* Ruler - clickable to position playhead */}
                         <TimelineRuler
                             durationSec={totalDuration}
                             pixelsPerSecond={pixelsPerSecond}
+                            onClick={onPlayheadChange}
                         />
 
                         {/* Dynamic tracks with segments */}
@@ -166,7 +173,7 @@ export default function HorizontalTimeline({
                                         } ${track.locked ? 'opacity-60' : ''} ${!track.visible && isVideoTrack ? 'opacity-30' : ''
                                         }`}
                                     style={{ height: track.height, minWidth: `${totalWidth}px` }}
-                                    onClick={handleTrackClick}
+                                    onClick={handleTimelineClick}
                                 >
                                     {/* Grid lines */}
                                     <div
