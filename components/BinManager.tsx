@@ -1,20 +1,43 @@
 /**
  * BinManager Component
  * Full-featured media library with drag-drop upload, grid view, and timeline integration
+ * 
+ * Features:
+ * - Rushes: Imported media files
+ * - Generated: AI-generated videos
+ * - Sequences: Découpage bins with slots (NEW)
  */
 
 import React, { useState, useRef, useCallback } from 'react';
 import { useLocalMediaLibrary } from '../hooks/useLocalMediaLibrary';
+import { useSequenceBins } from '../hooks/useSequenceBins';
 import { RushMedia } from '../types/media';
+import { SequenceBinFolder } from './SequenceBinFolder';
 
 interface BinManagerProps {
     onMediaSelect?: (media: RushMedia) => void;
     onAddToTimeline?: (media: RushMedia) => void;
+    onSlotGenerate?: (binId: string, slotId: string) => void;
+    onSlotAddToTimeline?: (binId: string, slotId: string) => void;
 }
 
-export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTimeline }) => {
+export const BinManager: React.FC<BinManagerProps> = ({ 
+    onMediaSelect, 
+    onAddToTimeline,
+    onSlotGenerate,
+    onSlotAddToTimeline,
+}) => {
     const { rushes, generated, isLoading, uploadMedia, deleteMedia, renameMedia } = useLocalMediaLibrary();
-    const [activeTab, setActiveTab] = useState<'rushes' | 'generated'>('rushes');
+    const { 
+        bins, 
+        toggleBinExpanded, 
+        renameBin, 
+        deleteBin, 
+        addAllPendingToQueue,
+        getSlotById,
+    } = useSequenceBins();
+    
+    const [activeTab, setActiveTab] = useState<'rushes' | 'generated' | 'sequences'>('rushes');
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
@@ -22,6 +45,7 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; media: RushMedia } | null>(null);
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [renameValue, setRenameValue] = useState('');
+    const [selectedBinId, setSelectedBinId] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const currentMedia = activeTab === 'rushes' ? rushes : generated;
@@ -29,10 +53,16 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
         ? currentMedia.filter(m => m.name.toLowerCase().includes(filter.toLowerCase()))
         : currentMedia;
 
+    const filteredBins = filter
+        ? bins.filter(b => b.name.toLowerCase().includes(filter.toLowerCase()))
+        : bins;
+
     // Handle file drop
     const handleDrop = useCallback(async (e: React.DragEvent) => {
         e.preventDefault();
         setIsDragging(false);
+
+        if (activeTab === 'sequences') return; // No upload in sequences tab
 
         const files = Array.from(e.dataTransfer.files).filter(
             f => f.type.startsWith('video/') || f.type.startsWith('image/')
@@ -44,7 +74,7 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
         setUploadProgress(0);
 
         for (let i = 0; i < files.length; i++) {
-            await uploadMedia(files[i], activeTab);
+            await uploadMedia(files[i], activeTab as 'rushes' | 'generated');
             setUploadProgress(((i + 1) / files.length) * 100);
         }
 
@@ -61,14 +91,13 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
         setUploadProgress(0);
 
         for (let i = 0; i < files.length; i++) {
-            await uploadMedia(files[i], activeTab);
+            await uploadMedia(files[i], activeTab as 'rushes' | 'generated');
             setUploadProgress(((i + 1) / files.length) * 100);
         }
 
         setIsUploading(false);
         setUploadProgress(0);
 
-        // Reset input
         if (fileInputRef.current) fileInputRef.current.value = '';
     }, [uploadMedia, activeTab]);
 
@@ -88,7 +117,7 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
 
     const submitRename = (media: RushMedia) => {
         if (renameValue.trim()) {
-            renameMedia(media.id, renameValue.trim(), activeTab);
+            renameMedia(media.id, renameValue.trim(), activeTab as 'rushes' | 'generated');
         }
         setRenamingId(null);
         setRenameValue('');
@@ -96,7 +125,7 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
 
     const handleDelete = (media: RushMedia) => {
         if (confirm(`Supprimer "${media.name}" ?`)) {
-            deleteMedia(media.id, activeTab);
+            deleteMedia(media.id, activeTab as 'rushes' | 'generated');
         }
         closeContextMenu();
     };
@@ -108,7 +137,35 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
         closeContextMenu();
     };
 
-    // Format duration
+    // Slot handlers
+    const handleSlotClick = (binId: string, slotId: string) => {
+        const slot = getSlotById(binId, slotId);
+        if (slot?.video) {
+            // Convert to RushMedia format for preview
+            const media: RushMedia = {
+                id: slotId,
+                name: `${slot.shotType} (${slot.duration}s)`,
+                type: 'video',
+                mimeType: 'video/mp4',
+                localUrl: slot.video.url,
+                thumbnail: slot.video.thumbnail,
+                durationSec: slot.duration,
+                sizeBytes: 0,
+                createdAt: slot.createdAt,
+            };
+            onMediaSelect?.(media);
+        }
+    };
+
+    const handleSlotGenerate = (binId: string, slotId: string) => {
+        onSlotGenerate?.(binId, slotId);
+    };
+
+    const handleSlotAddToTimeline = (binId: string, slotId: string) => {
+        onSlotAddToTimeline?.(binId, slotId);
+    };
+
+    // Format helpers
     const formatDuration = (sec?: number) => {
         if (!sec) return '';
         const m = Math.floor(sec / 60);
@@ -116,18 +173,21 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
         return `${m}:${s.toString().padStart(2, '0')}`;
     };
 
-    // Format file size
     const formatSize = (bytes: number) => {
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
         return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     };
+
+    // Calculate totals for badges
+    const totalBinsSlots = bins.reduce((sum, b) => sum + b.slots.length, 0);
+    const readyBinsSlots = bins.reduce((sum, b) => sum + b.readyCount, 0);
 
     return (
         <aside className="w-72 flex flex-col bg-[#161616] border-r border-[#3f3f46] shrink-0 z-20">
             {/* Header */}
             <div className="h-14 border-b border-[#3f3f46] flex items-center px-4 justify-between bg-[#1e1e1e]">
                 <h2 className="font-semibold text-sm text-gray-200">Bin Manager</h2>
-                <div className="flex gap-2">
+                {activeTab !== 'sequences' && (
                     <button
                         onClick={() => fileInputRef.current?.click()}
                         className="text-gray-400 hover:text-white transition-colors"
@@ -135,7 +195,7 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
                     >
                         <span className="material-symbols-outlined text-lg">cloud_upload</span>
                     </button>
-                </div>
+                )}
             </div>
 
             {/* Tabs & Filter */}
@@ -144,7 +204,7 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
                     <div className="flex bg-black/40 rounded p-0.5 border border-[#3f3f46]">
                         <button
                             onClick={() => setActiveTab('rushes')}
-                            className={`px-3 py-1 text-xs font-medium rounded-sm transition-colors ${activeTab === 'rushes'
+                            className={`px-2 py-1 text-[10px] font-medium rounded-sm transition-colors ${activeTab === 'rushes'
                                 ? 'bg-gray-700 text-white shadow-sm'
                                 : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
                                 }`}
@@ -153,27 +213,40 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
                         </button>
                         <button
                             onClick={() => setActiveTab('generated')}
-                            className={`px-3 py-1 text-xs font-medium rounded-sm transition-colors ${activeTab === 'generated'
+                            className={`px-2 py-1 text-[10px] font-medium rounded-sm transition-colors ${activeTab === 'generated'
                                 ? 'bg-gray-700 text-white shadow-sm'
                                 : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
                                 }`}
                         >
                             Générés ({generated.length})
                         </button>
+                        <button
+                            onClick={() => setActiveTab('sequences')}
+                            className={`px-2 py-1 text-[10px] font-medium rounded-sm transition-colors ${activeTab === 'sequences'
+                                ? 'bg-indigo-700 text-white shadow-sm'
+                                : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                                }`}
+                        >
+                            <span className="flex items-center gap-1">
+                                <span className="material-symbols-outlined text-xs">folder_special</span>
+                                Séq ({bins.length})
+                            </span>
+                        </button>
                     </div>
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-400 border border-gray-700 px-2 py-1 rounded hover:border-indigo-400 transition-colors"
-                    >
-                        <span>Import</span>
-                        <span className="material-symbols-outlined text-sm">add</span>
-                    </button>
+                    {activeTab !== 'sequences' && (
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-indigo-400 border border-gray-700 px-1.5 py-0.5 rounded hover:border-indigo-400 transition-colors"
+                        >
+                            <span className="material-symbols-outlined text-xs">add</span>
+                        </button>
+                    )}
                 </div>
                 <div className="relative">
                     <span className="absolute left-2 top-1.5 text-gray-500 material-symbols-outlined text-sm">search</span>
                     <input
                         className="w-full pl-8 pr-2 py-1.5 text-xs bg-black/40 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                        placeholder="Filter media..."
+                        placeholder={activeTab === 'sequences' ? "Filtrer séquences..." : "Filtrer média..."}
                         type="text"
                         value={filter}
                         onChange={(e) => setFilter(e.target.value)}
@@ -181,136 +254,190 @@ export const BinManager: React.FC<BinManagerProps> = ({ onMediaSelect, onAddToTi
                 </div>
             </div>
 
-            {/* Media Grid */}
+            {/* Content Area */}
             <div
-                className={`flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-3 content-start bg-[#121212] ${isDragging ? 'ring-2 ring-indigo-500 ring-inset' : ''
+                className={`flex-1 overflow-y-auto p-3 ${activeTab === 'sequences' ? 'space-y-2' : 'grid grid-cols-2 gap-3 content-start'} bg-[#121212] ${isDragging && activeTab !== 'sequences' ? 'ring-2 ring-indigo-500 ring-inset' : ''
                     }`}
-                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragOver={(e) => { e.preventDefault(); if (activeTab !== 'sequences') setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleDrop}
                 onClick={closeContextMenu}
             >
-                {/* Upload Zone */}
-                <div
-                    className={`col-span-2 border-2 border-dashed rounded-lg h-24 flex flex-col items-center justify-center transition-colors cursor-pointer mb-2 ${isDragging
-                        ? 'border-indigo-500 bg-indigo-900/20 text-indigo-300'
-                        : 'border-gray-800 text-gray-600 hover:border-gray-500 bg-gray-900/20'
-                        }`}
-                    onClick={() => fileInputRef.current?.click()}
-                >
-                    {isUploading ? (
-                        <>
-                            <div className="w-24 h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
-                                <div
-                                    className="h-full bg-indigo-500 transition-all duration-300"
-                                    style={{ width: `${uploadProgress}%` }}
-                                />
+                {/* === SEQUENCES TAB === */}
+                {activeTab === 'sequences' && (
+                    <>
+                        {/* Stats Bar */}
+                        {bins.length > 0 && (
+                            <div className="flex items-center justify-between bg-indigo-900/20 border border-indigo-600/30 rounded-lg p-2 mb-2">
+                                <div className="flex items-center gap-3 text-[10px]">
+                                    <span className="text-gray-400">
+                                        <span className="font-bold text-indigo-400">{bins.length}</span> séquence{bins.length > 1 ? 's' : ''}
+                                    </span>
+                                    <span className="text-gray-400">
+                                        <span className="font-bold text-green-400">{readyBinsSlots}</span>/{totalBinsSlots} plans prêts
+                                    </span>
+                                </div>
                             </div>
-                            <span className="text-[10px]">Upload {Math.round(uploadProgress)}%</span>
-                        </>
-                    ) : (
-                        <>
-                            <span className="material-symbols-outlined text-2xl mb-1">
-                                {isDragging ? 'file_download' : 'add_circle_outline'}
-                            </span>
-                            <span className="text-[10px]">
-                                {isDragging ? 'Déposez ici' : 'Glisser ou cliquer pour upload'}
-                            </span>
-                        </>
-                    )}
-                </div>
+                        )}
 
-                {/* Loading State */}
-                {isLoading && (
-                    <div className="col-span-2 text-center py-8">
-                        <span className="material-symbols-outlined text-3xl text-gray-600 animate-spin">refresh</span>
-                        <p className="text-xs text-gray-600 mt-2">Chargement...</p>
-                    </div>
-                )}
+                        {/* Empty State */}
+                        {filteredBins.length === 0 && (
+                            <div className="text-center py-12">
+                                <span className="material-symbols-outlined text-4xl text-gray-700 mb-3 block">folder_off</span>
+                                <p className="text-sm text-gray-500 mb-2">
+                                    {filter ? 'Aucune séquence trouvée' : 'Aucune séquence'}
+                                </p>
+                                <p className="text-xs text-gray-600 max-w-[200px] mx-auto">
+                                    Utilisez le mode "Découpage" dans l'onglet Conception pour créer une séquence
+                                </p>
+                            </div>
+                        )}
 
-                {/* Empty State */}
-                {!isLoading && filteredMedia.length === 0 && (
-                    <div className="col-span-2 text-center py-8">
-                        <span className="material-symbols-outlined text-3xl text-gray-700">folder_open</span>
-                        <p className="text-xs text-gray-600 mt-2">
-                            {filter ? 'Aucun résultat' : 'Aucun média'}
-                        </p>
-                    </div>
-                )}
-
-                {/* Media Items */}
-                {filteredMedia.map(media => (
-                    <div
-                        key={media.id}
-                        className="group relative aspect-video bg-gray-800 rounded overflow-hidden border border-transparent hover:border-indigo-500 cursor-pointer ring-1 ring-white/5"
-                        onClick={() => onMediaSelect?.(media)}
-                        onContextMenu={(e) => handleContextMenu(e, media)}
-                        onDoubleClick={() => handleAddToTimeline(media)}
-                        draggable
-                        onDragStart={(e) => {
-                            e.dataTransfer.setData('application/json', JSON.stringify(media));
-                            e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                    >
-                        {/* Thumbnail */}
-                        {media.thumbnail ? (
-                            <img
-                                src={media.thumbnail}
-                                alt={media.name}
-                                className="w-full h-full object-cover"
+                        {/* Sequence Bins List */}
+                        {filteredBins.map(bin => (
+                            <SequenceBinFolder
+                                key={bin.id}
+                                bin={bin}
+                                isSelected={selectedBinId === bin.id}
+                                onSelect={setSelectedBinId}
+                                onToggleExpand={toggleBinExpanded}
+                                onSlotClick={handleSlotClick}
+                                onSlotGenerate={handleSlotGenerate}
+                                onSlotAddToTimeline={handleSlotAddToTimeline}
+                                onGenerateAll={addAllPendingToQueue}
+                                onRename={renameBin}
+                                onDelete={deleteBin}
                             />
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-gray-900/50">
-                                <span className="material-symbols-outlined text-gray-700 text-3xl">
-                                    {media.type === 'video' ? 'movie' : 'image'}
-                                </span>
-                            </div>
-                        )}
+                        ))}
+                    </>
+                )}
 
-                        {/* Duration Badge (for videos) */}
-                        {media.type === 'video' && media.durationSec && (
-                            <div className="absolute top-1 right-1 text-[9px] bg-black/80 text-white px-1 py-0.5 rounded font-mono">
-                                {formatDuration(media.durationSec)}
-                            </div>
-                        )}
-
-                        {/* Type Badge */}
-                        <div className="absolute top-1 left-1">
-                            <span className={`material-symbols-outlined text-sm ${media.type === 'video' ? 'text-blue-400' : 'text-green-400'
-                                }`}>
-                                {media.type === 'video' ? 'videocam' : 'image'}
-                            </span>
-                        </div>
-
-                        {/* Name Overlay */}
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-1.5 pt-4">
-                            {renamingId === media.id ? (
-                                <input
-                                    type="text"
-                                    value={renameValue}
-                                    onChange={(e) => setRenameValue(e.target.value)}
-                                    onBlur={() => submitRename(media)}
-                                    onKeyDown={(e) => e.key === 'Enter' && submitRename(media)}
-                                    className="w-full text-[10px] bg-black/50 border border-indigo-500 rounded px-1 py-0.5 text-white focus:outline-none"
-                                    autoFocus
-                                />
+                {/* === RUSHES / GENERATED TABS === */}
+                {activeTab !== 'sequences' && (
+                    <>
+                        {/* Upload Zone */}
+                        <div
+                            className={`col-span-2 border-2 border-dashed rounded-lg h-24 flex flex-col items-center justify-center transition-colors cursor-pointer mb-2 ${isDragging
+                                ? 'border-indigo-500 bg-indigo-900/20 text-indigo-300'
+                                : 'border-gray-800 text-gray-600 hover:border-gray-500 bg-gray-900/20'
+                                }`}
+                            onClick={() => fileInputRef.current?.click()}
+                        >
+                            {isUploading ? (
+                                <>
+                                    <div className="w-24 h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
+                                        <div
+                                            className="h-full bg-indigo-500 transition-all duration-300"
+                                            style={{ width: `${uploadProgress}%` }}
+                                        />
+                                    </div>
+                                    <span className="text-[10px]">Upload {Math.round(uploadProgress)}%</span>
+                                </>
                             ) : (
-                                <p className="text-[10px] text-white truncate font-medium">{media.name}</p>
+                                <>
+                                    <span className="material-symbols-outlined text-2xl mb-1">
+                                        {isDragging ? 'file_download' : 'add_circle_outline'}
+                                    </span>
+                                    <span className="text-[10px]">
+                                        {isDragging ? 'Déposez ici' : 'Glisser ou cliquer pour upload'}
+                                    </span>
+                                </>
                             )}
                         </div>
 
-                        {/* Hover Actions */}
-                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <button
-                                onClick={(e) => { e.stopPropagation(); handleDelete(media); }}
-                                className="p-1.5 bg-red-600/80 rounded-full hover:bg-red-500 transition-colors"
-                                title="Supprimer"
+                        {/* Loading State */}
+                        {isLoading && (
+                            <div className="col-span-2 text-center py-8">
+                                <span className="material-symbols-outlined text-3xl text-gray-600 animate-spin">refresh</span>
+                                <p className="text-xs text-gray-600 mt-2">Chargement...</p>
+                            </div>
+                        )}
+
+                        {/* Empty State */}
+                        {!isLoading && filteredMedia.length === 0 && (
+                            <div className="col-span-2 text-center py-8">
+                                <span className="material-symbols-outlined text-3xl text-gray-700">folder_open</span>
+                                <p className="text-xs text-gray-600 mt-2">
+                                    {filter ? 'Aucun résultat' : 'Aucun média'}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Media Items */}
+                        {filteredMedia.map(media => (
+                            <div
+                                key={media.id}
+                                className="group relative aspect-video bg-gray-800 rounded overflow-hidden border border-transparent hover:border-indigo-500 cursor-pointer ring-1 ring-white/5"
+                                onClick={() => onMediaSelect?.(media)}
+                                onContextMenu={(e) => handleContextMenu(e, media)}
+                                onDoubleClick={() => handleAddToTimeline(media)}
+                                draggable
+                                onDragStart={(e) => {
+                                    e.dataTransfer.setData('application/json', JSON.stringify(media));
+                                    e.dataTransfer.effectAllowed = 'copy';
+                                }}
                             >
-                                <span className="material-symbols-outlined text-white text-sm">delete</span>
-                            </button>
-                        </div>
-                    </div>
-                ))}
+                                {/* Thumbnail */}
+                                {media.thumbnail ? (
+                                    <img
+                                        src={media.thumbnail}
+                                        alt={media.name}
+                                        className="w-full h-full object-cover"
+                                    />
+                                ) : (
+                                    <div className="w-full h-full flex items-center justify-center bg-gray-900/50">
+                                        <span className="material-symbols-outlined text-gray-700 text-3xl">
+                                            {media.type === 'video' ? 'movie' : 'image'}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Duration Badge */}
+                                {media.type === 'video' && media.durationSec && (
+                                    <div className="absolute top-1 right-1 text-[9px] bg-black/80 text-white px-1 py-0.5 rounded font-mono">
+                                        {formatDuration(media.durationSec)}
+                                    </div>
+                                )}
+
+                                {/* Type Badge */}
+                                <div className="absolute top-1 left-1">
+                                    <span className={`material-symbols-outlined text-sm ${media.type === 'video' ? 'text-blue-400' : 'text-green-400'
+                                        }`}>
+                                        {media.type === 'video' ? 'videocam' : 'image'}
+                                    </span>
+                                </div>
+
+                                {/* Name Overlay */}
+                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-1.5 pt-4">
+                                    {renamingId === media.id ? (
+                                        <input
+                                            type="text"
+                                            value={renameValue}
+                                            onChange={(e) => setRenameValue(e.target.value)}
+                                            onBlur={() => submitRename(media)}
+                                            onKeyDown={(e) => e.key === 'Enter' && submitRename(media)}
+                                            className="w-full text-[10px] bg-black/50 border border-indigo-500 rounded px-1 py-0.5 text-white focus:outline-none"
+                                            autoFocus
+                                        />
+                                    ) : (
+                                        <p className="text-[10px] text-white truncate font-medium">{media.name}</p>
+                                    )}
+                                </div>
+
+                                {/* Hover Actions */}
+                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleDelete(media); }}
+                                        className="p-1.5 bg-red-600/80 rounded-full hover:bg-red-500 transition-colors"
+                                        title="Supprimer"
+                                    >
+                                        <span className="material-symbols-outlined text-white text-sm">delete</span>
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </>
+                )}
             </div>
 
             {/* Hidden File Input */}

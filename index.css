@@ -1,3 +1,5 @@
+@import './styles/theme.css';
+
 /* Scrollbars - Enhanced visibility for better UX */
 ::-webkit-scrollbar {
   width: 10px;

@@ -8,12 +8,16 @@
  * Supports two modes:
  * - single-select: Click to apply one variant immediately
  * - ordered-select: Click to build ordered shot list with durations
+ * 
+ * NEW: "Créer le Bin" button to save découpage as a SequenceBin for later generation
  */
 import * as React from 'react';
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { Dogma, ImageFile, NanoApplyPayload, STANDARD_SHOT_LIST } from '../types';
 import { SparklesIcon, XMarkIcon, FilmIcon } from './icons';
 import { generateShotVariants } from '../services/nanoService';
+import { CreateSequenceBinInput } from '../types/bins';
+import CreateSequenceBinModal from './CreateSequenceBinModal';
 
 // === MOVEMENTS ===
 const CAMERA_MOVEMENTS = [
@@ -54,6 +58,7 @@ interface StoryboardPreviewModalProps {
   // === MODE SELECTION ===
   mode?: 'single-select' | 'ordered-select';
   onBuildTimeline?: (shots: OrderedShot[]) => void;
+  onCreateSequenceBin?: (input: CreateSequenceBinInput) => void;  // NEW: Create bin callback
   apiKey?: string;
 }
 
@@ -75,6 +80,7 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
   dogma,
   mode = 'single-select',
   onBuildTimeline,
+  onCreateSequenceBin,
   apiKey,
 }) => {
   const [variants, setVariants] = useState<VariantGridItem[]>([]);
@@ -85,6 +91,9 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
   const [selectedOrder, setSelectedOrder] = useState<string[]>([]);  // Array of shotTypes in selection order
   const [durations, setDurations] = useState<Record<string, number>>({});  // shotType -> duration in seconds
   const [cameraMovements, setCameraMovements] = useState<Record<string, string>>({});  // shotType -> movement
+
+  // === BIN CREATION STATE ===
+  const [showBinModal, setShowBinModal] = useState(false);
 
   // Derive target from segment index
   const target = segmentIndex === 0 ? 'root' : 'extension';
@@ -107,6 +116,28 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
     return selectedOrder.reduce((sum, shotType) => sum + (durations[shotType] || 3), 0);
   }, [selectedOrder, durations]);
 
+  // Build shots array for bin creation
+  const buildShotsArray = useCallback(() => {
+    return selectedOrder.map((shotType) => {
+      const variant = variants.find(v => v.shotType === shotType);
+      const movement = cameraMovements[shotType] || 'Static (Fixe)';
+      const cleanMovement = movement.split(' (')[0];
+
+      let finalPrompt = variant?.prompt || currentPrompt;
+      if (movement && movement !== 'Static (Fixe)') {
+        finalPrompt += `, camera movement: ${cleanMovement}`;
+      }
+
+      return {
+        shotType,
+        prompt: finalPrompt,
+        duration: durations[shotType] || 3,
+        cameraMovement: movement,
+        keyframe: variant?.image || undefined,
+      };
+    });
+  }, [selectedOrder, variants, currentPrompt, durations, cameraMovements]);
+
   // Initialize grid with empty slots
   useEffect(() => {
     if (isOpen) {
@@ -122,6 +153,7 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
       setSelectedOrder([]);
       setDurations({});
       setCameraMovements({});
+      setShowBinModal(false);
     }
   }, [isOpen]);
 
@@ -143,7 +175,6 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
 
       // Update variants with results
       setVariants(prev => prev.map(v => {
-        // Find result matching this shot type by label
         const result = results.variants.find(r => r.label === v.shotType);
         if (result) {
           return {
@@ -183,16 +214,14 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
       // Ordered-select: toggle in selection order
       setSelectedOrder(prev => {
         if (prev.includes(variant.shotType)) {
-          // Remove from selection
           return prev.filter(s => s !== variant.shotType);
         } else {
-          // Add to selection
           return [...prev, variant.shotType];
         }
       });
       // Initialize duration if not set
       if (!durations[variant.shotType]) {
-        setDurations(prev => ({ ...prev, [variant.shotType]: 3 }));  // Default 3s
+        setDurations(prev => ({ ...prev, [variant.shotType]: 3 }));
       }
       // Initialize movement if not set
       if (!cameraMovements[variant.shotType]) {
@@ -201,16 +230,14 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
     }
   }, [mode, target, segmentIndex, currentPrompt, onApplyVariant, onClose, durations, cameraMovements]);
 
-  // Build timeline from ordered shots
+  // Build timeline from ordered shots (legacy behavior)
   const handleBuildTimeline = useCallback(() => {
     if (!onBuildTimeline || selectedOrder.length === 0) return;
 
     const orderedShots: OrderedShot[] = selectedOrder.map((shotType, idx) => {
       const variant = variants.find(v => v.shotType === shotType);
-
-      // OPTION C: Append movement to prompt if selected
       const movement = cameraMovements[shotType] || 'Static (Fixe)';
-      const cleanMovement = movement.split(' (')[0]; // Remove french/description
+      const cleanMovement = movement.split(' (')[0];
 
       let finalPrompt = variant?.prompt || currentPrompt;
       if (movement && movement !== 'Static (Fixe)') {
@@ -232,6 +259,20 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
     onClose();
   }, [selectedOrder, variants, baseImage, currentPrompt, durations, cameraMovements, totalDuration, onBuildTimeline, onClose]);
 
+  // Open bin creation modal
+  const handleOpenBinModal = useCallback(() => {
+    if (selectedOrder.length === 0) return;
+    setShowBinModal(true);
+  }, [selectedOrder]);
+
+  // Create bin from modal confirmation
+  const handleConfirmBinCreation = useCallback((input: CreateSequenceBinInput) => {
+    console.log('[StoryboardPreview] Creating sequence bin:', { name: input.name, shotCount: input.shots.length });
+    onCreateSequenceBin?.(input);
+    setShowBinModal(false);
+    onClose();
+  }, [onCreateSequenceBin, onClose]);
+
   // Get order badge for a shot type
   const getOrderBadge = (shotType: string): number | null => {
     const idx = selectedOrder.indexOf(shotType);
@@ -241,201 +282,229 @@ const StoryboardPreviewModal: React.FC<StoryboardPreviewModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-[90vw] max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <div className="flex items-center gap-3">
-            <SparklesIcon className="w-6 h-6 text-orange-400" />
-            <div>
-              <h2 className="text-xl font-bold text-white">
-                {mode === 'ordered-select' ? 'Mode Découpage' : 'Couverture de Plans'}
-              </h2>
-              <p className="text-sm text-gray-400">
-                {mode === 'ordered-select'
-                  ? `Cliquez pour ordonner • ${selectedOrder.length} plans sélectionnés`
-                  : `${segmentIndex === 0 ? 'Root' : `Extension ${segmentIndex}`} — 12 variantes de cadrage`
-                }
-              </p>
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-[90vw] max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between p-4 border-b border-gray-700">
+            <div className="flex items-center gap-3">
+              <SparklesIcon className="w-6 h-6 text-orange-400" />
+              <div>
+                <h2 className="text-xl font-bold text-white">
+                  {mode === 'ordered-select' ? 'Mode Découpage' : 'Couverture de Plans'}
+                </h2>
+                <p className="text-sm text-gray-400">
+                  {mode === 'ordered-select'
+                    ? `Cliquez pour ordonner • ${selectedOrder.length} plans sélectionnés`
+                    : `${segmentIndex === 0 ? 'Root' : `Extension ${segmentIndex}`} — 12 variantes de cadrage`
+                  }
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleGenerateAll}
+                disabled={isGenerating}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait"
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-t-transparent border-white rounded-full animate-spin" />
+                    Génération...
+                  </>
+                ) : (
+                  <>
+                    <SparklesIcon className="w-4 h-4" />
+                    Générer 12 Plans
+                  </>
+                )}
+              </button>
+              <button
+                onClick={onClose}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleGenerateAll}
-              disabled={isGenerating}
-              className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait"
-            >
-              {isGenerating ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-t-transparent border-white rounded-full animate-spin" />
-                  Génération...
-                </>
-              ) : (
-                <>
-                  <SparklesIcon className="w-4 h-4" />
-                  Générer 12 Plans
-                </>
-              )}
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <XMarkIcon className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
 
-        {/* Error Banner */}
-        {globalError && (
-          <div className="mx-4 mt-4 p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
-            {globalError}
-          </div>
-        )}
+          {/* Error Banner */}
+          {globalError && (
+            <div className="mx-4 mt-4 p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
+              {globalError}
+            </div>
+          )}
 
-        {/* Grid */}
-        <div className="flex-grow overflow-y-auto p-4">
-          <div className="grid grid-cols-4 gap-4">
-            {variants.map((variant) => {
-              const orderBadge = getOrderBadge(variant.shotType);
-              const isSelected = orderBadge !== null;
+          {/* Grid */}
+          <div className="flex-grow overflow-y-auto p-4">
+            <div className="grid grid-cols-4 gap-4">
+              {variants.map((variant) => {
+                const orderBadge = getOrderBadge(variant.shotType);
+                const isSelected = orderBadge !== null;
 
-              return (
-                <div
-                  key={variant.shotType}
-                  className={`bg-gray-800 rounded-xl border overflow-hidden group transition-all cursor-pointer
-                    ${isSelected
-                      ? 'border-green-500 ring-2 ring-green-500/30'
-                      : 'border-gray-700 hover:border-orange-500/50'
-                    }`}
-                  onClick={() => handleVariantClick(variant)}
-                >
-                  {/* Image / Placeholder */}
-                  <div className="aspect-video relative bg-gray-900">
-                    {variant.isLoading ? (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-8 h-8 border-3 border-t-transparent border-orange-500 rounded-full animate-spin" />
-                      </div>
-                    ) : variant.image ? (
-                      <>
-                        <img
-                          src={`data:image/jpeg;base64,${variant.image.base64}`}
-                          alt={variant.shotType}
-                          className="w-full h-full object-cover"
-                        />
-                        {/* Order Badge (ordered-select mode) */}
-                        {mode === 'ordered-select' && isSelected && (
-                          <div className="absolute top-2 left-2 w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg">
-                            {orderBadge}
-                          </div>
-                        )}
-                        {/* Single-select hover action */}
-                        {mode === 'single-select' && (
-                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <span className="px-3 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg shadow-lg">
-                              Utiliser ce plan
-                            </span>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-xs">
-                        Non généré
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Label + Duration + Movement Input */}
-                  <div className="p-2 space-y-2">
-                    <div className="flex items-center justify-between gap-1">
-                      <div className="text-xs font-semibold text-gray-300 truncate" title={variant.shotType}>
-                        {variant.shotType}
-                      </div>
-
-                      {/* Duration input (ordered-select mode, when selected) */}
-                      {mode === 'ordered-select' && isSelected && (
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <input
-                            type="number"
-                            min="1"
-                            max="30"
-                            value={durations[variant.shotType] || 3}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              setDurations(prev => ({
-                                ...prev,
-                                [variant.shotType]: Math.max(1, Math.min(30, parseInt(e.target.value) || 3)),
-                              }));
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-10 px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white text-center"
+                return (
+                  <div
+                    key={variant.shotType}
+                    className={`bg-gray-800 rounded-xl border overflow-hidden group transition-all cursor-pointer
+                      ${isSelected
+                        ? 'border-green-500 ring-2 ring-green-500/30'
+                        : 'border-gray-700 hover:border-orange-500/50'
+                      }`}
+                    onClick={() => handleVariantClick(variant)}
+                  >
+                    {/* Image / Placeholder */}
+                    <div className="aspect-video relative bg-gray-900">
+                      {variant.isLoading ? (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="w-8 h-8 border-3 border-t-transparent border-orange-500 rounded-full animate-spin" />
+                        </div>
+                      ) : variant.image ? (
+                        <>
+                          <img
+                            src={`data:image/jpeg;base64,${variant.image.base64}`}
+                            alt={variant.shotType}
+                            className="w-full h-full object-cover"
                           />
-                          <span className="text-[10px] text-gray-500">s</span>
+                          {/* Order Badge (ordered-select mode) */}
+                          {mode === 'ordered-select' && isSelected && (
+                            <div className="absolute top-2 left-2 w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg">
+                              {orderBadge}
+                            </div>
+                          )}
+                          {/* Single-select hover action */}
+                          {mode === 'single-select' && (
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <span className="px-3 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg shadow-lg">
+                                Utiliser ce plan
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-xs">
+                          Non généré
                         </div>
                       )}
                     </div>
 
-                    {/* OPTION C: Camera Movement Selector */}
-                    {mode === 'ordered-select' && isSelected && (
-                      <select
-                        value={cameraMovements[variant.shotType] || 'Static (Fixe)'}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          setCameraMovements(prev => ({
-                            ...prev,
-                            [variant.shotType]: e.target.value
-                          }));
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full text-[10px] bg-gray-900 border border-gray-600 rounded px-1 py-0.5 text-gray-300 focus:border-green-500 outline-none"
-                      >
-                        {CAMERA_MOVEMENTS.map(mov => (
-                          <option key={mov} value={mov}>{mov}</option>
-                        ))}
-                      </select>
-                    )}
+                    {/* Label + Duration + Movement Input */}
+                    <div className="p-2 space-y-2">
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="text-xs font-semibold text-gray-300 truncate" title={variant.shotType}>
+                          {variant.shotType}
+                        </div>
 
-                    {/* Timecode (ordered-select mode) */}
-                    {mode === 'ordered-select' && isSelected && (
-                      <div className="text-[10px] text-green-400">
-                        @ {timecodes[variant.shotType]}
+                        {/* Duration input (ordered-select mode, when selected) */}
+                        {mode === 'ordered-select' && isSelected && (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <input
+                              type="number"
+                              min="1"
+                              max="30"
+                              value={durations[variant.shotType] || 3}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                setDurations(prev => ({
+                                  ...prev,
+                                  [variant.shotType]: Math.max(1, Math.min(30, parseInt(e.target.value) || 3)),
+                                }));
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-10 px-1 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-white text-center"
+                            />
+                            <span className="text-[10px] text-gray-500">s</span>
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {variant.error && (
-                      <div className="text-[10px] text-red-400">{variant.error}</div>
-                    )}
+
+                      {/* OPTION C: Camera Movement Selector */}
+                      {mode === 'ordered-select' && isSelected && (
+                        <select
+                          value={cameraMovements[variant.shotType] || 'Static (Fixe)'}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            setCameraMovements(prev => ({
+                              ...prev,
+                              [variant.shotType]: e.target.value
+                            }));
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full text-[10px] bg-gray-900 border border-gray-600 rounded px-1 py-0.5 text-gray-300 focus:border-green-500 outline-none"
+                        >
+                          {CAMERA_MOVEMENTS.map(mov => (
+                            <option key={mov} value={mov}>{mov}</option>
+                          ))}
+                        </select>
+                      )}
+
+                      {/* Timecode (ordered-select mode) */}
+                      {mode === 'ordered-select' && isSelected && (
+                        <div className="text-[10px] text-green-400">
+                          @ {timecodes[variant.shotType]}
+                        </div>
+                      )}
+                      {variant.error && (
+                        <div className="text-[10px] text-red-400">{variant.error}</div>
+                      )}
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="p-4 border-t border-gray-700">
+            {mode === 'ordered-select' ? (
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-400">
+                  <span className="font-bold text-white">{selectedOrder.length}</span> plans •{' '}
+                  <span className="font-bold text-green-400">{totalDuration}s</span> total
                 </div>
-              );
-            })}
+                <div className="flex items-center gap-3">
+                  {/* NEW: Create Bin Button */}
+                  {onCreateSequenceBin && (
+                    <button
+                      onClick={handleOpenBinModal}
+                      disabled={selectedOrder.length === 0}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span className="material-symbols-outlined text-lg">create_new_folder</span>
+                      Créer le Bin
+                    </button>
+                  )}
+                  {/* Legacy: Build Timeline Button */}
+                  {onBuildTimeline && (
+                    <button
+                      onClick={handleBuildTimeline}
+                      disabled={selectedOrder.length === 0}
+                      className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <FilmIcon className="w-4 h-4" />
+                      Timeline directe
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center text-xs text-gray-500">
+                Cliquez sur une vignette pour l'appliquer au segment courant
+              </div>
+            )}
           </div>
         </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-700">
-          {mode === 'ordered-select' ? (
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-gray-400">
-                <span className="font-bold text-white">{selectedOrder.length}</span> plans •{' '}
-                <span className="font-bold text-green-400">{totalDuration}s</span> total
-              </div>
-              <button
-                onClick={handleBuildTimeline}
-                disabled={selectedOrder.length === 0}
-                className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <FilmIcon className="w-4 h-4" />
-                Construire la Timeline
-              </button>
-            </div>
-          ) : (
-            <div className="text-center text-xs text-gray-500">
-              Cliquez sur une vignette pour l'appliquer au segment courant
-            </div>
-          )}
-        </div>
       </div>
-    </div>
+
+      {/* Bin Creation Modal */}
+      <CreateSequenceBinModal
+        isOpen={showBinModal}
+        onClose={() => setShowBinModal(false)}
+        onConfirm={handleConfirmBinCreation}
+        shots={buildShotsArray()}
+        dogma={dogma}
+        rootPrompt={currentPrompt}
+      />
+    </>
   );
 };
 

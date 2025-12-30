@@ -5,16 +5,15 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { KeyIcon, Trash2Icon, ShieldCheckIcon, ExternalLinkIcon } from './icons';
-// Removed storage imports for Strict BYOK
 
 import { setGeminiKey, clearGeminiKey } from '../utils/runtimeKeys';
+import { ThemeSwitcher } from './ThemeSwitcher';
 
 interface ApiKeyDialogProps {
   onSetKey: (key: string) => void;
   onClearKey: () => void;
   onClose: () => void;
   hasCustomKey: boolean;
-  providerToken?: string | null;
   errorMessage?: string;
 }
 
@@ -23,18 +22,10 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
   onClearKey,
   onClose,
   hasCustomKey,
-  providerToken,
   errorMessage
 }) => {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [error, setError] = useState<string | null>(null);
-
-  // Vertex AI State
-  const [vertexProjectId, setVertexProjectId] = useState(window.localStorage.getItem('vertex_project_id') || '');
-  const [vertexLocation, setVertexLocation] = useState(window.localStorage.getItem('vertex_location') || 'us-central1');
-  // P0.7: vertex_token is now memory-only (session-scoped, NOT persisted)
-  const [vertexToken, setVertexToken] = useState('');
-  const [showVertexConfig, setShowVertexConfig] = useState(false);
 
   // Show parent error message if provided
   useEffect(() => {
@@ -42,13 +33,6 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
       setError(errorMessage);
     }
   }, [errorMessage]);
-
-  // Auto-fill token if available from Google Login
-  useEffect(() => {
-    if (providerToken) {
-      setVertexToken(providerToken);
-    }
-  }, [providerToken]);
 
   const validateKey = (key: string): boolean => {
     // Basic validation: Gemini keys start with "AIzaSy" and are ~39 chars
@@ -67,22 +51,13 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
   const handleSave = () => {
     const trimmedKey = apiKeyInput.trim();
 
-    // Save Vertex Config if provided
-    if (vertexProjectId) window.localStorage.setItem('vertex_project_id', vertexProjectId.trim());
-    if (vertexLocation) window.localStorage.setItem('vertex_location', vertexLocation.trim());
-
-    // Prioritize providerToken if available, otherwise use manual input
-    // P0.7: Do NOT store vertex_token in localStorage (security risk)
-    // Token is memory-only, used only for current session if Google Login provides it
-
     if (trimmedKey) {
       if (validateKey(trimmedKey)) {
-        // Preview MVP: Persist key if in preview
         setGeminiKey(trimmedKey);
         onSetKey(trimmedKey);
       }
     } else if (hasCustomKey) {
-      // If user clicks save but field is empty, and they ALREADY have a key, just close dialog (no change)
+      // If user clicks save but field is empty, and they ALREADY have a key, just close dialog
       onClose();
     } else {
       setError('Please enter an API Key to continue.');
@@ -90,17 +65,8 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
   };
 
   const handleRemove = () => {
-    // BYOK Strict: Signal removal to parent (clears React State)
-    window.localStorage.removeItem('vertex_project_id');
-    window.localStorage.removeItem('vertex_location');
-    window.localStorage.removeItem('vertex_token');
-
-    // Preview MVP: Clear from storage
     clearGeminiKey();
-
     setApiKeyInput('');
-    setVertexProjectId('');
-    setVertexToken('');
     onClearKey();
   };
 
@@ -152,7 +118,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
           </div>
         )}
 
-        <div className="w-full mb-2 space-y-2">
+        <div className="w-full mb-4 space-y-2">
           <label className="text-xs font-medium text-gray-500 ml-1">Your Gemini API Key</label>
           <input
             type="password"
@@ -168,85 +134,15 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
           />
         </div>
 
-        {/* VERTEX AI CONFIGURATION (OPTIONAL) */}
+        {/* THEME / APPARENCE */}
         <div className="w-full mb-4 border-t border-gray-800 pt-4">
-          <button
-            onClick={() => setShowVertexConfig(!showVertexConfig)}
-            className="flex items-center gap-2 text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors mb-3"
-          >
-            {showVertexConfig ? '▼' : '▶'} Configure Vertex AI (Optional)
-          </button>
-
-          {showVertexConfig && (
-            <div className="space-y-4 bg-gray-800/30 p-4 rounded-lg border border-gray-700/50">
-              {/* Project ID Section */}
-              <div>
-                <div className="flex justify-between items-baseline mb-1">
-                  <label className="text-xs font-semibold text-gray-300">Google Cloud Project ID</label>
-                  <a
-                    href="https://console.cloud.google.com/welcome"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 hover:underline"
-                  >
-                    Find in Console <ExternalLinkIcon className="w-3 h-3" />
-                  </a>
-                </div>
-                <input
-                  type="text"
-                  value={vertexProjectId}
-                  onChange={(e) => setVertexProjectId(e.target.value)}
-                  placeholder="e.g. jenial-studio-123456"
-                  className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none placeholder-gray-600"
-                />
-                <p className="text-[10px] text-gray-500 mt-1">
-                  ⚠️ Copy the <strong>ID</strong> (often has numbers), not the Name.
-                </p>
-              </div>
-
-              {/* Location & Token Section */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">Location</label>
-                  <input
-                    type="text"
-                    value={vertexLocation}
-                    onChange={(e) => setVertexLocation(e.target.value)}
-                    placeholder="us-central1"
-                    className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none placeholder-gray-600"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">
-                    Access Token
-                    {!providerToken && (
-                      <span className="text-[10px] font-normal text-gray-500 ml-1">(Optional for manual)</span>
-                    )}
-                  </label>
-                  {providerToken ? (
-                    <div className="w-full bg-green-900/20 border border-green-500/30 rounded p-2 text-green-400 text-xs flex items-center gap-2 h-[34px]">
-                      <ShieldCheckIcon className="w-3 h-3 flex-shrink-0" />
-                      <span className="truncate">Auto-connected</span>
-                    </div>
-                  ) : (
-                    <input
-                      type="password"
-                      value={vertexToken}
-                      onChange={(e) => setVertexToken(e.target.value)}
-                      placeholder="OAuth 2.0 Token"
-                      className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-xs focus:border-indigo-500 outline-none placeholder-gray-600"
-                    />
-                  )}
-                </div>
-              </div>
-
-              {!providerToken && (
-                <div className="text-[10px] text-gray-500 bg-gray-800/50 p-2 rounded border border-gray-700">
-                  <span className="font-semibold text-indigo-400">Beta Testers:</span> If you don't have a token, you can leave it blank if using API Key only, or sign in again to auto-connect.
-                </div>
-              )}
-            </div>
-          )}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-medium text-gray-400 flex items-center gap-2">
+              <span className="material-symbols-outlined text-sm">palette</span>
+              Apparence
+            </span>
+          </div>
+          <ThemeSwitcher variant="compact" />
         </div>
 
         {error && (
@@ -267,7 +163,7 @@ const ApiKeyDialog: React.FC<ApiKeyDialogProps> = ({
           )}
           <button
             onClick={handleSave}
-            disabled={!apiKeyInput.trim() && !hasCustomKey} // Allow saving if custom key exists (for Vertex updates)
+            disabled={!apiKeyInput.trim() && !hasCustomKey}
             className="flex-1 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all shadow-lg shadow-indigo-900/20"
           >
             {hasCustomKey ? 'Update Key' : '🚀 Start Creating'}

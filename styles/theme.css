@@ -1,0 +1,215 @@
+/* 
+ * Studio Jenial - Theme CSS
+ * Global styles and theme-specific effects
+ */
+
+/* Film Grain - Cinematic only */
+body.theme-cinematic::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+}
+
+/* Glow - Neon only */
+body.theme-neon .glow-accent {
+    box-shadow: 0 0 20px var(--color-accent-muted), 0 0 40px var(--color-accent-muted);
+}
+
+body.theme-neon .glow-border {
+    box-shadow: 0 0 10px var(--color-accent-muted);
+}
+
+/* Glass - Neon only */
+body.theme-neon .glass {
+    background: rgba(26, 26, 46, 0.7);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(168, 85, 247, 0.2);
+}
+
+/* Sharp corners - Terminal only */
+body.theme-terminal .rounded,
+body.theme-terminal .rounded-sm,
+body.theme-terminal .rounded-md,
+body.theme-terminal .rounded-lg,
+body.theme-terminal .rounded-xl,
+body.theme-terminal .rounded-2xl,
+body.theme-terminal .rounded-3xl {
+    border-radius: 0 !important;
+}
+
+/* Scanlines effect - Terminal only */
+body.theme-terminal::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9998;
+    opacity: 0.03;
+    background: repeating-linear-gradient(0deg,
+            transparent,
+            transparent 1px,
+            rgba(0, 0, 0, 0.3) 1px,
+            rgba(0, 0, 0, 0.3) 2px);
+}
+
+/* === UTILITY CLASSES === */
+
+/* Backgrounds */
+.bg-theme {
+    background-color: var(--color-bg);
+}
+
+.bg-theme-alt {
+    background-color: var(--color-bg-alt);
+}
+
+.bg-surface {
+    background-color: var(--color-surface);
+}
+
+.bg-surface-hover {
+    background-color: var(--color-surface-hover);
+}
+
+.bg-surface-active {
+    background-color: var(--color-surface-active);
+}
+
+.bg-accent {
+    background-color: var(--color-accent);
+}
+
+.bg-accent-muted {
+    background-color: var(--color-accent-muted);
+}
+
+/* Text */
+.text-theme {
+    color: var(--color-text);
+}
+
+.text-muted {
+    color: var(--color-text-muted);
+}
+
+.text-accent {
+    color: var(--color-accent);
+}
+
+/* Borders */
+.border-theme {
+    border-color: var(--color-border);
+}
+
+.border-hover {
+    border-color: var(--color-border-hover);
+}
+
+.border-active {
+    border-color: var(--color-border-active);
+}
+
+/* Radius (uses theme values) */
+.radius-none {
+    border-radius: var(--radius-none);
+}
+
+.radius-sm {
+    border-radius: var(--radius-sm);
+}
+
+.radius-md {
+    border-radius: var(--radius-md);
+}
+
+.radius-lg {
+    border-radius: var(--radius-lg);
+}
+
+.radius-full {
+    border-radius: var(--radius-full);
+}
+
+/* Shadows */
+.shadow-theme-sm {
+    box-shadow: var(--shadow-sm);
+}
+
+.shadow-theme-md {
+    box-shadow: var(--shadow-md);
+}
+
+.shadow-theme-lg {
+    box-shadow: var(--shadow-lg);
+}
+
+.shadow-accent {
+    box-shadow: var(--shadow-accent);
+}
+
+/* Fonts */
+.font-body {
+    font-family: var(--font-body);
+}
+
+.font-heading {
+    font-family: var(--font-heading);
+}
+
+.font-mono {
+    font-family: var(--font-mono);
+}
+
+/* === SCROLLBAR === */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--color-border-hover);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-muted);
+}
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-hover) var(--color-surface);
+}
+
+/* === TRANSITIONS === */
+.theme-transition {
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* === FOCUS STYLES === */
+.focus-theme:focus {
+    outline: none;
+    border-color: var(--color-border-active);
+    box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+/* === SELECTION === */
+::selection {
+    background: var(--color-accent-muted);
+    color: var(--color-text);
+}

@@ -33,9 +33,13 @@ import { SourceViewer } from './components/SourceViewer';
 import { TimelinePreview } from './components/TimelinePreview';
 import VideoResult from './components/VideoResult';
 import VisualContextViewer from './components/VisualContextViewer';
+import { ThemeSwitcher } from './components/ThemeSwitcher';
+import { useTheme } from './contexts/ThemeContext';
 import useLocalStorage from './hooks/useLocalStorage';
 import { useShotLibrary } from './hooks/useShotLibrary';
+import { useSequenceBins } from './hooks/useSequenceBins';
 import { useSessionPersistence } from './hooks/useSessionPersistence'; // New // New Hook
+import { CreateSequenceBinInput } from './types/bins';
 import {
   generateVideo,
   reviseFollowingPrompts,
@@ -50,6 +54,7 @@ import { useAuth } from './contexts/AuthContext';
 import {
   AppState,
   AppStage,
+  AspectRatio,
   Character,
   Dogma,
   GenerateVideoParams,
@@ -59,6 +64,7 @@ import {
   NanoEditorContext,
   PromptSequence,
   PromptSequenceStatus,
+  Resolution,
   SavedShot,
   SequenceProgress,
   SequenceVideoData,
@@ -379,6 +385,9 @@ const PromptConception: React.FC<{
   };
 
 const Studio: React.FC = () => {
+  // === THEME ===
+  const { theme, themeId } = useTheme();
+
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [currentStage, setCurrentStage] = useState<AppStage>(AppStage.PROMPTING);
   const [activeTab, setActiveTab] = useState<'conception' | 'editing' | 'export'>('conception');
@@ -386,6 +395,7 @@ const Studio: React.FC = () => {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [showThemeModal, setShowThemeModal] = useState(false);
 
   const [lastConfig, setLastConfig] = useState<GenerateVideoParams | null>(
     null,
@@ -421,6 +431,8 @@ const Studio: React.FC = () => {
   const [storyboardModalContext, setStoryboardModalContext] = useState<{
     segmentIndex: number;
     baseImage: ImageFile;
+    currentPrompt: string;
+    mode: 'single-select' | 'ordered-select';
   } | null>(null);
   const [originalVideoForExtension, setOriginalVideoForExtension] =
     useState<VideoFile | null>(null);
@@ -505,6 +517,17 @@ const Studio: React.FC = () => {
   const [sequenceMode, setSequenceMode] = useState<SequenceMode>('plan-sequence');
   // P0: Lift messages for persistence
   const [assistantMessages, setAssistantMessages] = useState<any[]>([]);
+
+  // === SEQUENCE BINS (Découpage workflow) ===
+  const {
+    bins,
+    createBin,
+    fillSlotWithVideo,
+    setSlotStatus,
+    getBinById,
+    getSlotById,
+  } = useSequenceBins();
+
 
   // === SESSION PERSISTENCE ===
   const {
@@ -880,6 +903,20 @@ const Studio: React.FC = () => {
       };
     });
   }, []);
+
+  // === SEQUENCE BIN HANDLERS (TODO: Re-enable when types align) ===
+  // These handlers are temporarily disabled due to generateVideo return type changes
+  // and SegmentWithUI interface mismatches. The bin system is integrated but these
+  // specific handlers need updating.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleSlotGenerate = async (_binId: string, _slotId: string) => {
+    console.log('[Slot] Generation handler pending type alignment');
+  };
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleSlotAddToTimeline = (_binId: string, _slotId: string) => {
+    console.log('[Slot] Add to timeline handler pending type alignment');
+  };
+
 
   // === KEYBOARD SHORTCUTS (NLE) ===
   const FPS = 30; // Project FPS
@@ -1706,6 +1743,8 @@ const Studio: React.FC = () => {
         setStoryboardModalContext({
           segmentIndex: 0,
           baseImage: storyboardByIndex[0].previewImage,
+          currentPrompt: storyboardByIndex[0].previewPrompt || '',
+          mode: 'ordered-select', // Découpage mode uses ordered selection
         });
       }
     } else {
@@ -2888,6 +2927,98 @@ const Studio: React.FC = () => {
             setIsShotLibraryOpen(false);
           }}
         />
+      )}
+
+      {/* STORYBOARD PREVIEW MODAL (12 Grid Shots) */}
+      {storyboardModalContext && (
+        <StoryboardPreviewModal
+          isOpen={true}
+          onClose={() => setStoryboardModalContext(null)}
+          onApplyVariant={(payload: NanoApplyPayload) => {
+            // Apply single variant to storyboard
+            if (payload.previewImage) {
+              setStoryboardByIndex(prev => ({
+                ...prev,
+                [storyboardModalContext.segmentIndex]: {
+                  id: crypto.randomUUID(),
+                  owner: 'root',
+                  segmentIndex: storyboardModalContext.segmentIndex,
+                  previewImage: payload.previewImage,
+                  previewPrompt: payload.previewPrompt || storyboardModalContext.currentPrompt,
+                  cameraNotes: payload.cameraNotes,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                }
+              }));
+            }
+            setStoryboardModalContext(null);
+          }}
+          segmentIndex={storyboardModalContext.segmentIndex}
+          baseImage={storyboardModalContext.baseImage}
+          currentPrompt={storyboardModalContext.currentPrompt}
+          dogma={sequenceBoundDogma ?? activeDogma}
+          mode={storyboardModalContext.mode}
+          onBuildTimeline={(shots) => {
+            // Create a sequence bin from ordered shots
+            const binInput: CreateSequenceBinInput = {
+              name: `Découpage - ${new Date().toLocaleTimeString()}`,
+              dogma: sequenceBoundDogma ?? activeDogma,
+              rootPrompt: storyboardModalContext.currentPrompt,
+              shots: shots.map(shot => ({
+                shotType: shot.shotType,
+                prompt: shot.prompt,
+                duration: shot.duration,
+                cameraMovement: shot.cameraMovement,
+                keyframe: shot.image,
+              })),
+            };
+            const newBin = createBin(binInput);
+            console.log('[Studio] Created sequence bin:', newBin.name);
+            setStoryboardModalContext(null);
+          }}
+          apiKey={apiKey || undefined}
+        />
+      )}
+
+      {/* PROMPT EDITOR MODAL (Revision Chat) */}
+      {editingPromptDetails && (
+        <PromptEditorModal
+          originalPrompt={editingPromptDetails.prompt}
+          visualContextBase64={editingPromptDetails.thumbnail}
+          onClose={() => setEditingPromptDetails(null)}
+          onConfirm={(newPrompt: string) => {
+            if (promptSequence && editingPromptDetails) {
+              const updated = { ...promptSequence };
+              if (editingPromptDetails.index === 0) {
+                updated.mainPrompt = newPrompt;
+              } else if (updated.extensionPrompts?.[editingPromptDetails.index - 1] !== undefined) {
+                updated.extensionPrompts[editingPromptDetails.index - 1] = newPrompt;
+              }
+              setPromptSequence(updated);
+            }
+            setEditingPromptDetails(null);
+          }}
+          dogma={sequenceBoundDogma ?? activeDogma}
+          onOpenNanoEditor={() => {
+            // Open Nano editor with current context
+            if (editingPromptDetails) {
+              const keyframe = storyboardByIndex[editingPromptDetails.index];
+              if (keyframe) {
+                openNanoEditor({
+                  segmentIndex: editingPromptDetails.index,
+                  baseImage: keyframe.previewImage,
+                  initialPrompt: editingPromptDetails.prompt,
+                });
+              }
+            }
+            setEditingPromptDetails(null);
+          }}
+        />
+      )}
+
+      {/* THEME MODAL */}
+      {showThemeModal && (
+        <ThemeSwitcher variant="full" onClose={() => setShowThemeModal(false)} />
       )}
 
     </ErrorBoundary>
