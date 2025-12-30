@@ -14,6 +14,7 @@ export type RevisionStatus = 'draft' | 'queued' | 'running' | 'succeeded' | 'fai
 
 // === TIMELINE SETTINGS ===
 export type FPS = 24 | 25 | 30;
+export const DEFAULT_FPS = 25;
 export type AspectRatio = '16:9' | '9:16' | '1:1';
 
 // === ASSET ===
@@ -115,6 +116,7 @@ export interface Segment {
     updatedAt: string;
     // Media source (for rush imports)
     mediaKind?: MediaKind;
+    mediaId?: string;       // ID for IndexedDB resolution
     mediaSrc?: string;      // URL to source media file
     sourceInSec?: number;   // In point within source media
     sourceOutSec?: number;  // Out point within source media

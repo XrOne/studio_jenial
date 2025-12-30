@@ -8,6 +8,7 @@
 'use client';
 
 import * as React from 'react';
+import { DEFAULT_FPS } from '../types/timeline';
 
 interface TimelinePlayheadProps {
     positionSec: number;
@@ -105,6 +106,6 @@ export default function TimelinePlayhead({
 const formatTimecode = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    const frames = Math.floor((seconds % 1) * 24);
+    const frames = Math.floor((seconds % 1) * DEFAULT_FPS);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
 };

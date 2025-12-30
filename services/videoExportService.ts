@@ -9,6 +9,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { SegmentWithUI, Track } from '../types/timeline';
+import { getMediaBlob } from '../utils/mediaResolver';
 
 // FFmpeg instance (singleton)
 let ffmpeg: FFmpeg | null = null;
@@ -124,7 +125,7 @@ export async function exportV1Track(
             const segment = v1Segments[i];
             const videoUrl = segment.mediaSrc || segment.activeRevision?.videoUrl;
 
-            if (!videoUrl) continue;
+            if (!videoUrl && !segment.mediaId) continue;
 
             const inputName = `input${i}.mp4`;
 
@@ -135,7 +136,17 @@ export async function exportV1Track(
             });
 
             // Fetch and write input file
-            const fileData = await fetchFile(videoUrl);
+            let fileData: Uint8Array;
+            if (segment.mediaId) {
+                // Resolve from IndexedDB
+                const blob = await getMediaBlob(segment.mediaId);
+                if (!blob) throw new Error(`Could not resolve media for segment ${segment.id}`);
+                fileData = await fetchFile(blob);
+            } else {
+                // Fetch from URL
+                fileData = await fetchFile(videoUrl!);
+            }
+
             await ffmpeg.writeFile(inputName, fileData);
             inputFiles.push(inputName);
 

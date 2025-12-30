@@ -6,6 +6,7 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { SegmentWithUI, Track } from '../types/timeline';
+import { getMediaUrl } from '../utils/mediaResolver';
 
 interface TimelinePreviewProps {
     tracks: Track[];
@@ -36,6 +37,24 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
     const audioRef = useRef<HTMLAudioElement>(null);
     const [activeVideoLayers, setActiveVideoLayers] = useState<ActiveVideoLayer[]>([]);
     const [activeAudioSegment, setActiveAudioSegment] = useState<SegmentWithUI | null>(null);
+    const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
+
+    // Resolve persistent media URLs
+    useEffect(() => {
+        const resolveMedia = async () => {
+            const newUrls: Record<string, string> = {};
+            for (const seg of segments) {
+                if (seg.mediaId && !resolvedUrls[seg.mediaId]) {
+                    const url = await getMediaUrl(seg.mediaId);
+                    if (url) newUrls[seg.mediaId] = url;
+                }
+            }
+            if (Object.keys(newUrls).length > 0) {
+                setResolvedUrls(prev => ({ ...prev, ...newUrls }));
+            }
+        };
+        resolveMedia();
+    }, [segments]);
 
     // Format timecode (HH:MM:SS:FF)
     const formatTimecode = (seconds: number): string => {
@@ -102,20 +121,31 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         }
     }, [segments, playheadSec, videoTracks, audioTracks]);
 
-    // Sync video positions with playhead
+    // Sync video and audio positions with playhead
     useEffect(() => {
         if (isPlaying) return; // Don't seek while playing
 
+        // Sync Video
         for (const layer of activeVideoLayers) {
             const video = videoRefs.current.get(layer.segment.id);
             if (video && Math.abs(video.currentTime - layer.seekPosition) > 0.05) {
                 video.currentTime = layer.seekPosition;
             }
         }
-    }, [playheadSec, activeVideoLayers, isPlaying]);
 
-    // Handle play/pause for all videos
+        // Sync Audio
+        if (activeAudioSegment && audioRef.current) {
+            const positionInSegment = playheadSec - activeAudioSegment.inSec;
+            const seekPosition = (activeAudioSegment.sourceInSec ?? 0) + positionInSegment;
+            if (Math.abs(audioRef.current.currentTime - seekPosition) > 0.05) {
+                audioRef.current.currentTime = seekPosition;
+            }
+        }
+    }, [playheadSec, activeVideoLayers, activeAudioSegment, isPlaying]);
+
+    // Handle play/pause for all videos AND audio
     useEffect(() => {
+        // Videos
         for (const [, video] of videoRefs.current) {
             if (isPlaying) {
                 video.play().catch(() => { });
@@ -123,7 +153,15 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                 video.pause();
             }
         }
-    }, [isPlaying]);
+        // Audio
+        if (audioRef.current && activeAudioSegment) {
+            if (isPlaying) {
+                audioRef.current.play().catch(() => { });
+            } else {
+                audioRef.current.pause();
+            }
+        }
+    }, [isPlaying, activeAudioSegment]);
 
     // Handle video time update during playback (from top layer)
     const handleTimeUpdate = useCallback((segmentId: string) => {
@@ -161,6 +199,9 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
     }, [activeVideoLayers, segments, onSeek, onPlayPause]);
 
     const getVideoUrl = (segment: SegmentWithUI): string | null => {
+        if (segment.mediaId && resolvedUrls[segment.mediaId]) {
+            return resolvedUrls[segment.mediaId];
+        }
         return segment.mediaSrc || segment.activeRevision?.videoUrl || segment.activeRevision?.outputAsset?.url || null;
     };
 
@@ -298,6 +339,13 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                     <span className="material-symbols-outlined text-lg">last_page</span>
                 </button>
             </div>
+            {/* Audio Player (Hidden) */}
+            <audio
+                ref={audioRef}
+                src={activeAudioSegment ? getVideoUrl(activeAudioSegment) || undefined : undefined}
+                className="hidden"
+                onEnded={onPlayPause}
+            />
         </div>
     );
 };

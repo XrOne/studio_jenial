@@ -2,6 +2,7 @@
  * /api/config - Lightweight config endpoint
  * CRITICAL: No heavy imports - this must always respond
  */
+
 export default function handler(req, res) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');

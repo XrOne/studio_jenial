@@ -8,7 +8,7 @@
 'use client';
 
 import * as React from 'react';
-import { SegmentWithUI, Track } from '../types/timeline';
+import { SegmentWithUI, Track, DEFAULT_FPS } from '../types/timeline';
 import TimelineRuler from './TimelineRuler';
 import TimelinePlayhead from './TimelinePlayhead';
 import TimelineClip from './TimelineClip';
@@ -252,6 +252,6 @@ const formatDuration = (seconds: number): string => {
 const formatTimecode = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    const frames = Math.floor((seconds % 1) * 24);
+    const frames = Math.floor((seconds % 1) * DEFAULT_FPS);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
 };
