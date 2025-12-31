@@ -800,22 +800,60 @@ const Studio: React.FC = () => {
     }
   }, [timelineState.project]);
 
-  const handleSegmentDelete = useCallback(async (segmentId: string) => {
-    // Optimistic update
-    setTimelineState(prev => ({
-      ...prev,
-      segments: prev.segments.filter(s => s.id !== segmentId),
-      selectedSegmentIds: prev.selectedSegmentIds.filter(id => id !== segmentId)
-    }));
+  const handleSegmentDelete = useCallback(async (segmentId: string, ripple: boolean = false) => {
+    const segment = timelineState.segments.find(s => s.id === segmentId);
+    if (!segment) return;
+
+    const deletedDuration = segment.durationSec;
+    const deletedEnd = segment.outSec;
+    const trackId = segment.trackId;
+
+    // Find linked segments to also delete
+    const linkedIds = segment.linkGroupId
+      ? timelineState.segments
+        .filter(s => s.linkGroupId === segment.linkGroupId)
+        .map(s => s.id)
+      : [segmentId];
+
+    setTimelineState(prev => {
+      let newSegments = prev.segments.filter(s => !linkedIds.includes(s.id));
+
+      // RIPPLE: Shift following segments on same track(s) left
+      if (ripple) {
+        const tracksToShift = segment.linkGroupId
+          ? ['v1', 'a1'] // Shift both linked tracks
+          : [trackId];
+
+        newSegments = newSegments.map(seg => {
+          if (tracksToShift.includes(seg.trackId) && seg.inSec >= deletedEnd) {
+            return {
+              ...seg,
+              inSec: seg.inSec - deletedDuration,
+              outSec: seg.outSec - deletedDuration
+            };
+          }
+          return seg;
+        });
+        console.log(`[RIPPLE DELETE] Shifted segments left by ${deletedDuration}s`);
+      }
+
+      return {
+        ...prev,
+        segments: newSegments,
+        selectedSegmentIds: prev.selectedSegmentIds.filter(id => !linkedIds.includes(id))
+      };
+    });
 
     // Persist to backend
     try {
-      await TimelineService.deleteSegment(segmentId);
-      console.log('[Timeline] Segment deleted:', segmentId);
+      for (const id of linkedIds) {
+        await TimelineService.deleteSegment(id);
+      }
+      console.log('[Timeline] Segment deleted:', linkedIds.join(', '));
     } catch (err) {
       console.error('[Timeline] Delete failed:', err);
     }
-  }, []);
+  }, [timelineState.segments]);
 
   const handleSegmentDuplicate = useCallback(async (segmentId: string) => {
     const segment = timelineState.segments.find(s => s.id === segmentId);
@@ -969,34 +1007,47 @@ const Studio: React.FC = () => {
           setTimelineState(prev => ({ ...prev, playheadSec: totalDuration }));
           break;
 
-        // === SPLIT (X) ===
+        // === SPLIT/RAZOR (X) - Single segment or Shift+X for all tracks ===
         case 'x':
         case 'X':
           e.preventDefault();
-          // Find segment at playhead
-          const segmentAtPlayhead = segments.find(s =>
-            playheadSec > s.inSec && playheadSec < s.outSec
-          );
-          if (segmentAtPlayhead) {
-            // Check both segment.locked and track.locked
-            const segTrack = timelineState.tracks.find(t => t.id === segmentAtPlayhead.trackId);
-            if (!segmentAtPlayhead.locked && !segTrack?.locked) {
-              handleSplitSegment(segmentAtPlayhead.id, playheadSec);
+          if (e.shiftKey) {
+            // SHIFT+X: Cut ALL segments across ALL tracks at playhead
+            const segmentsAtPlayhead = segments.filter(s =>
+              playheadSec > s.inSec && playheadSec < s.outSec
+            );
+            console.log(`[Razor] Shift+X: Cutting ${segmentsAtPlayhead.length} segments at ${playheadSec.toFixed(2)}s`);
+            for (const seg of segmentsAtPlayhead) {
+              const segTrack = timelineState.tracks.find(t => t.id === seg.trackId);
+              if (!seg.locked && !segTrack?.locked) {
+                handleSplitSegment(seg.id, playheadSec);
+              }
+            }
+          } else {
+            // X: Cut single segment at playhead
+            const segmentAtPlayhead = segments.find(s =>
+              playheadSec > s.inSec && playheadSec < s.outSec
+            );
+            if (segmentAtPlayhead) {
+              const segTrack = timelineState.tracks.find(t => t.id === segmentAtPlayhead.trackId);
+              if (!segmentAtPlayhead.locked && !segTrack?.locked) {
+                handleSplitSegment(segmentAtPlayhead.id, playheadSec);
+              }
             }
           }
           break;
 
-        // === DELETE (Delete/Backspace) ===
+        // === DELETE (Delete/Backspace) - Shift for ripple delete ===
         case 'Delete':
         case 'Backspace':
           e.preventDefault();
           if (selectedId) {
             const segment = segments.find(s => s.id === selectedId);
             if (segment) {
-              // Check both segment.locked and track.locked
               const segTrack = timelineState.tracks.find(t => t.id === segment.trackId);
               if (!segment.locked && !segTrack?.locked) {
-                handleSegmentDelete(selectedId);
+                // Shift = ripple delete (shift following segments left)
+                handleSegmentDelete(selectedId, e.shiftKey);
               }
             }
           }
@@ -2578,15 +2629,29 @@ const Studio: React.FC = () => {
                                 mediaType: 'audio'
                               };
 
-                              // Insert both segments and move playhead
-                              setTimelineState(prev => ({
-                                ...prev,
-                                segments: [...prev.segments, videoSegment, audioSegment],
-                                selectedSegmentIds: [videoSegment.id, audioSegment.id],
-                                playheadSec: playheadPos + clipDuration
-                              }));
+                              // TRUE INSERT MODE: Shift all segments on V1/A1 that start at or after playhead
+                              setTimelineState(prev => {
+                                const shiftedSegments = prev.segments.map(seg => {
+                                  // Only shift V1 and A1 segments that start at or after the insertion point
+                                  if ((seg.trackId === 'v1' || seg.trackId === 'a1') && seg.inSec >= playheadPos) {
+                                    return {
+                                      ...seg,
+                                      inSec: seg.inSec + clipDuration,
+                                      outSec: seg.outSec + clipDuration
+                                    };
+                                  }
+                                  return seg;
+                                });
 
-                              console.log(`[Studio] Created linked V1+A1: ${videoSegment.id}, ${audioSegment.id} (linkGroup: ${linkGroupId})`);
+                                return {
+                                  ...prev,
+                                  segments: [...shiftedSegments, videoSegment, audioSegment],
+                                  selectedSegmentIds: [videoSegment.id, audioSegment.id],
+                                  playheadSec: playheadPos + clipDuration
+                                };
+                              });
+
+                              console.log(`[Studio] INSERT: Shifted segments right by ${clipDuration}s, created V1+A1: ${videoSegment.id}, ${audioSegment.id}`);
                               setSourceMedia(null);
                             }}
                             onOverwrite={(media, inPoint, outPoint) => {
@@ -2652,14 +2717,100 @@ const Studio: React.FC = () => {
                                 mediaType: 'audio'
                               };
 
-                              setTimelineState(prev => ({
-                                ...prev,
-                                segments: [...prev.segments, videoSegment, audioSegment],
-                                selectedSegmentIds: [videoSegment.id, audioSegment.id],
-                                playheadSec: playheadPos + clipDuration
-                              }));
+                              // TRUE OVERWRITE MODE: Handle overlapping segments
+                              setTimelineState(prev => {
+                                const newInSec = playheadPos;
+                                const newOutSec = playheadPos + clipDuration;
+                                const processedSegments: typeof prev.segments = [];
 
-                              console.log(`[Studio] Created linked V1+A1 (overwrite): ${videoSegment.id}, ${audioSegment.id} (linkGroup: ${linkGroupId})`);
+                                for (const seg of prev.segments) {
+                                  // Only process V1 and A1 segments (the tracks we're overwriting)
+                                  if (seg.trackId !== 'v1' && seg.trackId !== 'a1') {
+                                    processedSegments.push(seg);
+                                    continue;
+                                  }
+
+                                  const segInSec = seg.inSec;
+                                  const segOutSec = seg.outSec;
+
+                                  // Case 1: Segment completely before new clip - keep as is
+                                  if (segOutSec <= newInSec) {
+                                    processedSegments.push(seg);
+                                    continue;
+                                  }
+
+                                  // Case 2: Segment completely after new clip - keep as is
+                                  if (segInSec >= newOutSec) {
+                                    processedSegments.push(seg);
+                                    continue;
+                                  }
+
+                                  // Case 3: Segment completely covered by new clip - remove it
+                                  if (segInSec >= newInSec && segOutSec <= newOutSec) {
+                                    console.log(`[OVERWRITE] Removing fully covered segment: ${seg.id}`);
+                                    continue; // Skip this segment
+                                  }
+
+                                  // Case 4: New clip covers start of segment - trim left side
+                                  if (segInSec >= newInSec && segInSec < newOutSec && segOutSec > newOutSec) {
+                                    const trimmedSeg = {
+                                      ...seg,
+                                      inSec: newOutSec,
+                                      durationSec: segOutSec - newOutSec,
+                                      sourceInSec: (seg.sourceInSec ?? 0) + (newOutSec - segInSec)
+                                    };
+                                    console.log(`[OVERWRITE] Trimming left of segment: ${seg.id}`);
+                                    processedSegments.push(trimmedSeg);
+                                    continue;
+                                  }
+
+                                  // Case 5: New clip covers end of segment - trim right side
+                                  if (segInSec < newInSec && segOutSec > newInSec && segOutSec <= newOutSec) {
+                                    const trimmedSeg = {
+                                      ...seg,
+                                      outSec: newInSec,
+                                      durationSec: newInSec - segInSec,
+                                      sourceOutSec: (seg.sourceInSec ?? 0) + (newInSec - segInSec)
+                                    };
+                                    console.log(`[OVERWRITE] Trimming right of segment: ${seg.id}`);
+                                    processedSegments.push(trimmedSeg);
+                                    continue;
+                                  }
+
+                                  // Case 6: New clip is in middle of segment - split into two
+                                  if (segInSec < newInSec && segOutSec > newOutSec) {
+                                    const leftPart = {
+                                      ...seg,
+                                      id: seg.id + '_left',
+                                      outSec: newInSec,
+                                      durationSec: newInSec - segInSec,
+                                      sourceOutSec: (seg.sourceInSec ?? 0) + (newInSec - segInSec)
+                                    };
+                                    const rightPart = {
+                                      ...seg,
+                                      id: seg.id + '_right',
+                                      inSec: newOutSec,
+                                      durationSec: segOutSec - newOutSec,
+                                      sourceInSec: (seg.sourceInSec ?? 0) + (newOutSec - segInSec)
+                                    };
+                                    console.log(`[OVERWRITE] Splitting segment: ${seg.id} into left and right`);
+                                    processedSegments.push(leftPart, rightPart);
+                                    continue;
+                                  }
+
+                                  // Fallback - keep segment
+                                  processedSegments.push(seg);
+                                }
+
+                                return {
+                                  ...prev,
+                                  segments: [...processedSegments, videoSegment, audioSegment],
+                                  selectedSegmentIds: [videoSegment.id, audioSegment.id],
+                                  playheadSec: playheadPos + clipDuration
+                                };
+                              });
+
+                              console.log(`[Studio] OVERWRITE: Created V1+A1: ${videoSegment.id}, ${audioSegment.id}`);
                               setSourceMedia(null);
                             }}
                           />
