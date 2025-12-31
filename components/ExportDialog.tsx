@@ -47,9 +47,11 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose, seg
 
         try {
             // 1. Collect URLs (and filter out non-video segments if necessary)
+            // 1. Collect URLs (and filter out non-video segments if necessary)
             const videoUrls = segments
-                .filter(s => s.activeRevision?.outputAsset?.kind === 'video' && s.activeRevision?.outputAsset?.url)
-                .map(s => s.activeRevision!.outputAsset!.url!);
+                .filter(s => (s.activeRevision?.outputAsset?.kind === 'video' && s.activeRevision?.outputAsset?.url) || s.mediaSrc || s.mediaId)
+                .map(s => s.activeRevision?.outputAsset?.url || s.mediaSrc || (s.mediaId ? `media:${s.mediaId}` : null))
+                .filter(url => url !== null) as string[];
 
             if (videoUrls.length === 0) {
                 throw new Error("Aucun clip vidéo à exporter.");
@@ -164,8 +166,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose, seg
                         <button
                             onClick={() => setAiUpscale(!aiUpscale)}
                             className={`w-full px-4 py-4 rounded-xl border-2 transition-all flex items-center gap-4 ${aiUpscale
-                                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 border-purple-500 text-white shadow-lg shadow-purple-900/50'
-                                    : 'bg-gray-800/50 border-gray-700 text-gray-300 hover:border-gray-600'
+                                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 border-purple-500 text-white shadow-lg shadow-purple-900/50'
+                                : 'bg-gray-800/50 border-gray-700 text-gray-300 hover:border-gray-600'
                                 }`}
                         >
                             <div className="text-2xl">{aiUpscale ? '✨' : '🎬'}</div>

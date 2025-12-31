@@ -17,6 +17,7 @@ interface TimelineClipProps {
     trackHeight: number;
     onClick: () => void;
     onDoubleClick?: () => void;
+    onMouseDown?: (e: React.MouseEvent) => void;
 }
 
 /**
@@ -45,6 +46,7 @@ export default function TimelineClip({
     trackHeight,
     onClick,
     onDoubleClick,
+    onMouseDown,
 }: TimelineClipProps) {
     const width = segment.durationSec * pixelsPerSecond;
     const left = segment.inSec * pixelsPerSecond;
@@ -75,6 +77,7 @@ export default function TimelineClip({
             }}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
+            onMouseDown={onMouseDown}
         >
             {/* Thumbnail background */}
             {thumbnailUrl ? (

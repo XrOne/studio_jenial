@@ -86,6 +86,55 @@ export default function HorizontalTimeline({
     const [pixelsPerSecond, setPixelsPerSecond] = React.useState(DEFAULT_PIXELS_PER_SECOND);
     const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
+    // Drag handling refs
+    const dragState = React.useRef<{
+        segmentId: string;
+        startX: number;
+        originalInSec: number;
+        pps: number;
+    } | null>(null);
+
+    // Keep callback ref stable
+    const onSegmentMoveRef = React.useRef(onSegmentMove);
+    React.useEffect(() => { onSegmentMoveRef.current = onSegmentMove; }, [onSegmentMove]);
+
+    const handleDragMove = React.useCallback((e: MouseEvent) => {
+        if (!dragState.current) return;
+        const { segmentId, startX, originalInSec, pps } = dragState.current;
+
+        const deltaX = e.clientX - startX;
+        const deltaSec = deltaX / pps;
+        const newInSec = Math.max(0, originalInSec + deltaSec);
+
+        onSegmentMoveRef.current?.(segmentId, newInSec);
+    }, []);
+
+    const handleDragEnd = React.useCallback(() => {
+        dragState.current = null;
+        window.removeEventListener('mousemove', handleDragMove);
+        window.removeEventListener('mouseup', handleDragEnd);
+        // Reset cursor
+        document.body.style.cursor = '';
+    }, [handleDragMove]);
+
+    const handleClipMouseDown = (e: React.MouseEvent, segmentId: string) => {
+        e.stopPropagation(); // Prevent timeline click
+
+        const segment = segments.find(s => s.id === segmentId);
+        if (!segment) return;
+
+        dragState.current = {
+            segmentId,
+            startX: e.clientX,
+            originalInSec: segment.inSec,
+            pps: pixelsPerSecond
+        };
+
+        document.body.style.cursor = 'grabbing';
+        window.addEventListener('mousemove', handleDragMove);
+        window.addEventListener('mouseup', handleDragEnd);
+    };
+
     // Calculate total duration from segments
     const totalDuration = React.useMemo(() => {
         if (segments.length === 0) return 30; // Default 30 seconds
@@ -199,6 +248,7 @@ export default function HorizontalTimeline({
                                             trackHeight={track.height}
                                             onClick={() => onSegmentClick(segment.id)}
                                             onDoubleClick={onSegmentDoubleClick ? () => onSegmentDoubleClick(segment.id) : undefined}
+                                            onMouseDown={(e) => handleClipMouseDown(e, segment.id)}
                                         />
                                     ))}
 

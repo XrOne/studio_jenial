@@ -161,7 +161,7 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                 audioRef.current.pause();
             }
         }
-    }, [isPlaying, activeAudioSegment]);
+    }, [isPlaying, activeAudioSegment, activeVideoLayers]); // Added activeVideoLayers to trigger play on new segments
 
     // Handle video time update during playback (from top layer)
     const handleTimeUpdate = useCallback((segmentId: string) => {
@@ -254,7 +254,7 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                                     onClick={index === 0 ? onPlayPause : undefined}
                                     onTimeUpdate={() => handleTimeUpdate(layer.segment.id)}
                                     onEnded={index === 0 ? handleEnded : undefined}
-                                    muted={index !== 0} // Only top layer has audio
+                                    muted={true} // Always mute video element, rely on A1 audio track
                                 />
                             );
                         })}
