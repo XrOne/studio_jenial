@@ -74,7 +74,7 @@ import {
   VideoProvider,
 } from './types';
 
-import { TimelineState, SegmentWithUI, SegmentRevision } from './types/timeline';
+import { TimelineState, SegmentWithUI, SegmentRevision, DEFAULT_FPS } from './types/timeline';
 import VerticalTimelineStack from './components/VerticalTimelineStack';
 import SegmentIAPanel from './components/SegmentIAPanel';
 import { TimelineService } from './services/timelineService';
@@ -2657,7 +2657,7 @@ const Studio: React.FC = () => {
                             isPlaying={isPlaying}
                             onPlayPause={() => setIsPlaying(prev => !prev)}
                             onSeek={(sec) => setTimelineState(prev => ({ ...prev, playheadSec: sec }))}
-                            fps={FPS}
+                            fps={DEFAULT_FPS}
                           />
                         )}
 

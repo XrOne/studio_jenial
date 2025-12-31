@@ -190,7 +190,7 @@ export async function exportV1Track(
 
         // Read output file
         const data = await ffmpeg.readFile(outputFile);
-        const blob = new Blob([data], { type: `video/${outputFormat}` });
+        const blob = new Blob([data as any], { type: `video/${outputFormat}` });
 
         // Cleanup
         for (const f of inputFiles) {
