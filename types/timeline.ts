@@ -101,6 +101,7 @@ export interface Track {
 
 // === SEGMENT ===
 export type MediaKind = 'generated' | 'rush';
+export type MediaType = 'video' | 'audio' | 'image';
 
 export interface Segment {
     id: string;
@@ -120,6 +121,9 @@ export interface Segment {
     mediaSrc?: string;      // URL to source media file
     sourceInSec?: number;   // In point within source media
     sourceOutSec?: number;  // Out point within source media
+    // Linked clips (Premiere Pro paradigm)
+    linkGroupId?: string;   // Shared ID for linked V1+A1 segments
+    mediaType?: MediaType;  // Type of media this segment represents
     // Computed
     durationSec: number;
     // Joined

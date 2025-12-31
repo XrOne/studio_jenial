@@ -17,13 +17,18 @@ interface TimelineToolbarProps {
     onInsert?: () => void;
     onOverwrite?: () => void;
     onExport?: () => void;
-    onSaveJson?: () => void; // New
-    onLoadJson?: () => void; // New
+    onSaveJson?: () => void;
+    onLoadJson?: () => void;
     pixelsPerSecond: number;
     onZoomChange: (pps: number) => void;
     canUndo?: boolean;
     canRedo?: boolean;
     hasSelection?: boolean;
+    // Premiere Pro-style toggles
+    linkedSelection?: boolean;
+    onLinkedSelectionToggle?: () => void;
+    snapping?: boolean;
+    onSnappingToggle?: () => void;
 }
 
 interface ToolButton {
@@ -56,6 +61,11 @@ export default function TimelineToolbar({
     canRedo = false,
     hasSelection = false,
 }: TimelineToolbarProps) {
+    // Premiere Pro-style toggle state from props
+    const linkedSelection = arguments[0].linkedSelection !== undefined ? arguments[0].linkedSelection : true;
+    const snapping = arguments[0].snapping !== undefined ? arguments[0].snapping : true;
+    const onLinkedSelectionToggle = arguments[0].onLinkedSelectionToggle;
+    const onSnappingToggle = arguments[0].onSnappingToggle;
 
     const zoomLevels = [20, 40, 60, 80, 100, 150, 200];
     const currentZoomIndex = zoomLevels.findIndex(z => z >= pixelsPerSecond);
@@ -105,6 +115,34 @@ export default function TimelineToolbar({
                 ))}
 
                 <div className="w-px h-5 bg-[#333] mx-2" />
+
+                {/* Premiere Pro-style toggles */}
+                <button
+                    onClick={onLinkedSelectionToggle}
+                    className={`
+                        p-1.5 rounded transition-colors
+                        ${linkedSelection
+                            ? 'text-yellow-400 bg-yellow-400/10'
+                            : 'text-gray-600 hover:text-gray-400'
+                        }
+                    `}
+                    title={`Linked Selection: ${linkedSelection ? 'ON' : 'OFF'}`}
+                >
+                    <span className="material-symbols-outlined text-lg">link</span>
+                </button>
+                <button
+                    onClick={onSnappingToggle}
+                    className={`
+                        p-1.5 rounded transition-colors
+                        ${snapping
+                            ? 'text-blue-400 bg-blue-400/10'
+                            : 'text-gray-600 hover:text-gray-400'
+                        }
+                    `}
+                    title={`Snapping: ${snapping ? 'ON' : 'OFF'}`}
+                >
+                    <span className="material-symbols-outlined text-lg">align_horizontal_left</span>
+                </button>
 
                 {editTools.map((tool) => (
                     <button

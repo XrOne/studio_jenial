@@ -2518,6 +2518,7 @@ const Studio: React.FC = () => {
                               const playheadPos = timelineState.playheadSec;
                               const timestamp = Date.now();
                               const segId = `seg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+                              const linkGroupId = `link_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
 
                               console.log(`[Studio] INSERT at ${playheadPos.toFixed(2)}s: ${media.name} (${clipDuration.toFixed(2)}s)`);
 
@@ -2540,6 +2541,9 @@ const Studio: React.FC = () => {
                                 mediaSrc: media.localUrl,
                                 sourceInSec: inPoint,
                                 sourceOutSec: outPoint,
+                                // Linked clips (Premiere Pro paradigm)
+                                linkGroupId,
+                                mediaType: 'video',
                                 activeRevision: {
                                   id: `rev_${timestamp}_v`,
                                   segmentId: `${segId}_v`,
@@ -2550,7 +2554,7 @@ const Studio: React.FC = () => {
                                 }
                               };
 
-                              // Create AUDIO segment on A1 (same timing)
+                              // Create AUDIO segment on A1 (same timing, same linkGroupId)
                               const audioSegment: import('./types/timeline').SegmentWithUI = {
                                 id: `${segId}_a`,
                                 projectId: timelineState.project?.id || 'local',
@@ -2568,18 +2572,21 @@ const Studio: React.FC = () => {
                                 mediaKind: 'rush',
                                 mediaSrc: media.localUrl,
                                 sourceInSec: inPoint,
-                                sourceOutSec: outPoint
+                                sourceOutSec: outPoint,
+                                // Linked clips (Premiere Pro paradigm)
+                                linkGroupId,
+                                mediaType: 'audio'
                               };
 
                               // Insert both segments and move playhead
                               setTimelineState(prev => ({
                                 ...prev,
                                 segments: [...prev.segments, videoSegment, audioSegment],
-                                selectedSegmentIds: [videoSegment.id],
+                                selectedSegmentIds: [videoSegment.id, audioSegment.id],
                                 playheadSec: playheadPos + clipDuration
                               }));
 
-                              console.log(`[Studio] Created V1 segment: ${videoSegment.id}, A1 segment: ${audioSegment.id}`);
+                              console.log(`[Studio] Created linked V1+A1: ${videoSegment.id}, ${audioSegment.id} (linkGroup: ${linkGroupId})`);
                               setSourceMedia(null);
                             }}
                             onOverwrite={(media, inPoint, outPoint) => {
@@ -2587,6 +2594,7 @@ const Studio: React.FC = () => {
                               const playheadPos = timelineState.playheadSec;
                               const timestamp = Date.now();
                               const segId = `seg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+                              const linkGroupId = `link_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
 
                               console.log(`[Studio] OVERWRITE at ${playheadPos.toFixed(2)}s: ${media.name} (${clipDuration.toFixed(2)}s)`);
 
@@ -2608,6 +2616,9 @@ const Studio: React.FC = () => {
                                 mediaSrc: media.localUrl,
                                 sourceInSec: inPoint,
                                 sourceOutSec: outPoint,
+                                // Linked clips (Premiere Pro paradigm)
+                                linkGroupId,
+                                mediaType: 'video',
                                 activeRevision: {
                                   id: `rev_${timestamp}_v`,
                                   segmentId: `${segId}_v`,
@@ -2618,7 +2629,7 @@ const Studio: React.FC = () => {
                                 }
                               };
 
-                              // Create AUDIO segment on A1
+                              // Create AUDIO segment on A1 (same linkGroupId)
                               const audioSegment: import('./types/timeline').SegmentWithUI = {
                                 id: `${segId}_a`,
                                 projectId: timelineState.project?.id || 'local',
@@ -2635,17 +2646,20 @@ const Studio: React.FC = () => {
                                 mediaKind: 'rush',
                                 mediaSrc: media.localUrl,
                                 sourceInSec: inPoint,
-                                sourceOutSec: outPoint
+                                sourceOutSec: outPoint,
+                                // Linked clips (Premiere Pro paradigm)
+                                linkGroupId,
+                                mediaType: 'audio'
                               };
 
                               setTimelineState(prev => ({
                                 ...prev,
                                 segments: [...prev.segments, videoSegment, audioSegment],
-                                selectedSegmentIds: [videoSegment.id],
+                                selectedSegmentIds: [videoSegment.id, audioSegment.id],
                                 playheadSec: playheadPos + clipDuration
                               }));
 
-                              console.log(`[Studio] Created V1+A1 segments (overwrite): ${videoSegment.id}, ${audioSegment.id}`);
+                              console.log(`[Studio] Created linked V1+A1 (overwrite): ${videoSegment.id}, ${audioSegment.id} (linkGroup: ${linkGroupId})`);
                               setSourceMedia(null);
                             }}
                           />

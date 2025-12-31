@@ -86,12 +86,18 @@ export default function HorizontalTimeline({
     const [pixelsPerSecond, setPixelsPerSecond] = React.useState(DEFAULT_PIXELS_PER_SECOND);
     const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
+    // Premiere Pro-style toggles
+    const [linkedSelection, setLinkedSelection] = React.useState(true);
+    const [snappingEnabled, setSnappingEnabled] = React.useState(true);
+    const SNAP_THRESHOLD_PX = 10; // Snap within 10 pixels
+
     // Drag handling refs
     const dragState = React.useRef<{
         segmentId: string;
         startX: number;
         originalInSec: number;
         pps: number;
+        linkedSegmentIds: string[];
     } | null>(null);
 
     // Keep callback ref stable
@@ -100,14 +106,51 @@ export default function HorizontalTimeline({
 
     const handleDragMove = React.useCallback((e: MouseEvent) => {
         if (!dragState.current) return;
-        const { segmentId, startX, originalInSec, pps } = dragState.current;
+        const { segmentId, startX, originalInSec, pps, linkedSegmentIds } = dragState.current;
 
         const deltaX = e.clientX - startX;
-        const deltaSec = deltaX / pps;
-        const newInSec = Math.max(0, originalInSec + deltaSec);
+        let deltaSec = deltaX / pps;
+        let newInSec = Math.max(0, originalInSec + deltaSec);
 
+        // Snapping logic
+        if (snappingEnabled) {
+            const candidateEdges: number[] = [playheadSec];
+            // Collect edges from all other segments
+            for (const seg of segments) {
+                if (!linkedSegmentIds.includes(seg.id) && seg.id !== segmentId) {
+                    candidateEdges.push(seg.inSec, seg.outSec);
+                }
+            }
+            // Calculate new segment outSec for snapping
+            const draggedSeg = segments.find(s => s.id === segmentId);
+            const duration = draggedSeg?.durationSec ?? 0;
+            const newOutSec = newInSec + duration;
+
+            // Snap inSec to edges
+            for (const edge of candidateEdges) {
+                if (Math.abs(newInSec - edge) * pps < SNAP_THRESHOLD_PX) {
+                    newInSec = edge;
+                    break;
+                }
+                // Snap outSec to edges
+                if (Math.abs(newOutSec - edge) * pps < SNAP_THRESHOLD_PX) {
+                    newInSec = edge - duration;
+                    break;
+                }
+            }
+        }
+
+        // Move all linked segments
+        for (const id of linkedSegmentIds) {
+            const seg = segments.find(s => s.id === id);
+            if (seg) {
+                const offset = seg.inSec - originalInSec;
+                onSegmentMoveRef.current?.(id, newInSec + offset);
+            }
+        }
+        // Move the primary segment
         onSegmentMoveRef.current?.(segmentId, newInSec);
-    }, []);
+    }, [snappingEnabled, playheadSec, segments, SNAP_THRESHOLD_PX]);
 
     const handleDragEnd = React.useCallback(() => {
         dragState.current = null;
@@ -123,11 +166,20 @@ export default function HorizontalTimeline({
         const segment = segments.find(s => s.id === segmentId);
         if (!segment) return;
 
+        // Find all linked segments (same linkGroupId)
+        let linkedSegmentIds: string[] = [];
+        if (linkedSelection && segment.linkGroupId) {
+            linkedSegmentIds = segments
+                .filter(s => s.linkGroupId === segment.linkGroupId && s.id !== segmentId)
+                .map(s => s.id);
+        }
+
         dragState.current = {
             segmentId,
             startX: e.clientX,
             originalInSec: segment.inSec,
-            pps: pixelsPerSecond
+            pps: pixelsPerSecond,
+            linkedSegmentIds
         };
 
         document.body.style.cursor = 'grabbing';
@@ -174,6 +226,10 @@ export default function HorizontalTimeline({
                 onSaveJson={onSaveJson}
                 onLoadJson={onLoadJson}
                 hasSelection={selectedSegmentIds.length > 0}
+                linkedSelection={linkedSelection}
+                onLinkedSelectionToggle={() => setLinkedSelection(prev => !prev)}
+                snapping={snappingEnabled}
+                onSnappingToggle={() => setSnappingEnabled(prev => !prev)}
             />
 
             {/* Timeline area with synchronized scroll */}

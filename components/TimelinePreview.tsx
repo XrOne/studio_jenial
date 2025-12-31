@@ -107,7 +107,8 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
 
         setActiveVideoLayers(layers);
 
-        // Find active audio segment
+        // Find active audio segment (only from non-muted audio tracks)
+        let foundAudioSegment: SegmentWithUI | null = null;
         for (const track of audioTracks) {
             const audioSeg = segments.find(s =>
                 s.trackId === track.id &&
@@ -115,10 +116,12 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                 playheadSec < s.outSec
             );
             if (audioSeg) {
-                setActiveAudioSegment(audioSeg);
+                foundAudioSegment = audioSeg;
                 break;
             }
         }
+        // Clear audio if no segment found (handles mute/delete)
+        setActiveAudioSegment(foundAudioSegment);
     }, [segments, playheadSec, videoTracks, audioTracks]);
 
     // Sync video and audio positions with playhead
@@ -153,9 +156,9 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                 video.pause();
             }
         }
-        // Audio
-        if (audioRef.current && activeAudioSegment) {
-            if (isPlaying) {
+        // Audio - only play if there's an active audio segment
+        if (audioRef.current) {
+            if (activeAudioSegment && isPlaying) {
                 audioRef.current.play().catch(() => { });
             } else {
                 audioRef.current.pause();
@@ -254,10 +257,36 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                                     onClick={index === 0 ? onPlayPause : undefined}
                                     onTimeUpdate={() => handleTimeUpdate(layer.segment.id)}
                                     onEnded={index === 0 ? handleEnded : undefined}
-                                    muted={true} // Always mute video element, rely on A1 audio track
+                                    muted={true}
+                                    preload="auto"
                                 />
                             );
                         })}
+
+                        {/* Preload upcoming videos for seamless playback */}
+                        {segments
+                            .filter(seg => {
+                                // Only preload V1 segments coming up within 10 seconds
+                                const isV1 = seg.trackId === 'v1';
+                                const isUpcoming = seg.inSec > playheadSec && seg.inSec < playheadSec + 10;
+                                const notActive = !activeVideoLayers.some(l => l.segment.id === seg.id);
+                                return isV1 && isUpcoming && notActive;
+                            })
+                            .slice(0, 2) // Limit to 2 preloads
+                            .map(seg => {
+                                const url = getVideoUrl(seg);
+                                if (!url) return null;
+                                return (
+                                    <video
+                                        key={`preload-${seg.id}`}
+                                        src={url}
+                                        className="hidden"
+                                        preload="auto"
+                                        muted
+                                    />
+                                );
+                            })
+                        }
 
                         {/* Timecode Display */}
                         <div className="absolute top-4 right-4 text-sm font-mono bg-black/70 px-3 py-1.5 rounded text-white border border-white/10 tracking-widest z-50">
