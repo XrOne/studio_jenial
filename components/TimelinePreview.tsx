@@ -175,13 +175,39 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         const video = videoRefs.current.get(segmentId);
         if (!video) return;
 
-        // Calculate timeline position from source position
-        const sourceOffset = video.currentTime - (topLayer.segment.sourceInSec ?? 0);
-        const newPlayheadPos = topLayer.segment.inSec + sourceOffset;
-        onSeek(newPlayheadPos);
-    }, [isPlaying, activeVideoLayers, onSeek]);
+        const segment = topLayer.segment;
+        const sourceInSec = segment.sourceInSec ?? 0;
+        const sourceOutSec = segment.sourceOutSec ?? video.duration;
 
-    // Handle video ended
+        // Check if video has reached the end of this segment's source portion
+        if (video.currentTime >= sourceOutSec - 0.05) {
+            // Find next segment on V1 track
+            const v1Segments = segments.filter(s => s.trackId === 'v1').sort((a, b) => a.inSec - b.inSec);
+            const nextSegment = v1Segments.find(s => s.inSec >= segment.outSec);
+
+            if (nextSegment) {
+                // Transition to next segment
+                console.log(`[TimelinePreview] Transition from ${segment.id} to ${nextSegment.id}`);
+                onSeek(nextSegment.inSec);
+            } else {
+                // No more segments, stop playback
+                onSeek(segment.outSec);
+                onPlayPause();
+            }
+            return;
+        }
+
+        // Calculate timeline position from source position (clamped to segment bounds)
+        const sourceOffset = video.currentTime - sourceInSec;
+        const newPlayheadPos = Math.min(segment.outSec, segment.inSec + sourceOffset);
+
+        // Only update if within segment bounds
+        if (newPlayheadPos >= segment.inSec && newPlayheadPos <= segment.outSec) {
+            onSeek(newPlayheadPos);
+        }
+    }, [isPlaying, activeVideoLayers, segments, onSeek, onPlayPause]);
+
+    // Handle video ended (backup for non-trimmed clips)
     const handleEnded = useCallback(() => {
         const topLayer = activeVideoLayers[0];
         if (!topLayer) {
@@ -190,12 +216,12 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         }
 
         // Find next segment on same track
-        const currentIndex = segments.findIndex(s => s.id === topLayer.segment.id);
-        const sameTrackSegments = segments.filter(s => s.trackId === topLayer.segment.trackId);
-        const nextInTrack = sameTrackSegments.find(s => s.inSec >= topLayer.segment.outSec);
+        const v1Segments = segments.filter(s => s.trackId === 'v1').sort((a, b) => a.inSec - b.inSec);
+        const nextSegment = v1Segments.find(s => s.inSec >= topLayer.segment.outSec);
 
-        if (nextInTrack) {
-            onSeek(nextInTrack.inSec);
+        if (nextSegment) {
+            console.log(`[TimelinePreview] onEnded transition to ${nextSegment.id}`);
+            onSeek(nextSegment.inSec);
         } else {
             onPlayPause(); // Stop at end
         }
@@ -257,6 +283,16 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                                     onClick={index === 0 ? onPlayPause : undefined}
                                     onTimeUpdate={() => handleTimeUpdate(layer.segment.id)}
                                     onEnded={index === 0 ? handleEnded : undefined}
+                                    onLoadedData={() => {
+                                        // When video loads, seek to correct position and resume if playing
+                                        const video = videoRefs.current.get(layer.segment.id);
+                                        if (video) {
+                                            video.currentTime = layer.seekPosition;
+                                            if (isPlaying) {
+                                                video.play().catch(() => { });
+                                            }
+                                        }
+                                    }}
                                     muted={true}
                                     preload="auto"
                                 />
