@@ -1373,7 +1373,16 @@ const Studio: React.FC = () => {
             }
             setSequenceVideoData((prev) => ({
               ...prev,
-              [currentPromptIndex]: { video, blob, url: objectUrl, thumbnail },
+              [currentPromptIndex]: {
+                video,
+                blob,
+                url: objectUrl,
+                thumbnail,
+                prompt: currentPromptIndex === 0 ? promptSequence.mainPrompt : (promptSequence.extensionPrompts[currentPromptIndex - 1] || ''),
+                isExtension: currentPromptIndex > 0,
+                status: 'completed' as const,
+                createdAt: new Date().toISOString()
+              },
             }));
           } catch (thumbError) {
             console.error(
@@ -1382,7 +1391,16 @@ const Studio: React.FC = () => {
             );
             setSequenceVideoData((prev) => ({
               ...prev,
-              [currentPromptIndex]: { video, blob, url: objectUrl, thumbnail: '' },
+              [currentPromptIndex]: {
+                video,
+                blob,
+                url: objectUrl,
+                thumbnail: '',
+                prompt: currentPromptIndex === 0 ? promptSequence.mainPrompt : (promptSequence.extensionPrompts[currentPromptIndex - 1] || ''),
+                isExtension: currentPromptIndex > 0,
+                status: 'completed' as const,
+                createdAt: new Date().toISOString()
+              },
             }));
           }
         }
@@ -2629,29 +2647,74 @@ const Studio: React.FC = () => {
                                 mediaType: 'audio'
                               };
 
-                              // TRUE INSERT MODE: Shift all segments on V1/A1 that start at or after playhead
+                              // TRUE INSERT MODE: Split overlapping segments, then shift all following
                               setTimelineState(prev => {
-                                const shiftedSegments = prev.segments.map(seg => {
-                                  // Only shift V1 and A1 segments that start at or after the insertion point
-                                  if ((seg.trackId === 'v1' || seg.trackId === 'a1') && seg.inSec >= playheadPos) {
-                                    return {
+                                const processedSegments: typeof prev.segments = [];
+
+                                for (const seg of prev.segments) {
+                                  // Only process V1 and A1 segments
+                                  if (seg.trackId !== 'v1' && seg.trackId !== 'a1') {
+                                    processedSegments.push(seg);
+                                    continue;
+                                  }
+
+                                  // Case 1: Segment is completely before insertion point - keep as is
+                                  if (seg.outSec <= playheadPos) {
+                                    processedSegments.push(seg);
+                                    continue;
+                                  }
+
+                                  // Case 2: Segment starts at or after insertion point - shift right
+                                  if (seg.inSec >= playheadPos) {
+                                    processedSegments.push({
                                       ...seg,
                                       inSec: seg.inSec + clipDuration,
                                       outSec: seg.outSec + clipDuration
-                                    };
+                                    });
+                                    continue;
                                   }
-                                  return seg;
-                                });
+
+                                  // Case 3: Segment OVERLAPS insertion point - split into two parts
+                                  if (seg.inSec < playheadPos && seg.outSec > playheadPos) {
+                                    // Left part: keep in place (before insertion)
+                                    const leftDuration = playheadPos - seg.inSec;
+                                    const leftPart = {
+                                      ...seg,
+                                      id: seg.id + '_left',
+                                      outSec: playheadPos,
+                                      durationSec: leftDuration,
+                                      sourceOutSec: (seg.sourceInSec ?? 0) + leftDuration
+                                    };
+
+                                    // Right part: shift right (after new clip)
+                                    const rightStart = playheadPos + clipDuration;
+                                    const rightPart = {
+                                      ...seg,
+                                      id: seg.id + '_right',
+                                      inSec: rightStart,
+                                      outSec: rightStart + (seg.outSec - playheadPos),
+                                      durationSec: seg.outSec - playheadPos,
+                                      sourceInSec: (seg.sourceInSec ?? 0) + leftDuration
+                                    };
+
+                                    console.log(`[INSERT] Split segment ${seg.id} at ${playheadPos}s`);
+                                    processedSegments.push(leftPart, rightPart);
+                                    continue;
+                                  }
+
+                                  // Fallback
+                                  processedSegments.push(seg);
+                                }
 
                                 return {
                                   ...prev,
-                                  segments: [...shiftedSegments, videoSegment, audioSegment],
+                                  segments: [...processedSegments, videoSegment, audioSegment],
                                   selectedSegmentIds: [videoSegment.id, audioSegment.id],
                                   playheadSec: playheadPos + clipDuration
                                 };
                               });
 
-                              console.log(`[Studio] INSERT: Shifted segments right by ${clipDuration}s, created V1+A1: ${videoSegment.id}, ${audioSegment.id}`);
+                              console.log(`[Studio] INSERT: Created V1+A1: ${videoSegment.id}, ${audioSegment.id} at ${playheadPos}s`);
                               setSourceMedia(null);
                             }}
                             onOverwrite={(media, inPoint, outPoint) => {
@@ -2896,18 +2959,136 @@ const Studio: React.FC = () => {
                           ...s,
                           tracks: s.tracks.map(t => t.id === trackId ? { ...t, visible: !t.visible } : t)
                         }))}
-                        onSegmentTrim={(segmentId, edge, newTime) => {
-                          setTimelineState(prev => ({
-                            ...prev,
-                            segments: prev.segments.map(s => {
-                              if (s.id !== segmentId) return s;
-                              if (edge === 'start') {
-                                return { ...s, inSec: newTime, durationSec: s.outSec - newTime };
+                        onSegmentTrim={(segmentId, edge, newTime, trimMode) => {
+                          setTimelineState(prev => {
+                            const segment = prev.segments.find(s => s.id === segmentId);
+                            if (!segment) return prev;
+
+                            const mode = trimMode || 'normal';
+                            let newSegments = [...prev.segments];
+
+                            // Find segment index
+                            const segIndex = newSegments.findIndex(s => s.id === segmentId);
+                            if (segIndex === -1) return prev;
+
+                            // Get linked segments for video/audio sync
+                            const linkedIds = segment.linkGroupId
+                              ? prev.segments.filter(s => s.linkGroupId === segment.linkGroupId).map(s => s.id)
+                              : [segmentId];
+
+                            if (edge === 'start') {
+                              // === TRIMMING LEFT EDGE (IN POINT) ===
+                              const delta = newTime - segment.inSec;
+                              const minIn = 0;
+                              const maxIn = segment.outSec - 0.1;
+                              const clampedNewTime = Math.max(minIn, Math.min(maxIn, newTime));
+                              const actualDelta = clampedNewTime - segment.inSec;
+
+                              if (mode === 'ripple') {
+                                // RIPPLE: Trim and shift all following segments
+                                newSegments = newSegments.map(s => {
+                                  if (linkedIds.includes(s.id)) {
+                                    // Trim this segment
+                                    return {
+                                      ...s,
+                                      inSec: clampedNewTime,
+                                      durationSec: s.outSec - clampedNewTime,
+                                      sourceInSec: (s.sourceInSec ?? 0) + actualDelta
+                                    };
+                                  } else if (s.inSec >= segment.outSec) {
+                                    // Shift following segments
+                                    return {
+                                      ...s,
+                                      inSec: s.inSec + actualDelta,
+                                      outSec: s.outSec + actualDelta
+                                    };
+                                  }
+                                  return s;
+                                });
+                              } else if (mode === 'slip') {
+                                // SLIP: Change source in/out, keep timeline position
+                                newSegments = newSegments.map(s => {
+                                  if (linkedIds.includes(s.id)) {
+                                    return {
+                                      ...s,
+                                      sourceInSec: (s.sourceInSec ?? 0) + actualDelta,
+                                      sourceOutSec: (s.sourceOutSec ?? s.durationSec) + actualDelta
+                                    };
+                                  }
+                                  return s;
+                                });
                               } else {
-                                return { ...s, outSec: newTime, durationSec: newTime - s.inSec };
+                                // NORMAL: Just adjust in point
+                                newSegments = newSegments.map(s => {
+                                  if (linkedIds.includes(s.id)) {
+                                    return {
+                                      ...s,
+                                      inSec: clampedNewTime,
+                                      durationSec: s.outSec - clampedNewTime,
+                                      sourceInSec: (s.sourceInSec ?? 0) + actualDelta
+                                    };
+                                  }
+                                  return s;
+                                });
                               }
-                            })
-                          }));
+                            } else {
+                              // === TRIMMING RIGHT EDGE (OUT POINT) ===
+                              const minOut = segment.inSec + 0.1;
+                              const clampedNewTime = Math.max(minOut, newTime);
+                              const actualDelta = clampedNewTime - segment.outSec;
+
+                              if (mode === 'ripple') {
+                                // RIPPLE: Trim and shift all following segments
+                                newSegments = newSegments.map(s => {
+                                  if (linkedIds.includes(s.id)) {
+                                    // Trim this segment
+                                    return {
+                                      ...s,
+                                      outSec: clampedNewTime,
+                                      durationSec: clampedNewTime - s.inSec,
+                                      sourceOutSec: (s.sourceInSec ?? 0) + (clampedNewTime - s.inSec)
+                                    };
+                                  } else if (s.inSec >= segment.outSec) {
+                                    // Shift following segments
+                                    return {
+                                      ...s,
+                                      inSec: s.inSec + actualDelta,
+                                      outSec: s.outSec + actualDelta
+                                    };
+                                  }
+                                  return s;
+                                });
+                              } else if (mode === 'slip') {
+                                // SLIP: Change source in/out, keep timeline position
+                                newSegments = newSegments.map(s => {
+                                  if (linkedIds.includes(s.id)) {
+                                    return {
+                                      ...s,
+                                      sourceInSec: (s.sourceInSec ?? 0) + actualDelta,
+                                      sourceOutSec: (s.sourceOutSec ?? s.durationSec) + actualDelta
+                                    };
+                                  }
+                                  return s;
+                                });
+                              } else {
+                                // NORMAL: Just adjust out point
+                                newSegments = newSegments.map(s => {
+                                  if (linkedIds.includes(s.id)) {
+                                    return {
+                                      ...s,
+                                      outSec: clampedNewTime,
+                                      durationSec: clampedNewTime - s.inSec,
+                                      sourceOutSec: (s.sourceInSec ?? 0) + (clampedNewTime - s.inSec)
+                                    };
+                                  }
+                                  return s;
+                                });
+                              }
+                            }
+
+                            console.log(`[TRIM] ${mode} ${edge} on ${segmentId}: ${segment.inSec.toFixed(2)} -> ${newTime.toFixed(2)}`);
+                            return { ...prev, segments: newSegments };
+                          });
                         }}
                         onSegmentMove={(segmentId, newInSec) => {
                           setTimelineState(prev => ({

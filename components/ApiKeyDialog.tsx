@@ -14,6 +14,7 @@ interface ApiKeyDialogProps {
   onClearKey: () => void;
   onClose: () => void;
   hasCustomKey: boolean;
+  providerToken?: string;
   errorMessage?: string;
 }
 

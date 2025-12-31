@@ -1204,8 +1204,8 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
                   type="button"
                   onClick={() => onSequenceModeChange?.('plan-sequence')}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${sequenceMode === 'plan-sequence'
-                      ? 'bg-indigo-600 text-white shadow-lg'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    ? 'bg-indigo-600 text-white shadow-lg'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
                     }`}
                   title="Extensions fluides, caméra continue"
                 >
@@ -1215,8 +1215,8 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
                   type="button"
                   onClick={() => onSequenceModeChange?.('decoupage')}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${sequenceMode === 'decoupage'
-                      ? 'bg-purple-600 text-white shadow-lg'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    ? 'bg-purple-600 text-white shadow-lg'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
                     }`}
                   title="Plans multiples, montage classique"
                 >
@@ -1304,14 +1304,25 @@ const PromptSequenceAssistant: React.FC<PromptSequenceAssistantProps> = ({
           dogma={activeDogma}
         />
       )}
-      {storyboard && (
+      {storyboard && startFrame && (
         <StoryboardPreviewModal
-          storyboard={storyboard}
+          isOpen={!!storyboard}
           onClose={() => setStoryboard(null)}
-          onConfirm={handleConfirmStoryboard}
-          onRegenerate={() => handleGenerateStoryboard(prompt)}
-          startFrame={startFrame}
-          endFrame={endFrame}
+          onApplyVariant={(payload) => {
+            // Convert payload to storyboard update
+            if (payload.previewImage) {
+              onAssistantImageChange(payload.previewImage);
+            }
+            if (payload.previewPrompt) {
+              setPrompt(payload.previewPrompt);
+            }
+            setStoryboard(null);
+          }}
+          segmentIndex={0}
+          baseImage={startFrame}
+          currentPrompt={prompt}
+          dogma={activeDogma}
+          mode="single-select"
         />
       )}
       {isFrameSelectorOpen && (

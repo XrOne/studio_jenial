@@ -28,7 +28,7 @@ export interface HorizontalTimelineProps {
     onTrackToggleLock?: (trackId: string) => void;
     onTrackToggleMute?: (trackId: string) => void;
     onTrackToggleVisible?: (trackId: string) => void;
-    onSegmentTrim?: (segmentId: string, edge: 'start' | 'end', newTime: number) => void;
+    onSegmentTrim?: (segmentId: string, edge: 'start' | 'end', newTime: number, trimMode?: string) => void;
     onSegmentMove?: (segmentId: string, newInSec: number) => void;
     onDeleteGap?: (atSec: number, trackId: string) => void;
     onUndo?: () => void;
@@ -89,7 +89,15 @@ export default function HorizontalTimeline({
     // Premiere Pro-style toggles
     const [linkedSelection, setLinkedSelection] = React.useState(true);
     const [snappingEnabled, setSnappingEnabled] = React.useState(true);
-    const SNAP_THRESHOLD_PX = 10; // Snap within 10 pixels
+    const SNAP_THRESHOLD_PX = 10;
+
+    // Trim mode state
+    type TrimMode = 'normal' | 'ripple' | 'roll' | 'slip' | 'slide';
+    const [trimMode, setTrimMode] = React.useState<TrimMode>('normal');
+
+    // 3-Point Edit state
+    const [timelineIn, setTimelineIn] = React.useState<number | null>(null);
+    const [timelineOut, setTimelineOut] = React.useState<number | null>(null);
 
     // Drag handling refs
     const dragState = React.useRef<{
@@ -100,9 +108,24 @@ export default function HorizontalTimeline({
         linkedSegmentIds: string[];
     } | null>(null);
 
-    // Keep callback ref stable
+    // Trim handling refs
+    const trimState = React.useRef<{
+        segmentId: string;
+        edge: 'left' | 'right';
+        startX: number;
+        originalInSec: number;
+        originalOutSec: number;
+        originalSourceIn: number;
+        originalSourceOut: number;
+        pps: number;
+    } | null>(null);
+
+    // Keep callback refs stable
     const onSegmentMoveRef = React.useRef(onSegmentMove);
     React.useEffect(() => { onSegmentMoveRef.current = onSegmentMove; }, [onSegmentMove]);
+
+    const onSegmentTrimRef = React.useRef(onSegmentTrim);
+    React.useEffect(() => { onSegmentTrimRef.current = onSegmentTrim; }, [onSegmentTrim]);
 
     const handleDragMove = React.useCallback((e: MouseEvent) => {
         if (!dragState.current) return;
@@ -187,6 +210,61 @@ export default function HorizontalTimeline({
         window.addEventListener('mouseup', handleDragEnd);
     };
 
+    // === TRIM HANDLERS ===
+    const handleTrimMove = React.useCallback((e: MouseEvent) => {
+        if (!trimState.current) return;
+        const { segmentId, edge, startX, originalInSec, originalOutSec, pps } = trimState.current;
+
+        const deltaX = e.clientX - startX;
+        const deltaSec = deltaX / pps;
+
+        const segment = segments.find(s => s.id === segmentId);
+        if (!segment) return;
+
+        if (edge === 'left') {
+            // Trimming the left edge (start point)
+            let newInSec = Math.max(0, originalInSec + deltaSec);
+            newInSec = Math.min(newInSec, originalOutSec - 0.1);
+
+            // Pass trimMode to callback
+            onSegmentTrimRef.current?.(segmentId, 'start', newInSec, trimMode);
+        } else {
+            // Trimming the right edge (end point)
+            let newOutSec = Math.max(originalInSec + 0.1, originalOutSec + deltaSec);
+
+            // Pass trimMode to callback
+            onSegmentTrimRef.current?.(segmentId, 'end', newOutSec, trimMode);
+        }
+    }, [segments, trimMode]);
+
+    const handleTrimEnd = React.useCallback(() => {
+        trimState.current = null;
+        window.removeEventListener('mousemove', handleTrimMove);
+        window.removeEventListener('mouseup', handleTrimEnd);
+        document.body.style.cursor = '';
+    }, [handleTrimMove]);
+
+    const handleTrimStart = (edge: 'left' | 'right', e: React.MouseEvent, segmentId: string) => {
+        e.stopPropagation();
+        const segment = segments.find(s => s.id === segmentId);
+        if (!segment) return;
+
+        trimState.current = {
+            segmentId,
+            edge,
+            startX: e.clientX,
+            originalInSec: segment.inSec,
+            originalOutSec: segment.outSec,
+            originalSourceIn: segment.sourceInSec ?? 0,
+            originalSourceOut: segment.sourceOutSec ?? segment.durationSec,
+            pps: pixelsPerSecond
+        };
+
+        document.body.style.cursor = 'ew-resize';
+        window.addEventListener('mousemove', handleTrimMove);
+        window.addEventListener('mouseup', handleTrimEnd);
+    };
+
     // Calculate total duration from segments
     const totalDuration = React.useMemo(() => {
         if (segments.length === 0) return 30; // Default 30 seconds
@@ -230,6 +308,13 @@ export default function HorizontalTimeline({
                 onLinkedSelectionToggle={() => setLinkedSelection(prev => !prev)}
                 snapping={snappingEnabled}
                 onSnappingToggle={() => setSnappingEnabled(prev => !prev)}
+                trimMode={trimMode}
+                onTrimModeChange={setTrimMode}
+                timelineIn={timelineIn}
+                timelineOut={timelineOut}
+                onSetTimelineIn={() => setTimelineIn(playheadSec)}
+                onSetTimelineOut={() => setTimelineOut(playheadSec)}
+                onClearTimelineMarks={() => { setTimelineIn(null); setTimelineOut(null); }}
             />
 
             {/* Timeline area with synchronized scroll */}
@@ -302,9 +387,11 @@ export default function HorizontalTimeline({
                                             isSelected={selectedSegmentIds.includes(segment.id)}
                                             pixelsPerSecond={pixelsPerSecond}
                                             trackHeight={track.height}
+                                            trimMode={trimMode}
                                             onClick={() => onSegmentClick(segment.id)}
                                             onDoubleClick={onSegmentDoubleClick ? () => onSegmentDoubleClick(segment.id) : undefined}
                                             onMouseDown={(e) => handleClipMouseDown(e, segment.id)}
+                                            onTrimStart={(edge, e) => handleTrimStart(edge, e, segment.id)}
                                         />
                                     ))}
 

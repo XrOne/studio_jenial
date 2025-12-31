@@ -15,6 +15,7 @@ const API_BASE = '/api/projects';
 const transformSegment = (row: any): Segment => ({
     id: row.id,
     projectId: row.project_id,
+    trackId: row.track_id || 'v1', // Default to v1 if not specified
     order: row.order_index ?? row.order ?? 0,
     inSec: parseFloat(row.in_sec) || 0,
     outSec: parseFloat(row.out_sec) || 0,

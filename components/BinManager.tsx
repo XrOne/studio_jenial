@@ -21,22 +21,22 @@ interface BinManagerProps {
     onSlotAddToTimeline?: (binId: string, slotId: string) => void;
 }
 
-export const BinManager: React.FC<BinManagerProps> = ({ 
-    onMediaSelect, 
+export const BinManager: React.FC<BinManagerProps> = ({
+    onMediaSelect,
     onAddToTimeline,
     onSlotGenerate,
     onSlotAddToTimeline,
 }) => {
     const { rushes, generated, isLoading, uploadMedia, deleteMedia, renameMedia } = useLocalMediaLibrary();
-    const { 
-        bins, 
-        toggleBinExpanded, 
-        renameBin, 
-        deleteBin, 
+    const {
+        bins,
+        toggleBinExpanded,
+        renameBin,
+        deleteBin,
         addAllPendingToQueue,
         getSlotById,
     } = useSequenceBins();
-    
+
     const [activeTab, setActiveTab] = useState<'rushes' | 'generated' | 'sequences'>('rushes');
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -149,9 +149,9 @@ export const BinManager: React.FC<BinManagerProps> = ({
                 mimeType: 'video/mp4',
                 localUrl: slot.video.url,
                 thumbnail: slot.video.thumbnail,
-                durationSec: slot.duration,
+                durationSec: Number(slot.duration),
                 sizeBytes: 0,
-                createdAt: slot.createdAt,
+                createdAt: new Date(slot.createdAt).getTime(),
             };
             onMediaSelect?.(media);
         }

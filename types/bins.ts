@@ -10,12 +10,12 @@
  * - Integrates with BinManager for drag-drop to timeline
  */
 
-import { ImageFile, Dogma } from './index';
+import { ImageFile, Dogma } from '../types';
 
 /**
  * Status of a sequence slot
  */
-export type SlotStatus = 
+export type SlotStatus =
   | 'pending'      // Awaiting generation
   | 'generating'   // Currently being generated
   | 'ready'        // Video generated successfully
@@ -85,16 +85,16 @@ export interface SequenceSlot {
   shotType: ShotType | string;    // Type of shot (can be custom)
   duration: number;               // Planned duration in seconds
   cameraMovement?: CameraMovement | string;
-  
+
   // Prompt & keyframe
   prompt: string;                 // Generation prompt
   keyframe?: ImageFile;           // Nano preview image
-  
+
   // Generation state
   status: SlotStatus;
   video?: SlotVideo;              // Generated video (when ready)
   errorMessage?: string;          // Error details if status === 'error'
-  
+
   // Metadata
   createdAt: string;
   updatedAt: string;
@@ -107,23 +107,23 @@ export interface SequenceBin {
   id: string;
   name: string;                   // User-defined name: "Scène 3 - Confrontation"
   description?: string;           // Optional description
-  
+
   // Source context
   dogmaId?: string;               // Dogma used for this sequence
   dogmaSnapshot?: Dogma;          // Frozen copy of dogma at creation time
   rootPrompt?: string;            // Original root prompt
-  
+
   // Slots
   slots: SequenceSlot[];
-  
+
   // Stats (computed)
   totalDuration: number;          // Sum of slot durations
   readyCount: number;             // Number of slots with status === 'ready'
-  
+
   // Metadata
   createdAt: string;
   updatedAt: string;
-  
+
   // UI state
   isExpanded?: boolean;           // Whether folder is expanded in BinManager
   color?: string;                 // Optional folder color for visual organization

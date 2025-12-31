@@ -8,6 +8,7 @@
 'use client';
 
 import * as React from 'react';
+import { TrimMode } from './TimelineClip';
 
 interface TimelineToolbarProps {
     onUndo?: () => void;
@@ -29,6 +30,15 @@ interface TimelineToolbarProps {
     onLinkedSelectionToggle?: () => void;
     snapping?: boolean;
     onSnappingToggle?: () => void;
+    // Trim mode
+    trimMode?: TrimMode;
+    onTrimModeChange?: (mode: TrimMode) => void;
+    // 3-Point Edit
+    timelineIn?: number | null;
+    timelineOut?: number | null;
+    onSetTimelineIn?: () => void;
+    onSetTimelineOut?: () => void;
+    onClearTimelineMarks?: () => void;
 }
 
 interface ToolButton {
@@ -66,6 +76,21 @@ export default function TimelineToolbar({
     const snapping = arguments[0].snapping !== undefined ? arguments[0].snapping : true;
     const onLinkedSelectionToggle = arguments[0].onLinkedSelectionToggle;
     const onSnappingToggle = arguments[0].onSnappingToggle;
+    const trimMode = arguments[0].trimMode || 'normal';
+    const onTrimModeChange = arguments[0].onTrimModeChange;
+    const timelineIn = arguments[0].timelineIn;
+    const timelineOut = arguments[0].timelineOut;
+    const onSetTimelineIn = arguments[0].onSetTimelineIn;
+    const onSetTimelineOut = arguments[0].onSetTimelineOut;
+    const onClearTimelineMarks = arguments[0].onClearTimelineMarks;
+
+    const trimModes: { value: TrimMode; label: string; icon: string }[] = [
+        { value: 'normal', label: 'Normal', icon: 'select_all' },
+        { value: 'ripple', label: 'Ripple', icon: 'format_line_spacing' },
+        { value: 'roll', label: 'Roll', icon: 'sync_alt' },
+        { value: 'slip', label: 'Slip', icon: 'swap_horiz' },
+        { value: 'slide', label: 'Slide', icon: 'open_with' },
+    ];
 
     const zoomLevels = [20, 40, 60, 80, 100, 150, 200];
     const currentZoomIndex = zoomLevels.findIndex(z => z >= pixelsPerSecond);
@@ -143,6 +168,66 @@ export default function TimelineToolbar({
                 >
                     <span className="material-symbols-outlined text-lg">align_horizontal_left</span>
                 </button>
+
+                <div className="w-px h-5 bg-[#333] mx-2" />
+
+                {/* Trim Mode Selector */}
+                <div className="relative">
+                    <select
+                        value={trimMode}
+                        onChange={(e) => onTrimModeChange?.(e.target.value as TrimMode)}
+                        className="bg-[#2a2a2a] text-gray-300 text-xs px-2 py-1 rounded border border-[#444] 
+                                   hover:border-[#666] focus:border-primary focus:outline-none cursor-pointer"
+                        title="Trim Mode"
+                    >
+                        {trimModes.map(mode => (
+                            <option key={mode.value} value={mode.value}>
+                                {mode.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <div className="w-px h-5 bg-[#333] mx-2" />
+
+                {/* 3-Point Edit Markers */}
+                <div className="flex items-center gap-1">
+                    <button
+                        onClick={onSetTimelineIn}
+                        className={`
+                            p-1 rounded transition-colors text-xs font-mono
+                            ${timelineIn !== null && timelineIn !== undefined
+                                ? 'text-green-400 bg-green-400/10'
+                                : 'text-gray-500 hover:text-gray-300'
+                            }
+                        `}
+                        title={`Set In Point (I)${timelineIn != null ? ` - ${timelineIn.toFixed(2)}s` : ''}`}
+                    >
+                        <span className="material-symbols-outlined text-sm">start</span>
+                    </button>
+                    <button
+                        onClick={onSetTimelineOut}
+                        className={`
+                            p-1 rounded transition-colors text-xs font-mono
+                            ${timelineOut !== null && timelineOut !== undefined
+                                ? 'text-red-400 bg-red-400/10'
+                                : 'text-gray-500 hover:text-gray-300'
+                            }
+                        `}
+                        title={`Set Out Point (O)${timelineOut != null ? ` - ${timelineOut.toFixed(2)}s` : ''}`}
+                    >
+                        <span className="material-symbols-outlined text-sm">keyboard_tab</span>
+                    </button>
+                    {(timelineIn != null || timelineOut != null) && (
+                        <button
+                            onClick={onClearTimelineMarks}
+                            className="p-1 text-gray-500 hover:text-red-400 transition-colors"
+                            title="Clear In/Out Marks"
+                        >
+                            <span className="material-symbols-outlined text-sm">close</span>
+                        </button>
+                    )}
+                </div>
 
                 {editTools.map((tool) => (
                     <button

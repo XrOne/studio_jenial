@@ -3,21 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  * 
  * TimelineClip - Individual clip on the timeline track
- * Displays segment thumbnail, label, and status
+ * Displays segment thumbnail, label, status, and trim handles
  */
 'use client';
 
 import * as React from 'react';
 import { SegmentWithUI } from '../types/timeline';
 
+export type TrimMode = 'normal' | 'ripple' | 'roll' | 'slip' | 'slide';
+
 interface TimelineClipProps {
     segment: SegmentWithUI;
     isSelected: boolean;
     pixelsPerSecond: number;
     trackHeight: number;
+    trimMode?: TrimMode;
     onClick: () => void;
     onDoubleClick?: () => void;
     onMouseDown?: (e: React.MouseEvent) => void;
+    onTrimStart?: (edge: 'left' | 'right', e: React.MouseEvent) => void;
 }
 
 /**
@@ -37,32 +41,55 @@ const getStatusColor = (status?: string): string => {
  * TimelineClip
  * 
  * Visual representation of a segment on the horizontal timeline.
- * Shows thumbnail, label, and duration.
+ * Shows thumbnail, label, duration, and interactive trim handles.
  */
 export default function TimelineClip({
     segment,
     isSelected,
     pixelsPerSecond,
     trackHeight,
+    trimMode = 'normal',
     onClick,
     onDoubleClick,
     onMouseDown,
+    onTrimStart,
 }: TimelineClipProps) {
     const width = segment.durationSec * pixelsPerSecond;
     const left = segment.inSec * pixelsPerSecond;
 
-    // Get thumbnail from active revision - check both outputAsset (generated) and thumbnailUrl (imported)
+    // Get thumbnail from active revision
     const thumbnailUrl = segment.activeRevision?.thumbnailUrl
         || segment.activeRevision?.outputAsset?.url
-        || segment.activeRevision?.videoUrl; // Fallback to video URL if no thumbnail
+        || segment.activeRevision?.videoUrl;
     const status = segment.activeRevision?.status || 'draft';
+
+    // Trim handle cursor based on mode
+    const getTrimCursor = () => {
+        switch (trimMode) {
+            case 'ripple': return 'ew-resize';
+            case 'roll': return 'col-resize';
+            case 'slip': return 'move';
+            case 'slide': return 'grab';
+            default: return 'ew-resize';
+        }
+    };
+
+    const handleLeftTrim = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onTrimStart?.('left', e);
+    };
+
+    const handleRightTrim = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onTrimStart?.('right', e);
+    };
 
     return (
         <div
             className={`
         absolute rounded-md overflow-hidden cursor-pointer
         transition-all duration-150 ease-out
-        bg-gray-800 border
+        bg-gray-800 border group
         ${getStatusColor(status)}
         ${isSelected
                     ? 'ring-2 ring-primary border-primary shadow-xl scale-[1.02] z-10'
@@ -79,6 +106,28 @@ export default function TimelineClip({
             onDoubleClick={onDoubleClick}
             onMouseDown={onMouseDown}
         >
+            {/* Left Trim Handle */}
+            <div
+                className="absolute left-0 top-0 bottom-0 w-2 bg-yellow-500/0 hover:bg-yellow-500/60 
+                           transition-colors cursor-ew-resize z-20 opacity-0 group-hover:opacity-100"
+                style={{ cursor: getTrimCursor() }}
+                onMouseDown={handleLeftTrim}
+                title={`Trim Start (${trimMode})`}
+            >
+                <div className="absolute inset-y-0 left-0 w-1 bg-yellow-400/80" />
+            </div>
+
+            {/* Right Trim Handle */}
+            <div
+                className="absolute right-0 top-0 bottom-0 w-2 bg-yellow-500/0 hover:bg-yellow-500/60 
+                           transition-colors cursor-ew-resize z-20 opacity-0 group-hover:opacity-100"
+                style={{ cursor: getTrimCursor() }}
+                onMouseDown={handleRightTrim}
+                title={`Trim End (${trimMode})`}
+            >
+                <div className="absolute inset-y-0 right-0 w-1 bg-yellow-400/80" />
+            </div>
+
             {/* Thumbnail background */}
             {thumbnailUrl ? (
                 <img
@@ -129,6 +178,13 @@ export default function TimelineClip({
                     <span className="material-symbols-outlined text-[12px]">lock</span>
                 </div>
             )}
+
+            {/* Trim mode indicator (when selected) */}
+            {isSelected && trimMode !== 'normal' && (
+                <div className="absolute top-1 left-1/2 -translate-x-1/2 px-1 py-0.5 bg-orange-600/90 rounded text-[8px] font-bold text-white uppercase">
+                    {trimMode}
+                </div>
+            )}
         </div>
     );
 }
@@ -144,3 +200,4 @@ const formatDuration = (seconds: number): string => {
     }
     return `${secs}s`;
 };
+

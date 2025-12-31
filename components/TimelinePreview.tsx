@@ -177,34 +177,42 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
 
         const segment = topLayer.segment;
         const sourceInSec = segment.sourceInSec ?? 0;
-        const sourceOutSec = segment.sourceOutSec ?? video.duration;
 
-        // Check if video has reached the end of this segment's source portion
-        if (video.currentTime >= sourceOutSec - 0.05) {
+        // Calculate expected source out based on segment duration
+        // For imported rushes, use sourceOutSec if defined, otherwise calculate from duration
+        const segmentDuration = segment.durationSec || (segment.outSec - segment.inSec);
+        const sourceOutSec = segment.sourceOutSec ?? (sourceInSec + segmentDuration);
+
+        // Calculate current timeline position
+        const sourceOffset = video.currentTime - sourceInSec;
+        const currentTimelinePos = segment.inSec + sourceOffset;
+
+        // Check if we've reached or passed the segment's out point on the timeline
+        const reachedEnd = currentTimelinePos >= segment.outSec - 0.05 || video.currentTime >= sourceOutSec - 0.05;
+
+        if (reachedEnd) {
             // Find next segment on V1 track
             const v1Segments = segments.filter(s => s.trackId === 'v1').sort((a, b) => a.inSec - b.inSec);
-            const nextSegment = v1Segments.find(s => s.inSec >= segment.outSec);
+            const nextSegment = v1Segments.find(s => s.inSec >= segment.outSec - 0.01);
 
             if (nextSegment) {
-                // Transition to next segment
-                console.log(`[TimelinePreview] Transition from ${segment.id} to ${nextSegment.id}`);
+                console.log(`[TimelinePreview] Transition: ${segment.label} -> ${nextSegment.label} at ${segment.outSec}s`);
+                // Pause current video to prevent further timeupdate events
+                video.pause();
+                // Seek to next segment - this will trigger re-render and new video load
                 onSeek(nextSegment.inSec);
             } else {
                 // No more segments, stop playback
+                console.log(`[TimelinePreview] End of timeline at ${segment.outSec}s`);
                 onSeek(segment.outSec);
                 onPlayPause();
             }
             return;
         }
 
-        // Calculate timeline position from source position (clamped to segment bounds)
-        const sourceOffset = video.currentTime - sourceInSec;
-        const newPlayheadPos = Math.min(segment.outSec, segment.inSec + sourceOffset);
-
-        // Only update if within segment bounds
-        if (newPlayheadPos >= segment.inSec && newPlayheadPos <= segment.outSec) {
-            onSeek(newPlayheadPos);
-        }
+        // Normal playhead update - clamp to segment bounds
+        const newPlayheadPos = Math.min(segment.outSec, Math.max(segment.inSec, currentTimelinePos));
+        onSeek(newPlayheadPos);
     }, [isPlaying, activeVideoLayers, segments, onSeek, onPlayPause]);
 
     // Handle video ended (backup for non-trimmed clips)

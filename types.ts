@@ -41,7 +41,7 @@ export enum GenerationMode {
 }
 
 export interface ImageFile {
-  file?: File;
+  file: File;
   base64: string;
 }
 

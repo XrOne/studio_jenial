@@ -4,8 +4,7 @@
  */
 
 import { supabase } from './supabaseClient';
-import type { Dogma } from './dogmaService';
-import { StoryboardPreview } from '../types';
+import { StoryboardPreview, Dogma } from '../types';
 
 // ===================================
 // TYPES
