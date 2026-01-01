@@ -14,6 +14,8 @@ import TimelinePlayhead from './TimelinePlayhead';
 import TimelineClip from './TimelineClip';
 import TimelineToolbar from './TimelineToolbar';
 import TrackHeader from './TrackHeader';
+import { buildTrackItems } from '../utils/otioUtils';
+import { rationalTimeToSeconds } from '../types/otio';
 
 export interface HorizontalTimelineProps {
     tracks: Track[];
@@ -379,21 +381,59 @@ export default function HorizontalTimeline({
                                         }}
                                     />
 
-                                    {/* Segments for this track */}
-                                    {trackSegments.map((segment) => (
-                                        <TimelineClip
-                                            key={segment.id}
-                                            segment={segment}
-                                            isSelected={selectedSegmentIds.includes(segment.id)}
-                                            pixelsPerSecond={pixelsPerSecond}
-                                            trackHeight={track.height}
-                                            trimMode={trimMode}
-                                            onClick={() => onSegmentClick(segment.id)}
-                                            onDoubleClick={onSegmentDoubleClick ? () => onSegmentDoubleClick(segment.id) : undefined}
-                                            onMouseDown={(e) => handleClipMouseDown(e, segment.id)}
-                                            onTrimStart={(edge, e) => handleTrimStart(edge, e, segment.id)}
-                                        />
-                                    ))}
+                                    {/* Segments and Gaps for this track */}
+                                    {(() => {
+                                        const trackItems = buildTrackItems(trackSegments);
+                                        let currentPosition = 0;
+
+                                        return trackItems.map((trackItem, idx) => {
+                                            if (trackItem.type === 'gap') {
+                                                const gapDuration = rationalTimeToSeconds(trackItem.item.duration);
+                                                const gapStart = currentPosition;
+                                                currentPosition += gapDuration;
+
+                                                return (
+                                                    <div
+                                                        key={`gap-${trackItem.item.id}`}
+                                                        className="absolute top-1 bottom-1 bg-[#2a2a3a]/40 border border-dashed border-[#4a4a5a] rounded hover:bg-[#3a3a4a]/60 hover:border-[#6a6a7a] transition-colors cursor-copy"
+                                                        style={{
+                                                            left: `${gapStart * pixelsPerSecond}px`,
+                                                            width: `${gapDuration * pixelsPerSecond}px`
+                                                        }}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            // Click on gap moves playhead to gap start
+                                                            onPlayheadChange(gapStart);
+                                                        }}
+                                                        title={`Gap: ${gapDuration.toFixed(2)}s - Click pour positionner, drop pour insérer`}
+                                                    >
+                                                        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                                                            <span className="text-[8px] text-gray-400 uppercase tracking-wider">Drop Zone</span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            } else {
+                                                const segment = trackSegments.find(s => s.id === trackItem.item.id);
+                                                if (!segment) return null;
+                                                currentPosition = segment.outSec;
+
+                                                return (
+                                                    <TimelineClip
+                                                        key={segment.id}
+                                                        segment={segment}
+                                                        isSelected={selectedSegmentIds.includes(segment.id)}
+                                                        pixelsPerSecond={pixelsPerSecond}
+                                                        trackHeight={track.height}
+                                                        trimMode={trimMode}
+                                                        onClick={() => onSegmentClick(segment.id)}
+                                                        onDoubleClick={onSegmentDoubleClick ? () => onSegmentDoubleClick(segment.id) : undefined}
+                                                        onMouseDown={(e) => handleClipMouseDown(e, segment.id)}
+                                                        onTrimStart={(edge, e) => handleTrimStart(edge, e, segment.id)}
+                                                    />
+                                                );
+                                            }
+                                        });
+                                    })()}
 
                                     {/* Audio waveform placeholder for audio tracks */}
                                     {!isVideoTrack && trackSegments.length === 0 && (

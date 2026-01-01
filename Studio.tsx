@@ -78,7 +78,8 @@ import { TimelineState, SegmentWithUI, SegmentRevision, DEFAULT_FPS } from './ty
 import VerticalTimelineStack from './components/VerticalTimelineStack';
 import SegmentIAPanel from './components/SegmentIAPanel';
 import { TimelineService } from './services/timelineService';
-import ReactTimelineWrapper from './components/ReactTimelineWrapper';
+import HorizontalTimeline from './components/HorizontalTimeline';
+import { usePlaybackEngine } from './services/playbackEngine';
 
 // ===================================================================
 // NEUTRAL DEFAULT: No hardcoded dogmas
@@ -569,8 +570,27 @@ const Studio: React.FC = () => {
   // === SOURCE VIEWER STATE (NLE workflow) ===
   const [sourceMedia, setSourceMedia] = useState<import('./types/media').RushMedia | null>(null);
 
-  // === TIMELINE PLAYBACK STATE ===
-  const [isPlaying, setIsPlaying] = useState(false);
+  // === TIMELINE PLAYBACK ENGINE ===
+  const totalDuration = useMemo(() => {
+    if (timelineState.segments.length === 0) return 30;
+    return Math.max(30, ...timelineState.segments.map(s => s.outSec));
+  }, [timelineState.segments]);
+
+  const {
+    isPlaying,
+    currentTime,
+    play,
+    pause,
+    seek,
+    togglePlayPause
+  } = usePlaybackEngine({
+    fps: timelineState.project?.fps || 25,
+    totalDuration,
+    onTimeUpdate: (time) => {
+      // Sync React state with engine time
+      setTimelineState(prev => ({ ...prev, playheadSec: time }));
+    }
+  });
 
   // === UNDO/REDO HISTORY ===
   const historyRef = useRef<{ past: TimelineState[]; future: TimelineState[] }>({ past: [], future: [] });
@@ -1114,7 +1134,7 @@ const Studio: React.FC = () => {
         // === PLAY/PAUSE (Space) ===
         case ' ':
           e.preventDefault();
-          setIsPlaying(prev => !prev);
+          togglePlayPause();
           break;
 
         // === MARK IN/OUT (I/O) - for selected segment ===
@@ -2941,8 +2961,12 @@ const Studio: React.FC = () => {
                             segments={timelineState.segments}
                             playheadSec={timelineState.playheadSec}
                             isPlaying={isPlaying}
-                            onPlayPause={() => setIsPlaying(prev => !prev)}
-                            onSeek={(sec) => setTimelineState(prev => ({ ...prev, playheadSec: sec }))}
+                            onPlayPause={togglePlayPause}
+                            onSeek={(sec) => {
+                              seek(sec);
+                              // Immediate local update for responsiveness
+                              setTimelineState(prev => ({ ...prev, playheadSec: sec }));
+                            }}
                             fps={DEFAULT_FPS}
                           />
                         )}
@@ -2995,15 +3019,83 @@ const Studio: React.FC = () => {
                       </div>
 
                       {/* BOTTOM: Horizontal Timeline */}
-                      <ReactTimelineWrapper
-                        segments={timelineState.segments}
+                      <HorizontalTimeline
                         tracks={timelineState.tracks}
+                        segments={timelineState.segments}
                         selectedSegmentIds={timelineState.selectedSegmentIds}
+                        selectedTrackId={timelineState.selectedTrackId}
                         playheadSec={timelineState.playheadSec}
-                        onSegmentsChange={(segments) => setTimelineState(s => ({ ...s, segments }))}
-                        onPlayheadChange={(sec) => setTimelineState(s => ({ ...s, playheadSec: sec }))}
-                        onSegmentSelect={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
+                        onPlayheadChange={(sec) => {
+                          seek(sec);
+                          setTimelineState(s => ({ ...s, playheadSec: sec }));
+                        }}
+                        onSegmentClick={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
                         onSegmentDoubleClick={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: [...s.expandedSegmentIds, id] }))}
+                        onTrackSelect={(trackId) => setTimelineState(s => ({ ...s, selectedTrackId: trackId }))}
+                        onSegmentTrim={(segmentId, edge, newTime) => {
+                          pushToHistory();
+                          setTimelineState(s => ({
+                            ...s,
+                            segments: s.segments.map(seg => {
+                              if (seg.id !== segmentId) return seg;
+                              if (edge === 'start') {
+                                const newDuration = seg.outSec - newTime;
+                                return { ...seg, inSec: newTime, durationSec: newDuration };
+                              } else {
+                                const newDuration = newTime - seg.inSec;
+                                return { ...seg, outSec: newTime, durationSec: newDuration };
+                              }
+                            })
+                          }));
+                        }}
+                        onSegmentMove={(segmentId, newInSec) => {
+                          pushToHistory();
+                          setTimelineState(s => ({
+                            ...s,
+                            segments: s.segments.map(seg => {
+                              if (seg.id !== segmentId) return seg;
+                              const duration = seg.outSec - seg.inSec;
+                              return { ...seg, inSec: newInSec, outSec: newInSec + duration };
+                            })
+                          }));
+                        }}
+                        onDeleteGap={(atSec, trackId) => {
+                          pushToHistory();
+                          // Ripple: shift all segments after the gap to close it
+                          const trackSegments = timelineState.segments
+                            .filter(s => s.trackId === trackId)
+                            .sort((a, b) => a.inSec - b.inSec);
+
+                          // Find gap at atSec
+                          let gapStart = 0;
+                          let gapEnd = atSec;
+                          for (const seg of trackSegments) {
+                            if (seg.inSec > gapStart && seg.inSec <= atSec) {
+                              gapStart = seg.outSec;
+                            }
+                            if (seg.inSec > atSec) {
+                              gapEnd = seg.inSec;
+                              break;
+                            }
+                          }
+                          const gapDuration = gapEnd - gapStart;
+
+                          if (gapDuration > 0) {
+                            setTimelineState(s => ({
+                              ...s,
+                              segments: s.segments.map(seg => {
+                                if (seg.trackId === trackId && seg.inSec >= gapEnd) {
+                                  return {
+                                    ...seg,
+                                    inSec: seg.inSec - gapDuration,
+                                    outSec: seg.outSec - gapDuration
+                                  };
+                                }
+                                return seg;
+                              })
+                            }));
+                          }
+                        }}
                         onUndo={handleUndo}
                         onRedo={handleRedo}
                         onCut={() => {

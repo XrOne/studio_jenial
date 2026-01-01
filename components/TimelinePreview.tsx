@@ -7,6 +7,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { SegmentWithUI, Track } from '../types/timeline';
 import { getMediaUrl } from '../utils/mediaResolver';
+import { getMediaController } from '../services/mediaController';
 
 interface TimelinePreviewProps {
     tracks: Track[];
@@ -167,8 +168,12 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
     }, [isPlaying, activeAudioSegment, activeVideoLayers]); // Added activeVideoLayers to trigger play on new segments
 
     // Handle video time update during playback (from top layer)
+    // NEW: Engine-driven approach - video syncs to global time, not the other way around
     const handleTimeUpdate = useCallback((segmentId: string) => {
-        if (!isPlaying) return;
+        // When engine is driving playback, we don't need to update time from video
+        // This handler is now only used for scrubbing (when not playing)
+        if (isPlaying) return;
+
         const topLayer = activeVideoLayers[0];
         if (!topLayer || topLayer.segment.id !== segmentId) return;
 
@@ -178,42 +183,65 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         const segment = topLayer.segment;
         const sourceInSec = segment.sourceInSec ?? 0;
 
-        // Calculate expected source out based on segment duration
-        // For imported rushes, use sourceOutSec if defined, otherwise calculate from duration
-        const segmentDuration = segment.durationSec || (segment.outSec - segment.inSec);
-        const sourceOutSec = segment.sourceOutSec ?? (sourceInSec + segmentDuration);
-
-        // Calculate current timeline position
+        // Calculate current timeline position from video position
         const sourceOffset = video.currentTime - sourceInSec;
         const currentTimelinePos = segment.inSec + sourceOffset;
+        const clampedPos = Math.min(segment.outSec, Math.max(segment.inSec, currentTimelinePos));
 
-        // Check if we've reached or passed the segment's out point on the timeline
-        const reachedEnd = currentTimelinePos >= segment.outSec - 0.05 || video.currentTime >= sourceOutSec - 0.05;
+        onSeek(clampedPos);
+    }, [isPlaying, activeVideoLayers, onSeek]);
 
-        if (reachedEnd) {
+    // NEW: Continuous playback tick - check if we need to transition
+    useEffect(() => {
+        if (!isPlaying) return;
+
+        const topLayer = activeVideoLayers[0];
+        if (!topLayer) return;
+
+        const segment = topLayer.segment;
+
+        // Check if playhead has passed current segment's end
+        if (playheadSec >= segment.outSec - 0.02) {
             // Find next segment on V1 track
             const v1Segments = segments.filter(s => s.trackId === 'v1').sort((a, b) => a.inSec - b.inSec);
             const nextSegment = v1Segments.find(s => s.inSec >= segment.outSec - 0.01);
 
             if (nextSegment) {
-                console.log(`[TimelinePreview] Transition: ${segment.label} -> ${nextSegment.label} at ${segment.outSec}s`);
-                // Pause current video to prevent further timeupdate events
-                video.pause();
-                // Seek to next segment - this will trigger re-render and new video load
-                onSeek(nextSegment.inSec);
-            } else {
-                // No more segments, stop playback
+                console.log(`[TimelinePreview] Seamless transition: ${segment.label} -> ${nextSegment.label}`);
+                // NO pause, NO seek - let the layer update handle the transition
+                // The activeVideoLayers effect will pick up the new segment
+            } else if (playheadSec >= segment.outSec) {
+                // End of timeline
                 console.log(`[TimelinePreview] End of timeline at ${segment.outSec}s`);
-                onSeek(segment.outSec);
                 onPlayPause();
             }
-            return;
         }
+    }, [isPlaying, playheadSec, activeVideoLayers, segments, onPlayPause]);
 
-        // Normal playhead update - clamp to segment bounds
-        const newPlayheadPos = Math.min(segment.outSec, Math.max(segment.inSec, currentTimelinePos));
-        onSeek(newPlayheadPos);
-    }, [isPlaying, activeVideoLayers, segments, onSeek, onPlayPause]);
+    // Preload next segment when approaching end of current (Phase 5)
+    useEffect(() => {
+        if (!isPlaying) return;
+
+        const topLayer = activeVideoLayers[0];
+        if (!topLayer) return;
+
+        const segment = topLayer.segment;
+        const timeToEnd = segment.outSec - playheadSec;
+
+        // Start preloading when 1 second from end
+        if (timeToEnd > 0 && timeToEnd <= 1.0) {
+            const v1Segments = segments.filter(s => s.trackId === 'v1').sort((a, b) => a.inSec - b.inSec);
+            const nextSegment = v1Segments.find(s => s.inSec >= segment.outSec - 0.01);
+
+            if (nextSegment) {
+                const url = nextSegment.mediaSrc || nextSegment.activeRevision?.videoUrl;
+                if (url) {
+                    const controller = getMediaController();
+                    controller.preloadVideo(nextSegment, url);
+                }
+            }
+        }
+    }, [isPlaying, playheadSec, activeVideoLayers, segments]);
 
     // Handle video ended (backup for non-trimmed clips)
     const handleEnded = useCallback(() => {
