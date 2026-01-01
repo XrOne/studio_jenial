@@ -193,6 +193,23 @@ export default function HorizontalTimeline({
         const segment = segments.find(s => s.id === segmentId);
         if (!segment) return;
 
+        // NLE: SELECT IMMEDIATELY on mouseDown
+        // SHIFT = add to selection, CTRL/CMD = toggle
+        if (e.shiftKey) {
+            // Add to selection
+            if (!selectedSegmentIds.includes(segmentId)) {
+                onSegmentClick(segmentId); // Will be handled by parent to add
+            }
+        } else if (e.ctrlKey || e.metaKey) {
+            // Toggle selection
+            onSegmentClick(segmentId);
+        } else {
+            // Exclusive selection (replace)
+            if (!selectedSegmentIds.includes(segmentId)) {
+                onSegmentClick(segmentId);
+            }
+        }
+
         // Find all linked segments (same linkGroupId)
         let linkedSegmentIds: string[] = [];
         if (linkedSelection && segment.linkGroupId) {
@@ -201,17 +218,49 @@ export default function HorizontalTimeline({
                 .map(s => s.id);
         }
 
-        dragState.current = {
-            segmentId,
-            startX: e.clientX,
-            originalInSec: segment.inSec,
-            pps: pixelsPerSecond,
-            linkedSegmentIds
+        // Store drag start position - will check threshold before starting drag
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const DRAG_THRESHOLD = 3; // pixels before drag starts
+        let isDragging = false;
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            const deltaX = Math.abs(moveEvent.clientX - startX);
+            const deltaY = Math.abs(moveEvent.clientY - startY);
+
+            if (!isDragging && (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD)) {
+                // Threshold exceeded - start actual drag
+                isDragging = true;
+                dragState.current = {
+                    segmentId,
+                    startX,
+                    originalInSec: segment.inSec,
+                    pps: pixelsPerSecond,
+                    linkedSegmentIds
+                };
+                document.body.style.cursor = 'grabbing';
+            }
+
+            if (isDragging) {
+                // Already dragging - use normal drag handling
+                handleDragMove(moveEvent);
+            }
         };
 
-        document.body.style.cursor = 'grabbing';
-        window.addEventListener('mousemove', handleDragMove);
-        window.addEventListener('mouseup', handleDragEnd);
+        const handleMouseUp = () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+
+            if (isDragging) {
+                // Clean up drag state
+                dragState.current = null;
+                document.body.style.cursor = '';
+            }
+            // If not dragging, it was just a click-to-select (already handled at mouseDown)
+        };
+
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
     };
 
     // === TRIM HANDLERS ===
@@ -280,6 +329,10 @@ export default function HorizontalTimeline({
 
     // Handle click on track area or ruler to move playhead
     const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        // NLE GUARD: Only move playhead if clicking directly on the track background
+        // Clicks on clips are handled by TimelineClip and stopped from propagating
+        if (e.target !== e.currentTarget) return;
+
         // Get the scrollable container's rect
         const scrollContainer = scrollContainerRef.current;
         if (!scrollContainer) return;

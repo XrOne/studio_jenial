@@ -102,8 +102,8 @@ export default function TimelineClip({
                 height: `${trackHeight - 8}px`,
                 top: '4px',
             }}
-            onClick={onClick}
-            onDoubleClick={onDoubleClick}
+            onClick={(e) => { e.stopPropagation(); onClick(); }}
+            onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(); }}
             onMouseDown={onMouseDown}
         >
             {/* Left Trim Handle */}

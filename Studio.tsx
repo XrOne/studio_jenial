@@ -1135,14 +1135,39 @@ const Studio: React.FC = () => {
         case 'Delete':
         case 'Backspace':
           e.preventDefault();
-          if (selectedId) {
-            const segment = segments.find(s => s.id === selectedId);
-            if (segment) {
+          // NLE: Delete ALL selected segments (multi-select support)
+          if (timelineState.selectedSegmentIds.length > 0) {
+            // Collect all segments to delete (including linked clips)
+            const idsToDelete = new Set<string>();
+            for (const id of timelineState.selectedSegmentIds) {
+              const segment = segments.find(s => s.id === id);
+              if (!segment) continue;
+
               const segTrack = timelineState.tracks.find(t => t.id === segment.trackId);
-              if (!segment.locked && !segTrack?.locked) {
-                // Shift = ripple delete (shift following segments left)
-                handleSegmentDelete(selectedId, e.shiftKey);
+              if (segment.locked || segTrack?.locked) continue;
+
+              // Add segment and its linked clips
+              if (segment.linkGroupId) {
+                segments.filter(s => s.linkGroupId === segment.linkGroupId)
+                  .forEach(s => idsToDelete.add(s.id));
+              } else {
+                idsToDelete.add(id);
               }
+            }
+
+            // Delete each unique segment (linked clips handled by handleSegmentDelete)
+            const uniqueIds = Array.from(idsToDelete);
+            if (uniqueIds.length > 0) {
+              // Use first segment's ID - handleSegmentDelete will collect linked clips
+              handleSegmentDelete(uniqueIds[0], e.shiftKey);
+
+              // For multi-select without linkGroup, delete remaining individually
+              if (uniqueIds.length > 1) {
+                for (let i = 1; i < uniqueIds.length; i++) {
+                  handleSegmentDelete(uniqueIds[i], e.shiftKey);
+                }
+              }
+              console.log(`[NLE Delete] Deleted ${uniqueIds.length} segment(s)`);
             }
           }
           break;
