@@ -3029,7 +3029,7 @@ const Studio: React.FC = () => {
                               // Immediate local update for responsiveness
                               setTimelineState(prev => ({ ...prev, playheadSec: sec }));
                             }}
-                            fps={DEFAULT_FPS}
+                            fps={timelineState.project?.fps || 25}
                           />
                         )}
 
@@ -3095,29 +3095,61 @@ const Studio: React.FC = () => {
                         onSegmentDoubleClick={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: [...s.expandedSegmentIds, id] }))}
                         onTrackSelect={(trackId) => setTimelineState(s => ({ ...s, selectedTrackId: trackId }))}
                         onSegmentTrim={(segmentId, edge, newTime) => {
+                          const fps = timelineState.project?.fps || 25;
+                          // SNAP: Round newTime to nearest frame
+                          const snappedTime = Math.round(newTime * fps) / fps;
+
                           pushToHistory();
                           setTimelineState(s => ({
                             ...s,
                             segments: s.segments.map(seg => {
                               if (seg.id !== segmentId) return seg;
                               if (edge === 'start') {
-                                const newDuration = seg.outSec - newTime;
-                                return { ...seg, inSec: newTime, durationSec: newDuration };
+                                const newDuration = seg.outSec - snappedTime;
+                                const newStartFrame = Math.round(snappedTime * fps);
+                                const newDurFrames = Math.round(newDuration * fps);
+                                return {
+                                  ...seg,
+                                  inSec: snappedTime,
+                                  durationSec: newDuration,
+                                  startFrame: newStartFrame,
+                                  durationFrames: newDurFrames
+                                };
                               } else {
-                                const newDuration = newTime - seg.inSec;
-                                return { ...seg, outSec: newTime, durationSec: newDuration };
+                                const newDuration = snappedTime - seg.inSec;
+                                const newDurFrames = Math.round(newDuration * fps);
+                                return {
+                                  ...seg,
+                                  outSec: snappedTime,
+                                  durationSec: newDuration,
+                                  durationFrames: newDurFrames
+                                };
                               }
                             })
                           }));
                         }}
                         onSegmentMove={(segmentId, newInSec) => {
+                          const fps = timelineState.project?.fps || 25;
+                          // SNAP: Round to nearest frame
+                          const snappedIn = Math.round(newInSec * fps) / fps;
+
                           pushToHistory();
                           setTimelineState(s => ({
                             ...s,
                             segments: s.segments.map(seg => {
                               if (seg.id !== segmentId) return seg;
                               const duration = seg.outSec - seg.inSec;
-                              return { ...seg, inSec: newInSec, outSec: newInSec + duration };
+                              const durationFrames = seg.durationFrames || Math.round(duration * fps);
+
+                              const newOut = snappedIn + duration;
+                              const newStartFrame = Math.round(snappedIn * fps);
+
+                              return {
+                                ...seg,
+                                inSec: snappedIn,
+                                outSec: newOut,
+                                startFrame: newStartFrame
+                              };
                             })
                           }));
                         }}
