@@ -32,35 +32,138 @@ const openDB = (): Promise<IDBDatabase> => {
     });
 };
 
+// Polyfill for VideoFrameMetadata
+interface VideoFrameMetadata {
+    presentationTime: number;
+    expectedDisplayTime: number;
+    width: number;
+    height: number;
+    mediaTime: number;
+    presentedFrames: number;
+    processingDuration?: number;
+    captureTime?: number;
+    receiveTime?: number;
+    rtpTimestamp?: number;
+}
+
 // Generate video thumbnail
-const generateVideoThumbnail = (videoBlob: Blob): Promise<string> => {
+// Unified Video Processor with FPS Detection
+const processVideoImport = (videoBlob: Blob): Promise<{
+    thumbnail: string;
+    durationSec: number;
+    metadata: { width: number; height: number; fps: number; totalFrames: number; isVFR: boolean; };
+}> => {
     return new Promise((resolve, reject) => {
         const video = document.createElement('video');
-        video.preload = 'metadata';
+        video.preload = 'auto'; // Load data for playback
         video.muted = true;
         video.playsInline = true;
 
         const url = URL.createObjectURL(videoBlob);
         video.src = url;
 
-        video.onloadeddata = () => {
-            video.currentTime = Math.min(1, video.duration / 4); // Go to 25% or 1s
+        // Metadata loaded: Get dimensions and duration
+        video.onloadedmetadata = () => {
+            // Wait for data to be ready
+            video.currentTime = 0;
         };
 
-        video.onseeked = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 320;
-            canvas.height = 180;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
-                URL.revokeObjectURL(url);
-                resolve(thumbnail);
+        let frameCount = 0;
+        let startTime = 0;
+        let videoCallbackId: number;
+
+        const countFrames = (now: number, metadata: VideoFrameMetadata) => {
+            if (startTime === 0) startTime = now;
+            frameCount++;
+
+            const elapsed = now - startTime;
+
+            // Measure for 500ms (enough to distinguish 24/25/30/60)
+            if (elapsed < 500) {
+                videoCallbackId = video.requestVideoFrameCallback(countFrames);
             } else {
-                URL.revokeObjectURL(url);
-                reject(new Error('Canvas context unavailable'));
+                // Done measuring
+                video.pause();
+
+                // Calculate FPS
+                const rawFps = (frameCount / elapsed) * 1000;
+                // Snap to common frame rates
+                const commonRates = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
+                const fps = commonRates.reduce((prev, curr) =>
+                    Math.abs(curr - rawFps) < Math.abs(prev - rawFps) ? curr : prev
+                );
+
+                // Check VFR (if rawFps deviates significantly from snapped)
+                // Note: strict VFR detection requires full scan, this is a heuristic
+                const isVFR = Math.abs(rawFps - fps) > 0.5;
+
+                const durationSec = video.duration || 0;
+                const totalFrames = Math.round(durationSec * fps);
+                const width = video.videoWidth;
+                const height = video.videoHeight;
+
+                // Generate Thumbnail (we are likely at ~0.5s or just seek to 25%)
+                video.currentTime = Math.min(1, durationSec / 4);
+
+                // Wait for seek before capturing thumbnail
+                const onSeeked = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 320;
+                    canvas.height = 180;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
+
+                        URL.revokeObjectURL(url);
+                        resolve({
+                            thumbnail,
+                            durationSec,
+                            metadata: { width, height, fps, totalFrames, isVFR }
+                        });
+                    } else {
+                        URL.revokeObjectURL(url);
+                        // Fallback
+                        resolve({ thumbnail: '', durationSec, metadata: { width, height, fps, totalFrames, isVFR } });
+                    }
+                };
+
+                // We need to wait for seek to complete
+                // Since we were playing, pause() was called.
+                // triggering seek
+                video.onseeked = onSeeked;
             }
+        };
+
+        video.oncanplay = () => {
+            // Start measurement loop
+            startTime = 0;
+            frameCount = 0;
+            video.play().then(() => {
+                if ('requestVideoFrameCallback' in video) {
+                    videoCallbackId = video.requestVideoFrameCallback(countFrames);
+                } else {
+                    // Fallback for browsers without rVFC (should be rare now)
+                    // Just assume 25fps
+                    console.warn('requestVideoFrameCallback not supported, defaulting to 25fps');
+                    video.pause();
+                    video.currentTime = Math.min(1, video.duration / 4);
+                    video.onseeked = () => {
+                        // ... same thumbnail logic ...
+                        // Simplified fallback
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 320;
+                        canvas.height = 180;
+                        const ctx = canvas.getContext('2d');
+                        const thumbnail = ctx ? (ctx.drawImage(video, 0, 0, 320, 180), canvas.toDataURL('image/jpeg', 0.7)) : '';
+                        URL.revokeObjectURL(url);
+                        resolve({ thumbnail, durationSec: video.duration, metadata: { width: video.videoWidth, height: video.videoHeight, fps: 25, totalFrames: Math.round(video.duration * 25), isVFR: false } });
+                    }
+                }
+            }).catch(e => {
+                URL.revokeObjectURL(url);
+                reject(e);
+            });
         };
 
         video.onerror = () => {
@@ -102,26 +205,6 @@ const generateImageThumbnail = (imageBlob: Blob): Promise<string> => {
         };
 
         img.src = url;
-    });
-};
-
-// Get video duration
-const getVideoDuration = (videoBlob: Blob): Promise<number> => {
-    return new Promise((resolve) => {
-        const video = document.createElement('video');
-        video.preload = 'metadata';
-        const url = URL.createObjectURL(videoBlob);
-        video.src = url;
-
-        video.onloadedmetadata = () => {
-            URL.revokeObjectURL(url);
-            resolve(video.duration);
-        };
-
-        video.onerror = () => {
-            URL.revokeObjectURL(url);
-            resolve(0);
-        };
     });
 };
 
@@ -217,13 +300,19 @@ export const useLocalMediaLibrary = () => {
                 request.onerror = () => reject(request.error);
             });
 
-            // Generate thumbnail
-            const thumbnail = isVideo
-                ? await generateVideoThumbnail(blob)
-                : await generateImageThumbnail(blob);
+            // Process media
+            let thumbnail = '';
+            let durationSec = undefined;
+            let metadata = undefined;
 
-            // Get duration for videos
-            const durationSec = isVideo ? await getVideoDuration(blob) : undefined;
+            if (isVideo) {
+                const result = await processVideoImport(blob);
+                thumbnail = result.thumbnail;
+                durationSec = result.durationSec;
+                metadata = result.metadata;
+            } else {
+                thumbnail = await generateImageThumbnail(blob);
+            }
 
             const media: RushMedia = {
                 id,
@@ -234,7 +323,8 @@ export const useLocalMediaLibrary = () => {
                 durationSec,
                 sizeBytes: file.size,
                 mimeType: file.type,
-                createdAt: Date.now()
+                createdAt: Date.now(),
+                metadata
             };
 
             setState(s => ({

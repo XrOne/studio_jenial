@@ -21,6 +21,14 @@ export interface RushMedia {
     createdAt: number;
     /** Tags for organization */
     tags?: string[];
+    /** Rich metadata extracted on import */
+    metadata?: {
+        width: number;
+        height: number;
+        fps: number;
+        totalFrames: number;
+        isVFR?: boolean;
+    };
 }
 
 export interface MediaUploadResult {

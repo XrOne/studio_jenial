@@ -1,7 +1,7 @@
 /**
  * TimelinePreview Component
- * Real-time video preview synchronized with timeline playhead
- * Supports multi-track video stacking with correct source seek
+ * Frame-accurate double-buffer playback system.
+ * Uses two static video elements (A/B) to eliminate black flashes between segments.
  */
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
@@ -19,12 +19,6 @@ interface TimelinePreviewProps {
     fps: number;
 }
 
-interface ActiveVideoLayer {
-    segment: SegmentWithUI;
-    zIndex: number;
-    seekPosition: number;
-}
-
 export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
     tracks,
     segments,
@@ -34,421 +28,282 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
     onSeek,
     fps
 }) => {
-    const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+    // === DOUBLE BUFFER STATE ===
+    const videoRefA = useRef<HTMLVideoElement>(null);
+    const videoRefB = useRef<HTMLVideoElement>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
-    const [activeVideoLayers, setActiveVideoLayers] = useState<ActiveVideoLayer[]>([]);
-    const [activeAudioSegment, setActiveAudioSegment] = useState<SegmentWithUI | null>(null);
-    const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
 
-    // Resolve persistent media URLs
+    // Which player is currently visible?
+    const [activePlayer, setActivePlayer] = useState<'A' | 'B'>('A');
+
+    // Track what is loaded in each player
+    const playerContent = useRef<{
+        A: { segmentId: string | null };
+        B: { segmentId: string | null };
+    }>({ A: { segmentId: null }, B: { segmentId: null } });
+
+    // Resolved URLs cache
+    const resolvedUrls = useRef<Map<string, string>>(new Map());
+    const [forceUpdate, setForceUpdate] = useState(0); // Trigger re-render when URLs resolve
+
+    // === MEDIA RESOLUTION ===
     useEffect(() => {
         const resolveMedia = async () => {
-            const newUrls: Record<string, string> = {};
+            let changed = false;
             for (const seg of segments) {
-                if (seg.mediaId && !resolvedUrls[seg.mediaId]) {
+                if (seg.mediaId && !resolvedUrls.current.has(seg.mediaId)) {
                     const url = await getMediaUrl(seg.mediaId);
-                    if (url) newUrls[seg.mediaId] = url;
+                    if (url) {
+                        resolvedUrls.current.set(seg.mediaId, url);
+                        changed = true;
+                    }
                 }
             }
-            if (Object.keys(newUrls).length > 0) {
-                setResolvedUrls(prev => ({ ...prev, ...newUrls }));
-            }
+            if (changed) setForceUpdate(n => n + 1);
         };
         resolveMedia();
     }, [segments]);
 
-    // Format timecode (HH:MM:SS:FF)
-    const formatTimecode = (seconds: number): string => {
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.floor(seconds % 60);
-        const f = Math.floor((seconds % 1) * fps);
-        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${f.toString().padStart(2, '0')}`;
-    };
+    // === PLAYBACK LOGIC ===
 
-    // Get video tracks sorted by order (highest priority first = lowest order)
-    const videoTracks = useMemo(() =>
-        tracks.filter(t => t.type === 'video' && t.visible).sort((a, b) => a.order - b.order),
-        [tracks]
-    );
+    // Find the current segment on V1 (Main Track)
+    // TODO: Support multi-track compositing. For now, optimize V1 cuts.
+    const currentV1Segment = useMemo(() => {
+        return segments.find(s =>
+            s.trackId === 'v1' &&
+            playheadSec >= s.inSec &&
+            playheadSec < s.outSec
+        );
+    }, [segments, playheadSec]);
 
-    const audioTracks = useMemo(() =>
-        tracks.filter(t => t.type === 'audio' && !t.muted),
-        [tracks]
-    );
+    // Find the NEXT segment on V1 (for preloading)
+    const nextV1Segment = useMemo(() => {
+        if (!currentV1Segment) return null;
+        // Find segment starting explicitly at current.outSec (contiguous)
+        // or very close to it.
+        return segments.find(s =>
+            s.trackId === 'v1' &&
+            Math.abs(s.inSec - currentV1Segment.outSec) < 0.05
+        );
+    }, [segments, currentV1Segment]);
 
-    // Find active video segments at playhead for each video track
-    useEffect(() => {
-        const layers: ActiveVideoLayer[] = [];
-
-        for (const track of videoTracks) {
-            const segment = segments.find(s =>
-                s.trackId === track.id &&
-                playheadSec >= s.inSec &&
-                playheadSec < s.outSec
-            );
-
-            if (segment) {
-                // Calculate position within source media
-                const positionInSegment = playheadSec - segment.inSec;
-                const seekPosition = (segment.sourceInSec ?? 0) + positionInSegment;
-
-                // Get video URL from mediaSrc or activeRevision
-                const hasVideo = segment.mediaSrc || segment.activeRevision?.videoUrl;
-
-                if (hasVideo) {
-                    layers.push({
-                        segment,
-                        zIndex: videoTracks.length - track.order, // Top track has highest z-index
-                        seekPosition
-                    });
-                }
-            }
-        }
-
-        setActiveVideoLayers(layers);
-
-        // Find active audio segment (only from non-muted audio tracks)
-        let foundAudioSegment: SegmentWithUI | null = null;
-        for (const track of audioTracks) {
-            const audioSeg = segments.find(s =>
-                s.trackId === track.id &&
-                playheadSec >= s.inSec &&
-                playheadSec < s.outSec
-            );
-            if (audioSeg) {
-                foundAudioSegment = audioSeg;
-                break;
-            }
-        }
-        // Clear audio if no segment found (handles mute/delete)
-        setActiveAudioSegment(foundAudioSegment);
-    }, [segments, playheadSec, videoTracks, audioTracks]);
-
-    // Sync video and audio positions with playhead
-    useEffect(() => {
-        if (isPlaying) return; // Don't seek while playing
-
-        // Sync Video
-        for (const layer of activeVideoLayers) {
-            const video = videoRefs.current.get(layer.segment.id);
-            if (video && Math.abs(video.currentTime - layer.seekPosition) > 0.05) {
-                video.currentTime = layer.seekPosition;
-            }
-        }
-
-        // Sync Audio
-        if (activeAudioSegment && audioRef.current) {
-            const positionInSegment = playheadSec - activeAudioSegment.inSec;
-            const seekPosition = (activeAudioSegment.sourceInSec ?? 0) + positionInSegment;
-            if (Math.abs(audioRef.current.currentTime - seekPosition) > 0.05) {
-                audioRef.current.currentTime = seekPosition;
-            }
-        }
-    }, [playheadSec, activeVideoLayers, activeAudioSegment, isPlaying]);
-
-    // Handle play/pause for all videos AND audio
-    useEffect(() => {
-        // Videos
-        for (const [, video] of videoRefs.current) {
-            if (isPlaying) {
-                video.play().catch(() => { });
-            } else {
-                video.pause();
-            }
-        }
-        // Audio - only play if there's an active audio segment
-        if (audioRef.current) {
-            if (activeAudioSegment && isPlaying) {
-                audioRef.current.play().catch(() => { });
-            } else {
-                audioRef.current.pause();
-            }
-        }
-    }, [isPlaying, activeAudioSegment, activeVideoLayers]); // Added activeVideoLayers to trigger play on new segments
-
-    // Handle video time update during playback (from top layer)
-    // NEW: Engine-driven approach - video syncs to global time, not the other way around
-    const handleTimeUpdate = useCallback((segmentId: string) => {
-        // When engine is driving playback, we don't need to update time from video
-        // This handler is now only used for scrubbing (when not playing)
-        if (isPlaying) return;
-
-        const topLayer = activeVideoLayers[0];
-        if (!topLayer || topLayer.segment.id !== segmentId) return;
-
-        const video = videoRefs.current.get(segmentId);
+    // Helper: Load segment into player
+    const loadSegmentIntoPlayer = useCallback((player: 'A' | 'B', segment: SegmentWithUI) => {
+        const video = player === 'A' ? videoRefA.current : videoRefB.current;
         if (!video) return;
 
-        const segment = topLayer.segment;
-        const sourceInSec = segment.sourceInSec ?? 0;
+        const url = segment.mediaSrc ||
+            (segment.mediaId ? resolvedUrls.current.get(segment.mediaId) : null) ||
+            segment.activeRevision?.videoUrl;
 
-        // Calculate current timeline position from video position
-        const sourceOffset = video.currentTime - sourceInSec;
-        const currentTimelinePos = segment.inSec + sourceOffset;
-        const clampedPos = Math.min(segment.outSec, Math.max(segment.inSec, currentTimelinePos));
+        if (!url) return;
 
-        onSeek(clampedPos);
-    }, [isPlaying, activeVideoLayers, onSeek]);
+        // Verify if already loaded
+        if (playerContent.current[player].segmentId === segment.id && video.src) {
+            return; // Already loaded
+        }
 
-    // NEW: Continuous playback tick - check if we need to transition
+        console.log(`[TimelinePreview] Loading ${segment.label} into Player ${player}`);
+        video.src = url;
+        video.load();
+        playerContent.current[player].segmentId = segment.id;
+
+        // Initial seek
+        // Calculate seek position (frame accurate ideally)
+        // For preload, we seek to sourceInSec
+        video.currentTime = segment.sourceInSec ?? 0;
+    }, []);
+
+    // 1. SYNC ACTIVE PLAYER
     useEffect(() => {
-        if (!isPlaying) return;
+        if (!currentV1Segment) return;
 
-        const topLayer = activeVideoLayers[0];
-        if (!topLayer) return;
+        const activeVideo = activePlayer === 'A' ? videoRefA.current : videoRefB.current;
+        if (!activeVideo) return;
 
-        const segment = topLayer.segment;
-
-        // Check if playhead has passed current segment's end
-        if (playheadSec >= segment.outSec - 0.02) {
-            // Find next segment on V1 track
-            const v1Segments = segments.filter(s => s.trackId === 'v1').sort((a, b) => a.inSec - b.inSec);
-            const nextSegment = v1Segments.find(s => s.inSec >= segment.outSec - 0.01);
-
-            if (nextSegment) {
-                console.log(`[TimelinePreview] Seamless transition: ${segment.label} -> ${nextSegment.label}`);
-                // NO pause, NO seek - let the layer update handle the transition
-                // The activeVideoLayers effect will pick up the new segment
-            } else if (playheadSec >= segment.outSec) {
-                // End of timeline
-                console.log(`[TimelinePreview] End of timeline at ${segment.outSec}s`);
-                onPlayPause();
+        // Ensure active player has current segment
+        if (playerContent.current[activePlayer].segmentId !== currentV1Segment.id) {
+            console.log(`[TimelinePreview] Hard switch: Active ${activePlayer} needs ${currentV1Segment.label}`);
+            loadSegmentIntoPlayer(activePlayer, currentV1Segment);
+            // If hard switch while playing, we might need to play instantly
+            if (isPlaying) {
+                // If we hard-switched, we need to seek to current playhead
+                const positionInSegment = playheadSec - currentV1Segment.inSec;
+                activeVideo.currentTime = (currentV1Segment.sourceInSec ?? 0) + positionInSegment;
+                activeVideo.play().catch(() => { });
             }
         }
-    }, [isPlaying, playheadSec, activeVideoLayers, segments, onPlayPause]);
 
-    // Preload next segment when approaching end of current (Phase 5)
+        // Sync Time (Crucial for scrubbing)
+        if (!isPlaying) {
+            const positionInSegment = playheadSec - currentV1Segment.inSec;
+            const seekPos = (currentV1Segment.sourceInSec ?? 0) + positionInSegment;
+
+            if (Math.abs(activeVideo.currentTime - seekPos) > 0.04) {
+                activeVideo.currentTime = seekPos;
+            }
+        }
+    }, [currentV1Segment, activePlayer, isPlaying, playheadSec, loadSegmentIntoPlayer]);
+
+    // 2. PRELOAD INACTIVE PLAYER
     useEffect(() => {
-        if (!isPlaying) return;
+        if (!nextV1Segment) return;
 
-        const topLayer = activeVideoLayers[0];
-        if (!topLayer) return;
+        const inactivePlayer = activePlayer === 'A' ? 'B' : 'A';
+        const inactiveVideo = activePlayer === 'A' ? videoRefB.current : videoRefA.current;
 
-        const segment = topLayer.segment;
-        const timeToEnd = segment.outSec - playheadSec;
+        if (!inactiveVideo) return;
 
-        // Start preloading when 1 second from end
-        if (timeToEnd > 0 && timeToEnd <= 1.0) {
-            const v1Segments = segments.filter(s => s.trackId === 'v1').sort((a, b) => a.inSec - b.inSec);
-            const nextSegment = v1Segments.find(s => s.inSec >= segment.outSec - 0.01);
+        // Preload next segment
+        if (playerContent.current[inactivePlayer].segmentId !== nextV1Segment.id) {
+            loadSegmentIntoPlayer(inactivePlayer, nextV1Segment);
+        }
+    }, [nextV1Segment, activePlayer, loadSegmentIntoPlayer]);
 
-            if (nextSegment) {
-                const url = nextSegment.mediaSrc || nextSegment.activeRevision?.videoUrl;
-                if (url) {
-                    const controller = getMediaController();
-                    controller.preloadVideo(nextSegment, url);
+    // 3. SEAMLESS TRANSITION (The "Magic")
+    useEffect(() => {
+        if (!isPlaying || !currentV1Segment || !nextV1Segment) return;
+
+        // Check distance to cut
+        const distToCut = currentV1Segment.outSec - playheadSec;
+
+        // If we are VERY close to cut (e.g. 1-2 frames), verify Next Player is ready
+        if (distToCut < (2 / fps) && distToCut > 0) {
+            const inactivePlayer = activePlayer === 'A' ? 'B' : 'A';
+            const inactiveVideo = activePlayer === 'A' ? videoRefB.current : videoRefA.current;
+
+            if (inactiveVideo && playerContent.current[inactivePlayer].segmentId === nextV1Segment.id) {
+                // Ensure it's ready
+                if (inactiveVideo.readyState >= 2) {
+                    // It's ready.
+                    // We don't trigger swap here. We let the natural playback continue.
+                    // BUT we can prime it.
+                    // inactiveVideo.play(); // Maybe?
+                    // No, wait for the exact moment.
                 }
             }
         }
-    }, [isPlaying, playheadSec, activeVideoLayers, segments]);
+    }, [isPlaying, playheadSec, currentV1Segment, nextV1Segment, activePlayer, fps]);
 
-    // Handle video ended (backup for non-trimmed clips)
-    const handleEnded = useCallback(() => {
-        const topLayer = activeVideoLayers[0];
-        if (!topLayer) {
-            onPlayPause();
-            return;
-        }
+    // 4. PRECISE FRAME CALLBACK & SWAP loop
+    // This loop runs every render frame (requestAnimationFrame) to check cuts precisely
+    useEffect(() => {
+        if (!isPlaying) return;
 
-        // Find next segment on same track
-        const v1Segments = segments.filter(s => s.trackId === 'v1').sort((a, b) => a.inSec - b.inSec);
-        const nextSegment = v1Segments.find(s => s.inSec >= topLayer.segment.outSec);
+        const activeVideo = activePlayer === 'A' ? videoRefA.current : videoRefB.current;
+        if (!activeVideo) return;
 
-        if (nextSegment) {
-            console.log(`[TimelinePreview] onEnded transition to ${nextSegment.id}`);
-            onSeek(nextSegment.inSec);
+        let animationHandle: number;
+
+        const checkCut = () => {
+            if (currentV1Segment && nextV1Segment) {
+                // The CUT determines that we should be playing the NEXT segment
+                // If playhead >= outSec of current, we should have swapped.
+                // We add a tolerance (0.5 frames) to trigger swap slightly early?
+                // No, trigger swap exactly at boundary.
+                // Actually, "globalFrame" from Engine is the truth.
+
+                // If playheadSec enters next segment's domain:
+                if (playheadSec >= currentV1Segment.outSec - (1.0 / fps)) {
+                    // Time to swap!
+                    const inactivePlayer = activePlayer === 'A' ? 'B' : 'A';
+                    const inactiveVideo = activePlayer === 'A' ? videoRefB.current : videoRefA.current;
+
+                    if (inactiveVideo && playerContent.current[inactivePlayer].segmentId === nextV1Segment.id) {
+                        // Only swap if we haven't already swapped (checked by activePlayer state in dependency)
+                        // But playheadSec updates continuously.
+                        // We rely on state activePlayer to not re-swap back?
+                        // "currentV1Segment" will change AFTER playhead crosses boundary.
+                        // So we have a small window where playhead is past outSec, but currentV1Segment hasn't updated in React?
+                        // No, currentV1Segment is memoized on playheadSec.
+
+                        // Issue: If currentV1Segment updates, then NEXT segment becomes CURRENT.
+                        // So we'd be in the NEW segment.
+                        // So we don't need to force swap??
+                        // REACT will swap?
+                        // NO. React state update is slow. Double buffer means we manually swap DOM VISIBILITY before React catches up.
+
+                        // BUT `activePlayer` IS React state.
+                        // So waiting for `activePlayer` to update relies on React render cycle (16ms).
+                        // We want instant swap.
+
+                        // FORCE DOM UPDATE
+                        if (inactiveVideo.style.opacity === '0') {
+                            const gapFrames = Math.round((nextV1Segment.inSec - currentV1Segment.outSec) * fps);
+                            console.log(`[TimelinePreview] INSTANT SWAP at ${formatTimecode(playheadSec, fps)} | Gap: ${gapFrames} frames`);
+                            inactiveVideo.style.opacity = '1';
+                            inactiveVideo.style.zIndex = '10';
+                            activeVideo.style.opacity = '0';
+                            activeVideo.style.zIndex = '0';
+
+                            inactiveVideo.play().catch(e => console.error(e));
+
+                            // Update State to match DOM
+                            setActivePlayer(inactivePlayer);
+                        }
+                    }
+                }
+            }
+            animationHandle = requestAnimationFrame(checkCut);
+        };
+
+        checkCut();
+        return () => cancelAnimationFrame(animationHandle);
+    }, [isPlaying, playheadSec, currentV1Segment, nextV1Segment, activePlayer, fps]);
+
+
+    // HANDLE PLAY/PAUSE SYNC
+    useEffect(() => {
+        const video = activePlayer === 'A' ? videoRefA.current : videoRefB.current;
+        if (!video) return;
+
+        if (isPlaying) {
+            video.play().catch(e => console.error("Play failed", e));
         } else {
-            onPlayPause(); // Stop at end
+            video.pause();
         }
-    }, [activeVideoLayers, segments, onSeek, onPlayPause]);
+    }, [isPlaying, activePlayer]);
 
-    const getVideoUrl = (segment: SegmentWithUI): string | null => {
-        if (segment.mediaId && resolvedUrls[segment.mediaId]) {
-            return resolvedUrls[segment.mediaId];
-        }
-        return segment.mediaSrc || segment.activeRevision?.videoUrl || segment.activeRevision?.outputAsset?.url || null;
-    };
-
-    const topLayer = activeVideoLayers[0];
-    const totalDuration = useMemo(() => {
-        if (segments.length === 0) return 30;
-        return Math.max(...segments.map(s => s.outSec));
-    }, [segments]);
 
     return (
-        <div className="flex-1 bg-black flex flex-col min-w-0 relative border-r border-[#3f3f46]">
-            {/* Header */}
-            <div className="h-10 bg-[#1e1e1e] border-b border-[#3f3f46] flex items-center justify-between px-4 shrink-0">
-                <div className="flex items-center gap-4">
-                    <span className="text-xs font-mono text-gray-400 truncate max-w-[200px]">
-                        {topLayer?.segment.label || 'Program Monitor'}
-                    </span>
-                    <div className="h-3 w-px bg-gray-700"></div>
-                    <span className="text-[10px] px-1.5 py-0.5 bg-purple-600 rounded text-white font-mono">PROGRAM</span>
-                    {activeVideoLayers.length > 1 && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-blue-600 rounded text-white font-mono">
-                            {activeVideoLayers.length} LAYERS
-                        </span>
-                    )}
-                </div>
-                <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500">{segments.length} segments</span>
-                </div>
-            </div>
-
-            {/* Video Display - Stacked layers */}
-            <div className="flex-1 relative flex items-center justify-center bg-[#0a0a0a]">
-                {activeVideoLayers.length > 0 ? (
-                    <div className="aspect-video w-full h-full max-h-[90%] max-w-[95%] relative shadow-2xl bg-black overflow-hidden">
-                        {/* Render all video layers */}
-                        {activeVideoLayers.map((layer, index) => {
-                            const url = getVideoUrl(layer.segment);
-                            if (!url) return null;
-
-                            return (
-                                <video
-                                    key={layer.segment.id}
-                                    ref={el => {
-                                        if (el) videoRefs.current.set(layer.segment.id, el);
-                                        else videoRefs.current.delete(layer.segment.id);
-                                    }}
-                                    src={url}
-                                    className="absolute inset-0 w-full h-full object-contain"
-                                    style={{ zIndex: layer.zIndex }}
-                                    onClick={index === 0 ? onPlayPause : undefined}
-                                    onTimeUpdate={() => handleTimeUpdate(layer.segment.id)}
-                                    onEnded={index === 0 ? handleEnded : undefined}
-                                    onLoadedData={() => {
-                                        // When video loads, seek to correct position and resume if playing
-                                        const video = videoRefs.current.get(layer.segment.id);
-                                        if (video) {
-                                            video.currentTime = layer.seekPosition;
-                                            if (isPlaying) {
-                                                video.play().catch(() => { });
-                                            }
-                                        }
-                                    }}
-                                    muted={true}
-                                    preload="auto"
-                                />
-                            );
-                        })}
-
-                        {/* Preload upcoming videos for seamless playback */}
-                        {segments
-                            .filter(seg => {
-                                // Only preload V1 segments coming up within 10 seconds
-                                const isV1 = seg.trackId === 'v1';
-                                const isUpcoming = seg.inSec > playheadSec && seg.inSec < playheadSec + 10;
-                                const notActive = !activeVideoLayers.some(l => l.segment.id === seg.id);
-                                return isV1 && isUpcoming && notActive;
-                            })
-                            .slice(0, 2) // Limit to 2 preloads
-                            .map(seg => {
-                                const url = getVideoUrl(seg);
-                                if (!url) return null;
-                                return (
-                                    <video
-                                        key={`preload-${seg.id}`}
-                                        src={url}
-                                        className="hidden"
-                                        preload="auto"
-                                        muted
-                                    />
-                                );
-                            })
-                        }
-
-                        {/* Timecode Display */}
-                        <div className="absolute top-4 right-4 text-sm font-mono bg-black/70 px-3 py-1.5 rounded text-white border border-white/10 tracking-widest z-50">
-                            {formatTimecode(playheadSec)}
-                        </div>
-
-                        {/* Segment Info */}
-                        <div className="absolute top-4 left-4 flex gap-2 z-50">
-                            <div className="text-xs font-mono bg-purple-600/80 px-2 py-1 rounded text-white">
-                                {topLayer?.segment.label}
-                            </div>
-                            {topLayer?.segment.mediaKind === 'rush' && (
-                                <div className="text-xs font-mono bg-green-600/80 px-2 py-1 rounded text-white">
-                                    RUSH
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Play/Pause Overlay */}
-                        {!isPlaying && (
-                            <div
-                                className="absolute inset-0 flex items-center justify-center bg-black/20 cursor-pointer z-40"
-                                onClick={onPlayPause}
-                            >
-                                <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
-                                    <span className="material-symbols-outlined text-white text-5xl ml-1">play_arrow</span>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    <div className="flex flex-col items-center justify-center text-gray-600">
-                        <span className="material-symbols-outlined text-6xl mb-4">movie</span>
-                        <p className="text-lg font-medium">Program Monitor</p>
-                        <p className="text-sm mt-1">Ajoutez des segments à la timeline</p>
-                        <p className="text-xs mt-4 text-gray-700">
-                            ←/→ navigation frame • X split • Suppr delete
-                        </p>
-                    </div>
-                )}
-            </div>
-
-            {/* Transport Controls */}
-            <div className="h-14 bg-[#1a1a1a] border-t border-[#3f3f46] flex items-center justify-center gap-4 px-4">
-                <button
-                    onClick={() => onSeek(0)}
-                    className="p-1.5 text-gray-400 hover:text-white transition-colors"
-                    title="Go to start (Home)"
-                >
-                    <span className="material-symbols-outlined text-lg">first_page</span>
-                </button>
-                <button
-                    onClick={() => onSeek(Math.max(0, playheadSec - 1 / fps))}
-                    className="p-1.5 text-gray-400 hover:text-white transition-colors"
-                    title="Previous frame (←)"
-                >
-                    <span className="material-symbols-outlined text-lg">skip_previous</span>
-                </button>
-                <button
-                    onClick={onPlayPause}
-                    className="p-2 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors"
-                >
-                    <span className="material-symbols-outlined text-2xl">
-                        {isPlaying ? 'pause' : 'play_arrow'}
-                    </span>
-                </button>
-                <button
-                    onClick={() => onSeek(Math.min(totalDuration, playheadSec + 1 / fps))}
-                    className="p-1.5 text-gray-400 hover:text-white transition-colors"
-                    title="Next frame (→)"
-                >
-                    <span className="material-symbols-outlined text-lg">skip_next</span>
-                </button>
-                <button
-                    onClick={() => onSeek(totalDuration)}
-                    className="p-1.5 text-gray-400 hover:text-white transition-colors"
-                    title="Go to end (End)"
-                >
-                    <span className="material-symbols-outlined text-lg">last_page</span>
-                </button>
-            </div>
-            {/* Audio Player (Hidden) */}
-            <audio
-                ref={audioRef}
-                src={activeAudioSegment ? getVideoUrl(activeAudioSegment) || undefined : undefined}
-                className="hidden"
-                onEnded={onPlayPause}
+        <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
+            {/* VIDEO A */}
+            <video
+                ref={videoRefA}
+                className={`absolute top-0 left-0 w-full h-full object-contain transition-none`}
+                style={{
+                    opacity: activePlayer === 'A' ? 1 : 0,
+                    zIndex: activePlayer === 'A' ? 10 : 0
+                }}
+                muted
+                playsInline
             />
+
+            {/* VIDEO B */}
+            <video
+                ref={videoRefB}
+                className={`absolute top-0 left-0 w-full h-full object-contain transition-none`}
+                style={{
+                    opacity: activePlayer === 'B' ? 1 : 0,
+                    zIndex: activePlayer === 'B' ? 10 : 0
+                }}
+                muted
+                playsInline
+            />
+
+            {/* OVERLAY INFO (DEBUG) */}
+            <div className="absolute top-2 right-2 bg-black/50 text-white text-xs p-1 font-mono pointer-events-none z-50">
+                P: {activePlayer} | Seg: {currentV1Segment?.label || 'None'} | {formatTimecode(playheadSec, fps)}
+            </div>
         </div>
     );
 };
 
-export default TimelinePreview;
+// Helper
+const formatTimecode = (seconds: number, fps: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const f = Math.floor((seconds % 1) * fps);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${f.toString().padStart(2, '0')}`;
+};

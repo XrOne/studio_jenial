@@ -5,12 +5,13 @@
  * PlaybackEngine - Frame-accurate continuous playback
  * 
  * OTIO-inspired: The timeline is the source of truth.
- * The engine advances a global clock, not individual media files.
+ * The engine advances a global clock in integer frames, not seconds.
+ * This prevents floating point drift over long durations.
  * 
  * Key concepts:
- * - globalTimeSec: Current position on the timeline (not in source media)
+ * - globalFrame: Current position on the timeline (frames)
  * - fps: Frame rate for precise advancement
- * - Listeners receive time updates, they decide what to play
+ * - Listeners receive time updates (in seconds for UI), they decide what to play
  */
 
 export type PlaybackState = 'stopped' | 'playing' | 'paused';
@@ -23,7 +24,7 @@ export interface PlaybackEngineConfig {
 }
 
 export class PlaybackEngine {
-    private globalTimeSec = 0;
+    private globalFrame = 0;
     private state: PlaybackState = 'stopped';
     private lastFrameTime = 0;
     private animationFrameId: number | null = null;
@@ -35,9 +36,9 @@ export class PlaybackEngine {
     private onStateChange: (state: PlaybackState) => void;
     private onEndReached: () => void;
 
-    // Bounds
-    private startBoundSec = 0;
-    private endBoundSec = Infinity;
+    // Bounds (Frames)
+    private startFrameBound = 0;
+    private endFrameBound = Infinity;
 
     constructor(config: PlaybackEngineConfig) {
         this.fps = config.fps;
@@ -84,9 +85,9 @@ export class PlaybackEngine {
             cancelAnimationFrame(this.animationFrameId);
             this.animationFrameId = null;
         }
-        this.globalTimeSec = this.startBoundSec;
+        this.globalFrame = this.startFrameBound;
         this.onStateChange('stopped');
-        this.onTimeUpdate(this.globalTimeSec);
+        this.notifyTimeUpdate();
     }
 
     /**
@@ -101,34 +102,45 @@ export class PlaybackEngine {
     }
 
     /**
-     * Seek to a specific time
+     * Seek to a specific time (seconds)
+     * Converted to nearest frame internally
      */
     seek(timeSec: number): void {
-        const clampedTime = Math.max(this.startBoundSec, Math.min(this.endBoundSec, timeSec));
-        this.globalTimeSec = clampedTime;
-        this.onTimeUpdate(this.globalTimeSec);
+        const frame = Math.round(timeSec * this.fps);
+        const clampedFrame = Math.max(this.startFrameBound, Math.min(this.endFrameBound, frame));
+        this.globalFrame = clampedFrame;
+        this.notifyTimeUpdate();
     }
 
     /**
-     * Set playback bounds (in/out points)
+     * Set playback bounds (in/out points in seconds)
      */
     setBounds(startSec: number, endSec: number): void {
-        this.startBoundSec = startSec;
-        this.endBoundSec = endSec;
+        this.startFrameBound = Math.round(startSec * this.fps);
+        this.endFrameBound = Math.round(endSec * this.fps);
 
         // Clamp current time to new bounds
-        if (this.globalTimeSec < startSec) {
-            this.seek(startSec);
-        } else if (this.globalTimeSec > endSec) {
-            this.seek(endSec);
+        if (this.globalFrame < this.startFrameBound) {
+            this.globalFrame = this.startFrameBound;
+            this.notifyTimeUpdate();
+        } else if (this.globalFrame > this.endFrameBound) {
+            this.globalFrame = this.endFrameBound;
+            this.notifyTimeUpdate();
         }
     }
 
     /**
-     * Get current time
+     * Get current time in seconds
      */
     getCurrentTime(): number {
-        return this.globalTimeSec;
+        return this.globalFrame / this.fps;
+    }
+
+    /**
+     * Get current frame
+     */
+    getCurrentFrame(): number {
+        return this.globalFrame;
     }
 
     /**
@@ -155,6 +167,10 @@ export class PlaybackEngine {
 
     // === PRIVATE ===
 
+    private notifyTimeUpdate(): void {
+        this.onTimeUpdate(this.globalFrame / this.fps);
+    }
+
     /**
      * Main animation loop - advances time by whole frames
      */
@@ -167,21 +183,20 @@ export class PlaybackEngine {
         // Only advance by whole frames for accuracy
         if (elapsed >= this.frameIntervalMs) {
             const framesToAdd = Math.floor(elapsed / this.frameIntervalMs);
-            const timeToAdd = framesToAdd / this.fps;
 
-            this.globalTimeSec += timeToAdd;
+            this.globalFrame += framesToAdd;
             this.lastFrameTime = now - (elapsed % this.frameIntervalMs);
 
             // Check end reached
-            if (this.globalTimeSec >= this.endBoundSec) {
-                this.globalTimeSec = this.endBoundSec;
-                this.onTimeUpdate(this.globalTimeSec);
+            if (this.globalFrame >= this.endFrameBound) {
+                this.globalFrame = this.endFrameBound;
+                this.notifyTimeUpdate();
                 this.pause();
                 this.onEndReached();
                 return;
             }
 
-            this.onTimeUpdate(this.globalTimeSec);
+            this.notifyTimeUpdate();
         }
 
         // Continue loop
@@ -267,5 +282,6 @@ export function usePlaybackEngine(options: UsePlaybackEngineOptions) {
         pause,
         stop,
         togglePlayPause,
+        engine: engineRef.current // Expose engine for direct access
     };
 }

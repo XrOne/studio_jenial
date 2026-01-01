@@ -115,12 +115,20 @@ export interface Segment {
     locked: boolean;
     createdAt: string;
     updatedAt: string;
+    // Frame-based Time Model (Source of Truth)
+    startFrame?: number;       // Global timeline start frame
+    durationFrames?: number;   // Duration in frames
+
     // Media source (for rush imports)
     mediaKind?: MediaKind;
     mediaId?: string;       // ID for IndexedDB resolution
     mediaSrc?: string;      // URL to source media file
-    sourceInSec?: number;   // In point within source media
-    sourceOutSec?: number;  // Out point within source media
+
+    sourceStartFrame?: number; // In point within source media (frames)
+    sourceDurationFrames?: number; // Duration within source media (frames)
+
+    sourceInSec?: number;   // In point within source media (legacy/computed)
+    sourceOutSec?: number;  // Out point within source media (legacy/computed)
     sourceDurationSec?: number; // Total duration of source media (for trim limits)
     // Linked clips (Premiere Pro paradigm)
     linkGroupId?: string;   // Shared ID for linked V1+A1 segments

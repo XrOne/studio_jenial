@@ -582,7 +582,8 @@ const Studio: React.FC = () => {
     play,
     pause,
     seek,
-    togglePlayPause
+    togglePlayPause,
+    engine
   } = usePlaybackEngine({
     fps: timelineState.project?.fps || 25,
     totalDuration,
@@ -2651,7 +2652,68 @@ const Studio: React.FC = () => {
                           onMediaSelect={(media) => setSourceMedia(media)}
                           onAddToTimeline={(media) => {
                             console.log('[Studio] Add to timeline:', media.name);
-                            // TODO: Create segment from imported media
+
+                            // AUTO-FPS: If timeline is empty, set project FPS to match first clip
+                            const currentSegments = timelineState.segments;
+                            if (currentSegments.length === 0 && media.metadata?.fps) {
+                              const rawFps = media.metadata.fps;
+                              // Map to supported FPS (24, 25, 30)
+                              let newFps: import('./types/timeline').FPS = 25;
+                              if (Math.abs(rawFps - 24) < 1 || Math.abs(rawFps - 23.976) < 1) newFps = 24;
+                              if (Math.abs(rawFps - 30) < 1 || Math.abs(rawFps - 29.97) < 1) newFps = 30;
+
+                              console.log(`[Studio] Auto-FPS: Setting project FPS to ${newFps} (from ${rawFps})`);
+
+                              setTimelineState(prev => ({
+                                ...prev,
+                                project: prev.project ? { ...prev.project, fps: newFps } : null
+                              }));
+
+                              // Update engine immediately
+                              engine?.setFps(newFps);
+                            }
+
+                            const fps = timelineState.project?.fps || 25;
+                            const playheadPos = timelineState.playheadSec;
+                            const timestamp = Date.now();
+                            const segId = `seg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+
+                            // Calculate proper duration using frames if available, else seconds
+                            const durationSec = media.durationSec || 5;
+                            const durationFrames = media.metadata?.totalFrames || Math.round(durationSec * fps);
+
+                            const newSegment: import('./types/timeline').SegmentWithUI = {
+                              id: `${segId}_v`,
+                              projectId: timelineState.project?.id || 'local',
+                              trackId: 'v1',
+                              order: currentSegments.filter(s => s.trackId === 'v1').length,
+                              inSec: playheadPos,
+                              outSec: playheadPos + durationSec,
+                              durationSec: durationSec,
+                              startFrame: Math.round(playheadPos * fps),
+                              durationFrames: durationFrames,
+
+                              label: media.name,
+                              locked: false,
+                              createdAt: new Date().toISOString(),
+                              updatedAt: new Date().toISOString(),
+                              uiState: 'idle',
+
+                              // Source linking
+                              mediaKind: 'rush',
+                              mediaId: media.id,
+                              mediaType: media.type as 'video' | 'image',
+                              sourceStartFrame: 0,
+                              sourceDurationFrames: durationFrames,
+                              sourceInSec: 0,
+                              sourceOutSec: durationSec,
+                              sourceDurationSec: durationSec
+                            };
+
+                            setTimelineState(prev => ({
+                              ...prev,
+                              segments: [...prev.segments, newSegment]
+                            }));
                           }}
                         />
 
