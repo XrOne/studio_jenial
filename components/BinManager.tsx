@@ -370,7 +370,7 @@ export const BinManager: React.FC<BinManagerProps> = ({
                                 className="group relative aspect-video bg-gray-800 rounded overflow-hidden border border-transparent hover:border-indigo-500 cursor-pointer ring-1 ring-white/5"
                                 onClick={() => onMediaSelect?.(media)}
                                 onContextMenu={(e) => handleContextMenu(e, media)}
-                                onDoubleClick={() => handleAddToTimeline(media)}
+                                onDoubleClick={() => onMediaSelect?.(media)} // NLE: DoubleClick = preview, NOT add to timeline
                                 draggable
                                 onDragStart={(e) => {
                                     e.dataTransfer.setData('application/json', JSON.stringify(media));

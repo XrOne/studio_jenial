@@ -153,8 +153,11 @@ export const SourceViewer: React.FC<SourceViewerProps> = ({
     // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            // Don't capture if typing in input
-            if ((e.target as HTMLElement).tagName === 'INPUT') return;
+            // NLE: Don't capture if typing in any text field
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.isContentEditable) return;
 
             const video = videoRef.current;
             if (!video) return;

@@ -1037,10 +1037,16 @@ const Studio: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if ((e.target as HTMLElement).isContentEditable) return;
       // Only active on Editing tab
       if (activeTab !== 'editing') return;
-      // Ignore if SourceViewer is open (it has its own shortcuts)
-      if (sourceMedia) return;
+
+      // NLE: When SourceViewer is open, allow Delete/Backspace for timeline but block other keys
+      // (SourceViewer handles V, B, I, O, Space, arrows)
+      if (sourceMedia) {
+        const deleteKeys = ['Delete', 'Backspace'];
+        if (!deleteKeys.includes(e.key)) return;
+      }
 
       const { selectedSegmentIds, segments, playheadSec } = timelineState;
       const selectedId = selectedSegmentIds.length > 0 ? selectedSegmentIds[0] : null;
