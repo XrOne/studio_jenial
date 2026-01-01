@@ -959,16 +959,29 @@ const Studio: React.FC = () => {
       if (segmentIndex === -1) return prev;
 
       const original = prev.segments[segmentIndex];
+      const fps = prev.project?.fps || 25;
+
+      // SNAP: Round cut point to nearest frame
+      const snappedSec = Math.round(atSec * fps) / fps;
 
       // Don't split if at edges
-      if (atSec <= original.inSec || atSec >= original.outSec) return prev;
+      if (snappedSec <= original.inSec || snappedSec >= original.outSec) return prev;
+
+      // Frame calculations
+      const cutFrame = Math.round(snappedSec * fps);
+      const originalStartFrame = original.startFrame ?? Math.round(original.inSec * fps);
+      const originalEndFrame = originalStartFrame + (original.durationFrames ?? Math.round(original.durationSec * fps));
+
+      const leftDurationFrames = cutFrame - originalStartFrame;
+      const rightDurationFrames = originalEndFrame - cutFrame;
 
       // Create two new segments from the split
       const leftSegment: SegmentWithUI = {
         ...original,
         id: `${original.id}_left_${Date.now()}`,
-        outSec: atSec,
-        durationSec: atSec - original.inSec,
+        outSec: snappedSec,
+        durationSec: snappedSec - original.inSec,
+        durationFrames: leftDurationFrames,
         label: `${original.label || 'Segment'} (1)`,
         updatedAt: new Date().toISOString()
       };
@@ -976,8 +989,10 @@ const Studio: React.FC = () => {
       const rightSegment: SegmentWithUI = {
         ...original,
         id: `${original.id}_right_${Date.now()}`,
-        inSec: atSec,
-        durationSec: original.outSec - atSec,
+        inSec: snappedSec,
+        durationSec: original.outSec - snappedSec,
+        startFrame: cutFrame,
+        durationFrames: rightDurationFrames,
         label: `${original.label || 'Segment'} (2)`,
         order: original.order + 1,
         updatedAt: new Date().toISOString()
@@ -990,7 +1005,7 @@ const Studio: React.FC = () => {
       // Update order for subsequent segments
       const reorderedSegments = newSegments.map((s, i) => ({ ...s, order: i }));
 
-      console.log(`[Timeline] Split segment ${segmentId} at ${atSec.toFixed(2)}s`);
+      console.log(`[Timeline] Split segment ${segmentId} at frame ${cutFrame} (${snappedSec.toFixed(3)}s)`);
 
       return {
         ...prev,
@@ -3087,6 +3102,7 @@ const Studio: React.FC = () => {
                         selectedSegmentIds={timelineState.selectedSegmentIds}
                         selectedTrackId={timelineState.selectedTrackId}
                         playheadSec={timelineState.playheadSec}
+                        fps={timelineState.project?.fps || 25}
                         onPlayheadChange={(sec) => {
                           seek(sec);
                           setTimelineState(s => ({ ...s, playheadSec: sec }));

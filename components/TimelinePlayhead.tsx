@@ -8,12 +8,12 @@
 'use client';
 
 import * as React from 'react';
-import { DEFAULT_FPS } from '../types/timeline';
 
 interface TimelinePlayheadProps {
     positionSec: number;
     pixelsPerSecond: number;
     height: number;
+    fps: number; // Project FPS for timecode display
     onDrag?: (newPositionSec: number) => void;
 }
 
@@ -27,6 +27,7 @@ export default function TimelinePlayhead({
     positionSec,
     pixelsPerSecond,
     height,
+    fps,
     onDrag,
 }: TimelinePlayheadProps) {
     const [isDragging, setIsDragging] = React.useState(false);
@@ -93,7 +94,7 @@ export default function TimelinePlayhead({
             {/* Hover indicator */}
             {isDragging && (
                 <div className="absolute top-3 left-2 px-1.5 py-0.5 bg-red-500 rounded text-[9px] text-white font-mono whitespace-nowrap">
-                    {formatTimecode(positionSec)}
+                    {formatTimecode(positionSec, fps)}
                 </div>
             )}
         </div>
@@ -101,11 +102,11 @@ export default function TimelinePlayhead({
 }
 
 /**
- * Format seconds to MM:SS:FF (frames at 24fps)
+ * Format seconds to MM:SS:FF
  */
-const formatTimecode = (seconds: number): string => {
+const formatTimecode = (seconds: number, fps: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    const frames = Math.floor((seconds % 1) * DEFAULT_FPS);
+    const frames = Math.floor((seconds % 1) * fps);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
 };

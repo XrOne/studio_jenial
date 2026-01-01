@@ -23,6 +23,7 @@ export interface HorizontalTimelineProps {
     selectedSegmentIds: string[];
     selectedTrackId: string | null;
     playheadSec: number;
+    fps: number; // Project FPS for timecode display
     onPlayheadChange: (sec: number) => void;
     onSegmentClick: (id: string) => void;
     onSegmentDoubleClick?: (id: string) => void;
@@ -64,6 +65,7 @@ export default function HorizontalTimeline({
     selectedSegmentIds,
     selectedTrackId,
     playheadSec,
+    fps,
     onPlayheadChange,
     onSegmentClick,
     onSegmentDoubleClick,
@@ -450,6 +452,7 @@ export default function HorizontalTimeline({
                             positionSec={playheadSec}
                             pixelsPerSecond={pixelsPerSecond}
                             height={tracks.reduce((h, t) => h + t.height, 0) + 28} // All tracks + ruler
+                            fps={fps}
                             onDrag={onPlayheadChange}
                         />
                     </div>
@@ -463,7 +466,7 @@ export default function HorizontalTimeline({
                     <span>Durée: {formatDuration(totalDuration - 10)}</span>
                 </div>
                 <div className="text-[10px] text-gray-500 font-mono">
-                    {formatTimecode(playheadSec)}
+                    {formatTimecode(playheadSec, fps)}
                 </div>
             </div>
         </div>
@@ -482,9 +485,9 @@ const formatDuration = (seconds: number): string => {
 /**
  * Format seconds to MM:SS:FF
  */
-const formatTimecode = (seconds: number): string => {
+const formatTimecode = (seconds: number, fps: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    const frames = Math.floor((seconds % 1) * DEFAULT_FPS);
+    const frames = Math.floor((seconds % 1) * fps);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
 };
