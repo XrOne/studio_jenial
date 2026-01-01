@@ -185,70 +185,74 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         }
     }, [isPlaying, playheadSec, currentV1Segment, nextV1Segment, activePlayer, fps]);
 
-    // 4. PRECISE FRAME CALLBACK & SWAP loop
-    // This loop runs every render frame (requestAnimationFrame) to check cuts precisely
+    // 4. PRECISE SWAP using requestVideoFrameCallback
+    // The key insight: we must start playing the inactive video BEFORE the cut point,
+    // wait for it to paint a frame, and ONLY THEN swap visibility.
     useEffect(() => {
-        if (!isPlaying) return;
+        if (!isPlaying || !currentV1Segment || !nextV1Segment) return;
 
+        const inactivePlayer = activePlayer === 'A' ? 'B' : 'A';
+        const inactiveVideo = activePlayer === 'A' ? videoRefB.current : videoRefA.current;
         const activeVideo = activePlayer === 'A' ? videoRefA.current : videoRefB.current;
-        if (!activeVideo) return;
 
-        let animationHandle: number;
+        if (!inactiveVideo || !activeVideo) return;
+        if (playerContent.current[inactivePlayer].segmentId !== nextV1Segment.id) return;
 
-        const checkCut = () => {
-            if (currentV1Segment && nextV1Segment) {
-                // The CUT determines that we should be playing the NEXT segment
-                // If playhead >= outSec of current, we should have swapped.
-                // We add a tolerance (0.5 frames) to trigger swap slightly early?
-                // No, trigger swap exactly at boundary.
-                // Actually, "globalFrame" from Engine is the truth.
+        // Distance to cut
+        const distToCut = currentV1Segment.outSec - playheadSec;
 
-                // If playheadSec enters next segment's domain:
-                if (playheadSec >= currentV1Segment.outSec - (1.0 / fps)) {
-                    // Time to swap!
-                    const inactivePlayer = activePlayer === 'A' ? 'B' : 'A';
-                    const inactiveVideo = activePlayer === 'A' ? videoRefB.current : videoRefA.current;
+        // PHASE 1: 0.5s before cut - Start preloading video playback (muted, hidden)
+        // This gives the decoder time to have frames ready
+        if (distToCut < 0.5 && distToCut > 0.1) {
+            if (inactiveVideo.paused && inactiveVideo.readyState >= 2) {
+                console.log(`[TimelinePreview] PRE-PLAY: Starting ${nextV1Segment.label} in background`);
+                // Seek to exactly where we need it
+                inactiveVideo.currentTime = nextV1Segment.sourceInSec ?? 0;
+                inactiveVideo.play().catch(() => { });
+            }
+        }
 
-                    if (inactiveVideo && playerContent.current[inactivePlayer].segmentId === nextV1Segment.id) {
-                        // Only swap if we haven't already swapped (checked by activePlayer state in dependency)
-                        // But playheadSec updates continuously.
-                        // We rely on state activePlayer to not re-swap back?
-                        // "currentV1Segment" will change AFTER playhead crosses boundary.
-                        // So we have a small window where playhead is past outSec, but currentV1Segment hasn't updated in React?
-                        // No, currentV1Segment is memoized on playheadSec.
+        // PHASE 2: At cut point - Wait for frame then swap
+        if (distToCut <= (1.5 / fps) && distToCut > -(1.0 / fps)) {
+            // Time to swap! But only if inactive video is actually playing
+            if (!inactiveVideo.paused && inactiveVideo.style.opacity === '0') {
 
-                        // Issue: If currentV1Segment updates, then NEXT segment becomes CURRENT.
-                        // So we'd be in the NEW segment.
-                        // So we don't need to force swap??
-                        // REACT will swap?
-                        // NO. React state update is slow. Double buffer means we manually swap DOM VISIBILITY before React catches up.
+                // Use requestVideoFrameCallback if available
+                // Capture refs with explicit type to avoid TS narrowing issues
+                const nextVideo: HTMLVideoElement = inactiveVideo;
+                const prevVideo: HTMLVideoElement = activeVideo;
+                const nextPlayer = inactivePlayer;
 
-                        // BUT `activePlayer` IS React state.
-                        // So waiting for `activePlayer` to update relies on React render cycle (16ms).
-                        // We want instant swap.
-
-                        // FORCE DOM UPDATE
-                        if (inactiveVideo.style.opacity === '0') {
+                if ('requestVideoFrameCallback' in nextVideo) {
+                    (nextVideo as HTMLVideoElement & { requestVideoFrameCallback: (cb: () => void) => void })
+                        .requestVideoFrameCallback(() => {
+                            // Frame is ready! NOW swap visibility
                             const gapFrames = Math.round((nextV1Segment.inSec - currentV1Segment.outSec) * fps);
-                            console.log(`[TimelinePreview] INSTANT SWAP at ${formatTimecode(playheadSec, fps)} | Gap: ${gapFrames} frames`);
-                            inactiveVideo.style.opacity = '1';
-                            inactiveVideo.style.zIndex = '10';
-                            activeVideo.style.opacity = '0';
-                            activeVideo.style.zIndex = '0';
+                            console.log(`[TimelinePreview] FRAME-READY SWAP at ${formatTimecode(playheadSec, fps)} | Gap: ${gapFrames} frames`);
 
-                            inactiveVideo.play().catch(e => console.error(e));
+                            nextVideo.style.opacity = '1';
+                            nextVideo.style.zIndex = '10';
+                            prevVideo.style.opacity = '0';
+                            prevVideo.style.zIndex = '0';
+                            prevVideo.pause();
 
-                            // Update State to match DOM
-                            setActivePlayer(inactivePlayer);
-                        }
-                    }
+                            setActivePlayer(nextPlayer);
+                        });
+                } else {
+                    // Fallback: swap immediately (may flash)
+                    const gapFrames = Math.round((nextV1Segment.inSec - currentV1Segment.outSec) * fps);
+                    console.log(`[TimelinePreview] IMMEDIATE SWAP (no RVFC) at ${formatTimecode(playheadSec, fps)} | Gap: ${gapFrames} frames`);
+
+                    nextVideo.style.opacity = '1';
+                    nextVideo.style.zIndex = '10';
+                    prevVideo.style.opacity = '0';
+                    prevVideo.style.zIndex = '0';
+                    prevVideo.pause();
+
+                    setActivePlayer(nextPlayer);
                 }
             }
-            animationHandle = requestAnimationFrame(checkCut);
-        };
-
-        checkCut();
-        return () => cancelAnimationFrame(animationHandle);
+        }
     }, [isPlaying, playheadSec, currentV1Segment, nextV1Segment, activePlayer, fps]);
 
 
