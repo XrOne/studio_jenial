@@ -121,6 +121,7 @@ export interface Segment {
     mediaSrc?: string;      // URL to source media file
     sourceInSec?: number;   // In point within source media
     sourceOutSec?: number;  // Out point within source media
+    sourceDurationSec?: number; // Total duration of source media (for trim limits)
     // Linked clips (Premiere Pro paradigm)
     linkGroupId?: string;   // Shared ID for linked V1+A1 segments
     mediaType?: MediaType;  // Type of media this segment represents

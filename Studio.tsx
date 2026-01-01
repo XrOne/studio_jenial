@@ -78,7 +78,7 @@ import { TimelineState, SegmentWithUI, SegmentRevision, DEFAULT_FPS } from './ty
 import VerticalTimelineStack from './components/VerticalTimelineStack';
 import SegmentIAPanel from './components/SegmentIAPanel';
 import { TimelineService } from './services/timelineService';
-import HorizontalTimeline from './components/HorizontalTimeline';
+import ReactTimelineWrapper from './components/ReactTimelineWrapper';
 
 // ===================================================================
 // NEUTRAL DEFAULT: No hardcoded dogmas
@@ -572,6 +572,43 @@ const Studio: React.FC = () => {
   // === TIMELINE PLAYBACK STATE ===
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // === UNDO/REDO HISTORY ===
+  const historyRef = useRef<{ past: TimelineState[]; future: TimelineState[] }>({ past: [], future: [] });
+  const MAX_HISTORY = 50;
+
+  // Track timeline changes for undo (call this before making changes)
+  const pushToHistory = useCallback(() => {
+    historyRef.current.past.push(JSON.parse(JSON.stringify(timelineState)));
+    if (historyRef.current.past.length > MAX_HISTORY) {
+      historyRef.current.past.shift(); // Remove oldest
+    }
+    historyRef.current.future = []; // Clear redo stack
+  }, [timelineState]);
+
+  // Undo handler
+  const handleUndo = useCallback(() => {
+    if (historyRef.current.past.length === 0) {
+      console.log('[Undo] Nothing to undo');
+      return;
+    }
+    const previousState = historyRef.current.past.pop()!;
+    historyRef.current.future.push(JSON.parse(JSON.stringify(timelineState)));
+    setTimelineState(previousState);
+    console.log('[Undo] Restored previous state');
+  }, [timelineState]);
+
+  // Redo handler
+  const handleRedo = useCallback(() => {
+    if (historyRef.current.future.length === 0) {
+      console.log('[Redo] Nothing to redo');
+      return;
+    }
+    const nextState = historyRef.current.future.pop()!;
+    historyRef.current.past.push(JSON.parse(JSON.stringify(timelineState)));
+    setTimelineState(nextState);
+    console.log('[Redo] Restored next state');
+  }, [timelineState]);
+
   // Auto-open profile modal if no profile
   useEffect(() => {
     // Delay slightly to allow auto-login check in hook
@@ -978,6 +1015,27 @@ const Studio: React.FC = () => {
         : 30;
 
       switch (e.key) {
+        // === UNDO/REDO (Ctrl+Z / Ctrl+Y) ===
+        case 'z':
+        case 'Z':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (e.shiftKey) {
+              handleRedo(); // Ctrl+Shift+Z = Redo
+            } else {
+              handleUndo(); // Ctrl+Z = Undo
+            }
+          }
+          break;
+
+        case 'y':
+        case 'Y':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            handleRedo(); // Ctrl+Y = Redo
+          }
+          break;
+
         // === FRAME NAVIGATION ===
         case 'ArrowLeft':
           e.preventDefault();
@@ -1090,7 +1148,7 @@ const Studio: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [timelineState, activeTab, sourceMedia, handleSegmentDelete, handleSplitSegment, frameStep]);
+  }, [timelineState, activeTab, sourceMedia, handleSegmentDelete, handleSplitSegment, frameStep, handleUndo, handleRedo]);
 
   const generateThumbnail = async (videoBlob: Blob): Promise<string> => {
     const objectUrl = URL.createObjectURL(videoBlob);
@@ -2937,197 +2995,17 @@ const Studio: React.FC = () => {
                       </div>
 
                       {/* BOTTOM: Horizontal Timeline */}
-                      <HorizontalTimeline
-                        tracks={timelineState.tracks}
+                      <ReactTimelineWrapper
                         segments={timelineState.segments}
+                        tracks={timelineState.tracks}
                         selectedSegmentIds={timelineState.selectedSegmentIds}
-                        selectedTrackId={timelineState.selectedTrackId}
                         playheadSec={timelineState.playheadSec}
+                        onSegmentsChange={(segments) => setTimelineState(s => ({ ...s, segments }))}
                         onPlayheadChange={(sec) => setTimelineState(s => ({ ...s, playheadSec: sec }))}
-                        onSegmentClick={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
+                        onSegmentSelect={(id) => setTimelineState(s => ({ ...s, selectedSegmentIds: [id] }))}
                         onSegmentDoubleClick={(id) => setTimelineState(s => ({ ...s, expandedSegmentIds: [...s.expandedSegmentIds, id] }))}
-                        onTrackSelect={(trackId) => setTimelineState(s => ({ ...s, selectedTrackId: trackId }))}
-                        onTrackToggleLock={(trackId) => setTimelineState(s => ({
-                          ...s,
-                          tracks: s.tracks.map(t => t.id === trackId ? { ...t, locked: !t.locked } : t)
-                        }))}
-                        onTrackToggleMute={(trackId) => setTimelineState(s => ({
-                          ...s,
-                          tracks: s.tracks.map(t => t.id === trackId ? { ...t, muted: !t.muted } : t)
-                        }))}
-                        onTrackToggleVisible={(trackId) => setTimelineState(s => ({
-                          ...s,
-                          tracks: s.tracks.map(t => t.id === trackId ? { ...t, visible: !t.visible } : t)
-                        }))}
-                        onSegmentTrim={(segmentId, edge, newTime, trimMode) => {
-                          setTimelineState(prev => {
-                            const segment = prev.segments.find(s => s.id === segmentId);
-                            if (!segment) return prev;
-
-                            const mode = trimMode || 'normal';
-                            let newSegments = [...prev.segments];
-
-                            // Find segment index
-                            const segIndex = newSegments.findIndex(s => s.id === segmentId);
-                            if (segIndex === -1) return prev;
-
-                            // Get linked segments for video/audio sync
-                            const linkedIds = segment.linkGroupId
-                              ? prev.segments.filter(s => s.linkGroupId === segment.linkGroupId).map(s => s.id)
-                              : [segmentId];
-
-                            if (edge === 'start') {
-                              // === TRIMMING LEFT EDGE (IN POINT) ===
-                              const delta = newTime - segment.inSec;
-                              const minIn = 0;
-                              const maxIn = segment.outSec - 0.1;
-                              const clampedNewTime = Math.max(minIn, Math.min(maxIn, newTime));
-                              const actualDelta = clampedNewTime - segment.inSec;
-
-                              if (mode === 'ripple') {
-                                // RIPPLE: Trim and shift all following segments
-                                newSegments = newSegments.map(s => {
-                                  if (linkedIds.includes(s.id)) {
-                                    // Trim this segment
-                                    return {
-                                      ...s,
-                                      inSec: clampedNewTime,
-                                      durationSec: s.outSec - clampedNewTime,
-                                      sourceInSec: (s.sourceInSec ?? 0) + actualDelta
-                                    };
-                                  } else if (s.inSec >= segment.outSec) {
-                                    // Shift following segments
-                                    return {
-                                      ...s,
-                                      inSec: s.inSec + actualDelta,
-                                      outSec: s.outSec + actualDelta
-                                    };
-                                  }
-                                  return s;
-                                });
-                              } else if (mode === 'slip') {
-                                // SLIP: Change source in/out, keep timeline position
-                                newSegments = newSegments.map(s => {
-                                  if (linkedIds.includes(s.id)) {
-                                    return {
-                                      ...s,
-                                      sourceInSec: (s.sourceInSec ?? 0) + actualDelta,
-                                      sourceOutSec: (s.sourceOutSec ?? s.durationSec) + actualDelta
-                                    };
-                                  }
-                                  return s;
-                                });
-                              } else {
-                                // NORMAL: Just adjust in point
-                                newSegments = newSegments.map(s => {
-                                  if (linkedIds.includes(s.id)) {
-                                    return {
-                                      ...s,
-                                      inSec: clampedNewTime,
-                                      durationSec: s.outSec - clampedNewTime,
-                                      sourceInSec: (s.sourceInSec ?? 0) + actualDelta
-                                    };
-                                  }
-                                  return s;
-                                });
-                              }
-                            } else {
-                              // === TRIMMING RIGHT EDGE (OUT POINT) ===
-                              const minOut = segment.inSec + 0.1;
-                              const clampedNewTime = Math.max(minOut, newTime);
-                              const actualDelta = clampedNewTime - segment.outSec;
-
-                              if (mode === 'ripple') {
-                                // RIPPLE: Trim and shift all following segments
-                                newSegments = newSegments.map(s => {
-                                  if (linkedIds.includes(s.id)) {
-                                    // Trim this segment
-                                    return {
-                                      ...s,
-                                      outSec: clampedNewTime,
-                                      durationSec: clampedNewTime - s.inSec,
-                                      sourceOutSec: (s.sourceInSec ?? 0) + (clampedNewTime - s.inSec)
-                                    };
-                                  } else if (s.inSec >= segment.outSec) {
-                                    // Shift following segments
-                                    return {
-                                      ...s,
-                                      inSec: s.inSec + actualDelta,
-                                      outSec: s.outSec + actualDelta
-                                    };
-                                  }
-                                  return s;
-                                });
-                              } else if (mode === 'slip') {
-                                // SLIP: Change source in/out, keep timeline position
-                                newSegments = newSegments.map(s => {
-                                  if (linkedIds.includes(s.id)) {
-                                    return {
-                                      ...s,
-                                      sourceInSec: (s.sourceInSec ?? 0) + actualDelta,
-                                      sourceOutSec: (s.sourceOutSec ?? s.durationSec) + actualDelta
-                                    };
-                                  }
-                                  return s;
-                                });
-                              } else {
-                                // NORMAL: Just adjust out point
-                                newSegments = newSegments.map(s => {
-                                  if (linkedIds.includes(s.id)) {
-                                    return {
-                                      ...s,
-                                      outSec: clampedNewTime,
-                                      durationSec: clampedNewTime - s.inSec,
-                                      sourceOutSec: (s.sourceInSec ?? 0) + (clampedNewTime - s.inSec)
-                                    };
-                                  }
-                                  return s;
-                                });
-                              }
-                            }
-
-                            console.log(`[TRIM] ${mode} ${edge} on ${segmentId}: ${segment.inSec.toFixed(2)} -> ${newTime.toFixed(2)}`);
-                            return { ...prev, segments: newSegments };
-                          });
-                        }}
-                        onSegmentMove={(segmentId, newInSec) => {
-                          setTimelineState(prev => ({
-                            ...prev,
-                            segments: prev.segments.map(s => {
-                              if (s.id !== segmentId) return s;
-                              return { ...s, inSec: newInSec, outSec: newInSec + s.durationSec };
-                            })
-                          }));
-                        }}
-                        onDeleteGap={(atSec, trackId) => {
-                          // Find segments on this track and close gaps
-                          setTimelineState(prev => {
-                            const trackSegments = prev.segments
-                              .filter(s => s.trackId === trackId)
-                              .sort((a, b) => a.inSec - b.inSec);
-
-                            // Find gap at this position and close it
-                            for (let i = 0; i < trackSegments.length - 1; i++) {
-                              const current = trackSegments[i];
-                              const next = trackSegments[i + 1];
-                              const gapStart = current.outSec;
-                              const gapEnd = next.inSec;
-
-                              if (atSec >= gapStart && atSec < gapEnd) {
-                                const gapSize = gapEnd - gapStart;
-                                // Shift all subsequent segments left
-                                return {
-                                  ...prev,
-                                  segments: prev.segments.map(s => {
-                                    if (s.trackId !== trackId || s.inSec < gapEnd) return s;
-                                    return { ...s, inSec: s.inSec - gapSize, outSec: s.outSec - gapSize };
-                                  })
-                                };
-                              }
-                            }
-                            return prev;
-                          });
-                        }}
+                        onUndo={handleUndo}
+                        onRedo={handleRedo}
                         onCut={() => {
                           const segmentAtPlayhead = timelineState.segments.find(s =>
                             timelineState.playheadSec > s.inSec && timelineState.playheadSec < s.outSec
@@ -3143,6 +3021,8 @@ const Studio: React.FC = () => {
                         onExport={() => setIsExportDialogOpen(true)}
                         onSaveJson={handleSaveProjectJson}
                         onLoadJson={() => fileInputRef.current?.click()}
+                        canUndo={historyRef.current.past.length > 0}
+                        canRedo={historyRef.current.future.length > 0}
                         className="h-48 shrink-0"
                       />
 
