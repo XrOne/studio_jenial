@@ -67,14 +67,16 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
     // === PLAYBACK LOGIC ===
 
     // Find the current segment on V1 (Main Track)
-    // TODO: Support multi-track compositing. For now, optimize V1 cuts.
+    // EPSILON FRAME: Add tolerance to prevent "0 segment" at exact cut boundary
+    // A segment is active if: playheadSec >= inSec && playheadSec < outSec + epsilon
     const currentV1Segment = useMemo(() => {
+        const epsilon = 1.0 / fps; // 1 frame tolerance
         return segments.find(s =>
             s.trackId === 'v1' &&
             playheadSec >= s.inSec &&
-            playheadSec < s.outSec
+            playheadSec < s.outSec + epsilon
         );
-    }, [segments, playheadSec]);
+    }, [segments, playheadSec, fps]);
 
     // Find the NEXT segment on V1 (for preloading)
     const nextV1Segment = useMemo(() => {
@@ -104,13 +106,22 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         }
 
         console.log(`[TimelinePreview] Loading ${segment.label} into Player ${player}`);
+
+        // Add event listeners for debugging
+        const logEvent = (event: string) => () =>
+            console.log(`[TimelinePreview][${player}] ${event} - readyState: ${video.readyState}`);
+
+        video.addEventListener('waiting', logEvent('WAITING'), { once: true });
+        video.addEventListener('stalled', logEvent('STALLED'), { once: true });
+        video.addEventListener('seeking', logEvent('SEEKING'), { once: true });
+        video.addEventListener('seeked', logEvent('SEEKED'), { once: true });
+        video.addEventListener('canplay', logEvent('CANPLAY'), { once: true });
+
         video.src = url;
         video.load();
         playerContent.current[player].segmentId = segment.id;
 
-        // Initial seek
-        // Calculate seek position (frame accurate ideally)
-        // For preload, we seek to sourceInSec
+        // Initial seek - to sourceInSec (start of source clip)
         video.currentTime = segment.sourceInSec ?? 0;
     }, []);
 
@@ -201,9 +212,9 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         // Distance to cut
         const distToCut = currentV1Segment.outSec - playheadSec;
 
-        // PHASE 1: 0.5s before cut - Start preloading video playback (muted, hidden)
-        // This gives the decoder time to have frames ready
-        if (distToCut < 0.5 && distToCut > 0.1) {
+        // PHASE 1: 1s before cut - Start preloading video playback (muted, hidden)
+        // Extended window gives decoder more time for frames
+        if (distToCut < 1.0 && distToCut > 0.1) {
             if (inactiveVideo.paused && inactiveVideo.readyState >= 2) {
                 console.log(`[TimelinePreview] PRE-PLAY: Starting ${nextV1Segment.label} in background`);
                 // Seek to exactly where we need it
@@ -214,7 +225,7 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
 
         // PHASE 2: At cut point - Wait for frame then swap
         if (distToCut <= (1.5 / fps) && distToCut > -(1.0 / fps)) {
-            // Time to swap! But only if inactive video is actually playing
+            // Check if next video is ready to swap
             if (!inactiveVideo.paused && inactiveVideo.style.opacity === '0') {
 
                 // Use requestVideoFrameCallback if available
@@ -251,6 +262,10 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
 
                     setActivePlayer(nextPlayer);
                 }
+            } else if (inactiveVideo.paused && distToCut <= 0) {
+                // HOLD LAST FRAME: Next video not ready, keep current visible
+                // This prevents black flash - we accept late swap over black
+                console.log(`[TimelinePreview] HOLD: Next not ready at cut point, keeping current frame | readyState: ${inactiveVideo.readyState}`);
             }
         }
     }, [isPlaying, playheadSec, currentV1Segment, nextV1Segment, activePlayer, fps]);
