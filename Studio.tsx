@@ -13,11 +13,13 @@ import {
   BookMarkedIcon,
   CurvedArrowDownIcon,
   FilmIcon,
+  FolderIcon,
   KeyIcon,
   SparklesIcon,
   UsersIcon,
   UploadCloudIcon,
 } from './components/icons';
+import { ProjectManager } from './components/ProjectManager';
 import LoadingIndicator from './components/LoadingIndicator';
 import PromptEditorModal from './components/PromptEditorModal';
 import PromptSequenceAssistant from './components/PromptSequenceAssistant';
@@ -2473,7 +2475,7 @@ const Studio: React.FC = () => {
                     <div className="w-full h-full p-4">
                       {currentStage === AppStage.PROMPTING && (
                         <div className="grid grid-cols-3 gap-4 h-full">
-                          <div className="col-span-2 h-full">
+                          <div className="col-span-2 h-full max-h-[calc(100vh-160px)] overflow-hidden">
                             <PromptSequenceAssistant
                               onSequenceGenerated={handleSequenceGenerated}
                               activeDogma={activeDogma}

@@ -1,143 +1,129 @@
-
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
-*/
+ * useShotLibrary Hook - Local-First with IndexedDB
+ * Stores shots in local IndexedDB for full quality, offline-first workflow
+ * Cloud sync is optional (Supabase) - disabled by default for cost reasons
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import { SavedShot } from '../types';
-import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
-import { defaultShots } from '../data/defaultShots';
-import useLocalStorage from './useLocalStorage';
+import { LocalShot } from '../types/project';
+import { saveShot as saveToIndexedDB, getShotsByProject, deleteShot as deleteFromIndexedDB, blobToBase64, base64ToBlob, db } from '../services/localMediaDB';
+
+const ACTIVE_PROJECT_KEY = 'studio_jenial_active_project';
 
 export function useShotLibrary() {
-  // Fallback local state using existing hook
-  const [localShots, setLocalShots] = useLocalStorage<SavedShot[]>('shot-library', defaultShots);
-
-  // Real exposed state
-  const [shots, setShots] = useState<SavedShot[]>(localShots);
+  const [shots, setShots] = useState<SavedShot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isCloudEnabled, setIsCloudEnabled] = useState(isSupabaseConfigured());
+  const isCloudEnabled = false; // Cloud disabled - local-first
 
-  // Sync initial load
+  // Get current project ID
+  const getProjectId = (): string => {
+    return localStorage.getItem(ACTIVE_PROJECT_KEY) || 'default-project';
+  };
+
+  // Load shots from IndexedDB on mount
   useEffect(() => {
-    if (isCloudEnabled && supabase) {
-      fetchCloudShots();
-    } else {
-      setShots(localShots);
-    }
-  }, [isCloudEnabled]); // Depend on cloud status
+    loadShots();
+  }, []);
 
-  const fetchCloudShots = async () => {
-    if (!supabase) return;
+  const loadShots = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('shots')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const projectId = getProjectId();
+      const localShots = await getShotsByProject(projectId);
 
-      if (error) throw error;
+      // Convert LocalShot to SavedShot format
+      const savedShots: SavedShot[] = await Promise.all(localShots.map(async (shot) => ({
+        id: shot.id,
+        prompt: shot.prompt,
+        createdAt: shot.createdAt,
+        model: shot.model,
+        // Convert blob to base64 for display
+        thumbnail: shot.thumbnailBlob ? await blobToBase64(shot.thumbnailBlob) : undefined,
+        videoUrl: shot.videoUrl || (shot.videoBlob ? URL.createObjectURL(shot.videoBlob) : undefined),
+      })));
 
-      if (data) {
-        // Map database columns to SavedShot type if snake_case is used in DB
-        const mappedShots: SavedShot[] = data.map((item: any) => ({
-          id: item.id,
-          title: item.title,
-          prompt: item.prompt,
-          thumbnail: item.thumbnail,
-          createdAt: item.created_at || item.createdAt, // Handle both cases
-          model: item.model,
-          aspectRatio: item.aspect_ratio || item.aspectRatio,
-          resolution: item.resolution,
-          mode: item.mode,
-          // P1: Video restoration fields
-          videoUrl: item.video_url || item.videoUrl,
-          previewImageBase64: item.preview_image_base64 || item.previewImageBase64,
-        }));
-        setShots(mappedShots);
-      }
+      setShots(savedShots);
+      console.log(`[useShotLibrary] Loaded ${savedShots.length} shots from IndexedDB`);
     } catch (error) {
-      console.error("Error fetching shots from Supabase:", error);
-      // Fallback to local if fetch fails? Or just show error.
-      // For now, keep what we have or fallback
+      console.error('[useShotLibrary] Failed to load shots:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const addShot = async (newShot: SavedShot) => {
-    if (isCloudEnabled && supabase) {
-      // Optimistic update
+  const addShot = useCallback(async (newShot: SavedShot) => {
+    const projectId = getProjectId();
+
+    // Create LocalShot for IndexedDB
+    const localShot: LocalShot = {
+      id: newShot.id,
+      projectId,
+      prompt: newShot.prompt,
+      createdAt: newShot.createdAt,
+      model: newShot.model,
+      segmentIndex: undefined,
+      // Convert base64 thumbnail to blob for efficient storage
+      thumbnailBlob: newShot.thumbnail ? base64ToBlob(newShot.thumbnail, 'image/png') : undefined,
+      videoUrl: newShot.videoUrl,
+    };
+
+    try {
+      await saveToIndexedDB(localShot);
       setShots(prev => [newShot, ...prev]);
-
-      try {
-        const { error } = await supabase.from('shots').insert([{
-          id: newShot.id,
-          title: newShot.title,
-          prompt: newShot.prompt,
-          thumbnail: newShot.thumbnail,
-          created_at: newShot.createdAt,
-          model: newShot.model,
-          aspect_ratio: newShot.aspectRatio,
-          resolution: newShot.resolution,
-          mode: newShot.mode,
-          // P1: Video restoration fields
-          video_url: newShot.videoUrl,
-          preview_image_base64: newShot.previewImageBase64,
-        }]);
-        if (error) throw error;
-      } catch (err) {
-        console.error("Failed to save shot to cloud:", err);
-        alert("Failed to sync shot to cloud, but it is saved locally for this session.");
-        // In a real app, we might rollback the state here
-      }
-    } else {
-      // Local Storage logic
-      const updated = [newShot, ...localShots];
-      setLocalShots(updated);
-      setShots(updated);
+      console.log(`[useShotLibrary] Saved shot: ${newShot.id}`);
+    } catch (error) {
+      console.error('[useShotLibrary] Failed to save shot:', error);
+      throw error;
     }
-  };
+  }, []);
 
-  const deleteShot = async (shotId: string) => {
-    if (isCloudEnabled && supabase) {
-      // Optimistic update
+  const deleteShot = useCallback(async (shotId: string) => {
+    try {
+      await deleteFromIndexedDB(shotId);
       setShots(prev => prev.filter(s => s.id !== shotId));
-      try {
-        const { error } = await supabase.from('shots').delete().eq('id', shotId);
-        if (error) throw error;
-      } catch (err) {
-        console.error("Failed to delete from cloud:", err);
-      }
-    } else {
-      const updated = localShots.filter(s => s.id !== shotId);
-      setLocalShots(updated);
-      setShots(updated);
+      console.log(`[useShotLibrary] Deleted shot: ${shotId}`);
+    } catch (error) {
+      console.error('[useShotLibrary] Failed to delete shot:', error);
     }
-  };
+  }, []);
 
-  const updateShotTitle = async (shotId: string, newTitle: string) => {
-    if (isCloudEnabled && supabase) {
-      setShots(prev => prev.map(s => s.id === shotId ? { ...s, title: newTitle } : s));
-      try {
-        const { error } = await supabase.from('shots').update({ title: newTitle }).eq('id', shotId);
-        if (error) throw error;
-      } catch (err) {
-        console.error("Failed to update title in cloud:", err);
+  const updateShotTitle = useCallback(async (shotId: string, newTitle: string) => {
+    try {
+      // Get existing shot
+      const existing = await db.shots.get(shotId);
+      if (existing) {
+        // Update in IndexedDB
+        await db.shots.update(shotId, { ...existing });
+        setShots(prev => prev.map(s => s.id === shotId ? { ...s, title: newTitle } : s));
       }
-    } else {
-      const updated = localShots.map(s => s.id === shotId ? { ...s, title: newTitle } : s);
-      setLocalShots(updated);
-      setShots(updated);
+    } catch (error) {
+      console.error('[useShotLibrary] Failed to update shot title:', error);
     }
-  };
+  }, []);
+
+  // Save video blob to shot (for full quality storage)
+  const saveVideoToShot = useCallback(async (shotId: string, videoBlob: Blob) => {
+    try {
+      const existing = await db.shots.get(shotId);
+      if (existing) {
+        existing.videoBlob = videoBlob;
+        await db.shots.put(existing);
+        console.log(`[useShotLibrary] Saved video blob for shot: ${shotId} (${(videoBlob.size / 1024 / 1024).toFixed(2)}MB)`);
+      }
+    } catch (error) {
+      console.error('[useShotLibrary] Failed to save video:', error);
+    }
+  }, []);
 
   return {
     shots,
     addShot,
     deleteShot,
     updateShotTitle,
+    saveVideoToShot,
     isCloudEnabled,
-    isLoading
+    isLoading,
+    refreshShots: loadShots,
   };
 }

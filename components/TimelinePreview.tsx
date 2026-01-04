@@ -97,7 +97,6 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
     }, []);
 
     // === SINGLE UNIFIED PLAYBACK EFFECT ===
-    // This handles: load, preload, sync, and swap - ALL IN ONE PLACE
     useEffect(() => {
         const videoA = videoRefA.current;
         const videoB = videoRefB.current;
@@ -105,37 +104,42 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
 
         const activeVideo = activePlayer === 'A' ? videoA : videoB;
         const inactiveVideo = activePlayer === 'A' ? videoB : videoA;
-        const inactivePlayerName = activePlayer === 'A' ? 'B' : 'A';
+        const inactivePlayerName: 'A' | 'B' = activePlayer === 'A' ? 'B' : 'A';
+
+        // 0. END OF TIMELINE: No current segment = pause and show black
+        if (!currentV1Segment) {
+            activeVideo.pause();
+            inactiveVideo.pause();
+            return;
+        }
 
         // 1. ENSURE CURRENT SEGMENT IS LOADED IN ACTIVE PLAYER
-        if (currentV1Segment) {
-            const wantedId = currentV1Segment.id;
-            const currentLoadedId = playerContent.current[activePlayer].segmentId;
+        const wantedId = currentV1Segment.id;
+        const currentLoadedId = playerContent.current[activePlayer].segmentId;
 
-            if (currentLoadedId !== wantedId) {
-                const url = getSegmentUrl(currentV1Segment);
-                if (url) {
-                    console.log(`[TimelinePreview] Loading ${currentV1Segment.label} into Active ${activePlayer}`);
-                    activeVideo.src = url;
-                    activeVideo.load();
-                    playerContent.current[activePlayer].segmentId = wantedId;
+        if (currentLoadedId !== wantedId) {
+            const url = getSegmentUrl(currentV1Segment);
+            if (url) {
+                console.log(`[TimelinePreview] Loading ${currentV1Segment.label} into Active ${activePlayer}`);
+                activeVideo.src = url;
+                activeVideo.load();
+                playerContent.current[activePlayer].segmentId = wantedId;
 
-                    const posInSeg = playheadSec - currentV1Segment.inSec;
-                    activeVideo.currentTime = (currentV1Segment.sourceInSec ?? 0) + posInSeg;
+                const posInSeg = playheadSec - currentV1Segment.inSec;
+                activeVideo.currentTime = (currentV1Segment.sourceInSec ?? 0) + posInSeg;
 
-                    if (isPlaying) {
-                        activeVideo.play().catch(() => { });
-                    }
+                if (isPlaying) {
+                    activeVideo.play().catch(() => { });
                 }
             }
+        }
 
-            // 2. SYNC TIME (for scrubbing)
-            if (!isPlaying) {
-                const posInSeg = playheadSec - currentV1Segment.inSec;
-                const seekPos = (currentV1Segment.sourceInSec ?? 0) + posInSeg;
-                if (Math.abs(activeVideo.currentTime - seekPos) > 0.05) {
-                    activeVideo.currentTime = seekPos;
-                }
+        // 2. SYNC TIME (for scrubbing when not playing)
+        if (!isPlaying) {
+            const posInSeg = playheadSec - currentV1Segment.inSec;
+            const seekPos = (currentV1Segment.sourceInSec ?? 0) + posInSeg;
+            if (Math.abs(activeVideo.currentTime - seekPos) > 0.05) {
+                activeVideo.currentTime = seekPos;
             }
         }
 
@@ -156,45 +160,29 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
             }
         }
 
-        // 4. SWAP LOGIC - Simple and direct
-        if (currentV1Segment && nextV1Segment && isPlaying) {
+        // 4. SWAP LOGIC - At cut point
+        if (nextV1Segment && isPlaying) {
             const distToCut = currentV1Segment.outSec - playheadSec;
 
-            // When close to cut AND we haven't swapped yet for this segment
             if (distToCut <= (2 / fps) && distToCut > -(3 / fps)) {
                 const nextLoadedId = playerContent.current[inactivePlayerName].segmentId;
 
                 if (nextLoadedId === nextV1Segment.id && swapTriggered.current !== nextV1Segment.id) {
-                    // Check if inactive video is ready
                     if (inactiveVideo.readyState >= 2) {
-                        console.log(`[TimelinePreview] SWAP: ${activePlayer} → ${inactivePlayerName} | readyState: ${inactiveVideo.readyState}`);
-
-                        // Mark swap as triggered to prevent re-triggering
+                        console.log(`[TimelinePreview] SWAP: ${activePlayer} → ${inactivePlayerName}`);
                         swapTriggered.current = nextV1Segment.id;
 
-                        // Seek inactive to exact position
                         inactiveVideo.currentTime = nextV1Segment.sourceInSec ?? 0;
-
-                        // Start playing inactive
                         inactiveVideo.play().then(() => {
-                            // Swap visibility
                             setActivePlayer(inactivePlayerName);
-                            // Pause old video after swap
                             setTimeout(() => activeVideo.pause(), 50);
                         }).catch(() => {
-                            // If play fails, still swap but try again
                             setActivePlayer(inactivePlayerName);
                         });
                     }
                 }
             }
         }
-
-        // Reset swap trigger when segment changes
-        if (currentV1Segment && swapTriggered.current && swapTriggered.current !== nextV1Segment?.id) {
-            // Do nothing - keep the current trigger valid
-        }
-
     }, [playheadSec, isPlaying, currentV1Segment, nextV1Segment, activePlayer, fps, getSegmentUrl]);
 
     // === PLAY/PAUSE SYNC ===
@@ -209,6 +197,9 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         }
     }, [isPlaying, activePlayer]);
 
+    // Determine if we should show video or black
+    const hasActiveSegment = currentV1Segment !== undefined;
+
     return (
         <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
             {/* VIDEO A */}
@@ -216,7 +207,7 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                 ref={videoRefA}
                 className="absolute top-0 left-0 w-full h-full object-contain"
                 style={{
-                    opacity: activePlayer === 'A' ? 1 : 0,
+                    opacity: hasActiveSegment && activePlayer === 'A' ? 1 : 0,
                     zIndex: activePlayer === 'A' ? 10 : 0,
                     transition: 'none'
                 }}
@@ -229,7 +220,7 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                 ref={videoRefB}
                 className="absolute top-0 left-0 w-full h-full object-contain"
                 style={{
-                    opacity: activePlayer === 'B' ? 1 : 0,
+                    opacity: hasActiveSegment && activePlayer === 'B' ? 1 : 0,
                     zIndex: activePlayer === 'B' ? 10 : 0,
                     transition: 'none'
                 }}
@@ -239,7 +230,7 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
 
             {/* DEBUG OVERLAY */}
             <div className="absolute top-2 right-2 bg-black/50 text-white text-xs p-1 font-mono pointer-events-none z-50">
-                {activePlayer} | {currentV1Segment?.label?.slice(0, 20) || 'None'} | {formatTimecode(playheadSec, fps)}
+                {activePlayer} | {currentV1Segment?.label?.slice(0, 20) || 'END'} | {formatTimecode(playheadSec, fps)}
             </div>
         </div>
     );

@@ -4,6 +4,7 @@
 */
 import * as React from 'react';
 import {
+  AlertTriangle,
   ArrowUp,
   // AudioLines removed to avoid export errors
   Baseline,
@@ -22,6 +23,8 @@ import {
   Expand,
   ExternalLink,
   Film,
+  Folder,
+  FolderOpen,
   Image,
   KeyRound,
   Languages,
@@ -507,3 +510,16 @@ export const DutchAngleIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
 export const ExternalLinkIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
   props,
 ) => <ExternalLink {...defaultProps} {...props} />;
+
+// === Icons for ProjectManager ===
+export const FolderIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <Folder {...defaultProps} {...props} />
+);
+
+export const FolderOpenIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <FolderOpen {...defaultProps} {...props} />
+);
+
+export const ExclamationTriangleIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <AlertTriangle {...defaultProps} {...props} />
+);

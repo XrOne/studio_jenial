@@ -25,7 +25,7 @@ import {
   SparklesIcon,
   ShieldCheckIcon,
 } from './icons';
-import KeyframeRefinementAssistant from './KeyframeRefinementAssistant';
+// KeyframeRefinementAssistant removed - no longer used
 import { analyzeVideoCompliance } from '../services/geminiService';
 import { uploadVideoToSupabase } from '../services/supabaseClient';
 import { isDriveEnabled, isDriveConnected, connectDrive, uploadToDrive } from '../services/googleDriveClient';
@@ -519,7 +519,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
   return (
     <div className="w-full h-full flex flex-row items-start gap-4 p-4 bg-gray-800/50 rounded-lg border border-gray-700 shadow-2xl overflow-hidden">
       {/* Left Column: Video & Primary Actions */}
-      <div className="w-2/3 h-full flex flex-col items-center gap-4 overflow-y-auto">
+      <div className="w-full h-full flex flex-col items-center gap-4 overflow-y-auto">
         <div className="text-center w-full">
           <h2 className="text-2xl font-bold text-gray-200">
             {isExtendedExternalVideo
@@ -600,15 +600,29 @@ const VideoResult: React.FC<VideoResultProps> = ({
           )}
         </div>
 
+        {/* PRIMARY ACTION BUTTONS - Simplified layout */}
         <div className="w-full flex flex-wrap justify-center gap-4">
+          {/* Continue Sequence - Main CTA when sequence in progress */}
           {isSequenceInProgress && (
             <button
               onClick={onContinueSequence}
-              className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors">
+              className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors text-lg shadow-lg shadow-indigo-900/30">
               Continue Sequence
-              <ChevronsRightIcon className="w-5 h-5" />
+              <ChevronsRightIcon className="w-6 h-6" />
             </button>
           )}
+        </div>
+
+        {/* SECONDARY ACTIONS */}
+        <div className="w-full flex flex-wrap justify-center gap-3 mt-2">
+          <button
+            onClick={handleDownloadVideo}
+            className="flex items-center gap-2 px-5 py-2.5 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors">
+            <DownloadIcon className="w-5 h-5" />
+            {isExtendedExternalVideo
+              ? 'Download Combined Clip'
+              : 'Download Video'}
+          </button>
           <button
             onClick={handleSaveShot}
             disabled={isSaved}
@@ -623,116 +637,17 @@ const VideoResult: React.FC<VideoResultProps> = ({
               </>
             )}
           </button>
-          <button
-            onClick={handleDownloadVideo}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors">
-            <DownloadIcon className="w-5 h-5" />
-            {isExtendedExternalVideo
-              ? 'Download Combined Clip'
-              : 'Download Video'}
-          </button>
-          {/* Google Drive Save Button */}
-          {driveEnabled && (
-            driveConnected ? (
-              <button
-                onClick={async () => {
-                  setIsUploadingToDrive(true);
-                  setDriveUploadSuccess(false);
-                  try {
-                    const fileName = `veo_studio_video_${Date.now()}.mp4`;
-                    const result = await uploadToDrive(videoUrl, fileName, 'video/mp4');
-                    if (result.success) {
-                      setDriveUploadSuccess(true);
-                      setTimeout(() => setDriveUploadSuccess(false), 3000);
-                    } else {
-                      alert(`Drive upload failed: ${result.error}`);
-                    }
-                  } catch (e) {
-                    alert('Failed to upload to Google Drive');
-                  } finally {
-                    setIsUploadingToDrive(false);
-                  }
-                }}
-                disabled={isUploadingToDrive || driveUploadSuccess}
-                className={`flex items-center gap-2 px-5 py-2.5 font-semibold rounded-lg transition-colors ${driveUploadSuccess
-                  ? 'bg-green-600 text-white'
-                  : isUploadingToDrive
-                    ? 'bg-blue-800 text-blue-200 cursor-wait'
-                    : 'bg-blue-600 hover:bg-blue-500 text-white'
-                  }`}>
-                {driveUploadSuccess ? (
-                  <><CheckIcon className="w-5 h-5" /> Saved to Drive!</>
-                ) : isUploadingToDrive ? (
-                  <>Uploading...</>
-                ) : (
-                  <>Save to Google Drive</>
-                )}
-              </button>
-            ) : (
-              <button
-                onClick={() => connectDrive()}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-colors">
-                Connect Google Drive
-              </button>
-            )
-          )}
+        </div>
+
+        {/* DANGER ZONE - Start New Project (RED to warn user) */}
+        <div className="w-full flex justify-center mt-4 pt-4 border-t border-gray-700/50">
           <button
             onClick={onStartNewProject}
-            className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg transition-colors">
-            <PlusIcon className="w-5 h-5" />
+            className="flex items-center gap-2 px-4 py-2 bg-red-800/80 hover:bg-red-700 text-red-200 hover:text-white font-semibold rounded-lg transition-colors text-sm border border-red-700/50">
+            <PlusIcon className="w-4 h-4" />
             Start New Project
           </button>
         </div>
-
-        <div className="flex flex-wrap justify-center gap-4 mt-2">
-          <button
-            onClick={onRetry}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-700/80 hover:bg-gray-600 text-gray-300 hover:text-white font-semibold rounded-lg transition-colors text-sm">
-            <ArrowPathIcon className="w-4 h-4" />
-            Retry Last Prompt
-          </button>
-          {canExtend && !isExtendedExternalVideo && (
-            <>
-              <button
-                onClick={onExtendVideo}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-700/80 hover:bg-gray-600 text-gray-300 hover:text-white font-semibold rounded-lg transition-colors text-sm">
-                <FilmIcon className="w-4 h-4" />
-                Extend (Simple)
-              </button>
-              <button
-                onClick={handleStartExtension}
-                disabled={keyframes.length === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-800/80 hover:bg-indigo-700 text-indigo-200 hover:text-white font-semibold rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                <SparklesIcon className="w-4 h-4" />
-                Extend with Assistant
-              </button>
-            </>
-          )}
-
-          {/* Nano Banana Pro: Drift Control Button */}
-          {canShowDriftControl && (
-            <button
-              onClick={handleRecalNano}
-              title="Corrige le cadrage/axe à partir d'un frame, puis applique un prompt d'extension corrigé."
-              className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors text-sm shadow-lg shadow-orange-900/20">
-              <SparklesIcon className="w-4 h-4" />
-              Recaler avec Nano
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Right Column: Keyframe Refinement Assistant */}
-      <div className="w-1/3 h-full flex flex-col bg-gray-900/50 rounded-lg border border-gray-700">
-        <KeyframeRefinementAssistant
-          keyframes={keyframes}
-          isExtractingFrames={isPreparingVideo || isExtractingFrames}
-          originalPrompt={lastConfig?.prompt ?? ''}
-          dogma={activeDogma}
-          onPromptRevised={onPromptRevised}
-          onUseFrameAsStart={onContinueFromFrame}
-          onEditFrame={onEditCapturedFrame}
-        />
       </div>
     </div>
   );
