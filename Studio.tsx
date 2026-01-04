@@ -20,6 +20,7 @@ import {
   UploadCloudIcon,
 } from './components/icons';
 import { ProjectManager } from './components/ProjectManager';
+import { FileMenuBar } from './components/FileMenuBar';
 import LoadingIndicator from './components/LoadingIndicator';
 import PromptEditorModal from './components/PromptEditorModal';
 import PromptSequenceAssistant from './components/PromptSequenceAssistant';
@@ -492,6 +493,7 @@ const Studio: React.FC = () => {
   } = useShotLibrary();
 
   const [isShotLibraryOpen, setIsShotLibraryOpen] = useState(false);
+  const [isProjectManagerOpen, setIsProjectManagerOpen] = useState(false);
 
   // --- Character Library State ---
   const [characters, setCharacters] = useLocalStorage<Character[]>(
@@ -2443,6 +2445,11 @@ const Studio: React.FC = () => {
         </nav>
 
         <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+          {/* TOP BAR - File Menu */}
+          <div className="flex items-center gap-4 px-4 py-2 bg-[#1e1e1e] border-b border-[#3f3f46] shrink-0">
+            <FileMenuBar onOpenProjectManager={() => setIsProjectManagerOpen(true)} />
+          </div>
+
           <main className="flex-grow p-4 overflow-hidden">
             <div className="w-full h-full mx-auto">
               {appState === AppState.LOADING && (
@@ -3389,6 +3396,12 @@ const Studio: React.FC = () => {
           }}
         />
       )}
+
+      {/* PROJECT MANAGER */}
+      <ProjectManager
+        isOpen={isProjectManagerOpen}
+        onClose={() => setIsProjectManagerOpen(false)}
+      />
 
       {/* STORYBOARD PREVIEW MODAL (12 Grid Shots) */}
       {storyboardModalContext && (
