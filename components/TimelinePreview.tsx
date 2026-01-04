@@ -196,9 +196,12 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         }
     }, [isPlaying, playheadSec, currentV1Segment, nextV1Segment, activePlayer, fps]);
 
-    // 4. PRECISE SWAP using requestVideoFrameCallback
-    // The key insight: we must start playing the inactive video BEFORE the cut point,
-    // wait for it to paint a frame, and ONLY THEN swap visibility.
+    // 4. PRECISE SWAP - Simplified and robust approach
+    // Key principles:
+    // - Pre-play earlier (don't wait for readyState)
+    // - Re-seek just before swap to ensure correct frame
+    // - Swap only when video is actually playing (not paused)
+    // - If not ready at cut, HOLD current frame (never show black)
     useEffect(() => {
         if (!isPlaying || !currentV1Segment || !nextV1Segment) return;
 
@@ -209,37 +212,45 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
         if (!inactiveVideo || !activeVideo) return;
         if (playerContent.current[inactivePlayer].segmentId !== nextV1Segment.id) return;
 
-        // Distance to cut
+        // Distance to cut in seconds
         const distToCut = currentV1Segment.outSec - playheadSec;
 
-        // PHASE 1: 1s before cut - Start preloading video playback (muted, hidden)
-        // Extended window gives decoder more time for frames
-        if (distToCut < 1.0 && distToCut > 0.1) {
-            if (inactiveVideo.paused && inactiveVideo.readyState >= 2) {
-                console.log(`[TimelinePreview] PRE-PLAY: Starting ${nextV1Segment.label} in background`);
-                // Seek to exactly where we need it
+        // PHASE 1: 2s before cut - Start playing inactive video (hidden)
+        // More aggressive: start even if readyState is low, the browser will buffer
+        if (distToCut < 2.0 && distToCut > 0.5) {
+            if (inactiveVideo.paused) {
+                console.log(`[TimelinePreview] PRE-PLAY: Starting ${nextV1Segment.label} (readyState: ${inactiveVideo.readyState})`);
                 inactiveVideo.currentTime = nextV1Segment.sourceInSec ?? 0;
                 inactiveVideo.play().catch(() => { });
             }
         }
 
-        // PHASE 2: At cut point - Wait for frame then swap
-        if (distToCut <= (1.5 / fps) && distToCut > -(1.0 / fps)) {
-            // Check if next video is ready to swap
-            if (!inactiveVideo.paused && inactiveVideo.style.opacity === '0') {
+        // PHASE 2: 0.2s before cut - Re-seek to exact position (safety measure)
+        if (distToCut < 0.2 && distToCut > 0.1 && !inactiveVideo.paused) {
+            const targetTime = nextV1Segment.sourceInSec ?? 0;
+            if (Math.abs(inactiveVideo.currentTime - targetTime) > 0.1) {
+                console.log(`[TimelinePreview] RE-SEEK: Correcting position for ${nextV1Segment.label}`);
+                inactiveVideo.currentTime = targetTime;
+            }
+        }
 
-                // Use requestVideoFrameCallback if available
-                // Capture refs with explicit type to avoid TS narrowing issues
-                const nextVideo: HTMLVideoElement = inactiveVideo;
-                const prevVideo: HTMLVideoElement = activeVideo;
-                const nextPlayer = inactivePlayer;
+        // PHASE 3: At cut point - Swap if ready
+        if (distToCut <= (2 / fps) && distToCut > -(2 / fps)) {
+            // Capture refs to avoid closure issues
+            const nextVideo: HTMLVideoElement = inactiveVideo;
+            const prevVideo: HTMLVideoElement = activeVideo;
+            const nextPlayer = inactivePlayer;
 
+            // Check if next video is playing AND has enough data
+            const isNextReady = !nextVideo.paused && nextVideo.readyState >= 3;
+
+            if (isNextReady && nextVideo.style.opacity === '0') {
+                // Use requestVideoFrameCallback for precise timing if available
                 if ('requestVideoFrameCallback' in nextVideo) {
                     (nextVideo as HTMLVideoElement & { requestVideoFrameCallback: (cb: () => void) => void })
                         .requestVideoFrameCallback(() => {
-                            // Frame is ready! NOW swap visibility
                             const gapFrames = Math.round((nextV1Segment.inSec - currentV1Segment.outSec) * fps);
-                            console.log(`[TimelinePreview] FRAME-READY SWAP at ${formatTimecode(playheadSec, fps)} | Gap: ${gapFrames} frames`);
+                            console.log(`[TimelinePreview] FRAME-READY SWAP | Gap: ${gapFrames} frames`);
 
                             nextVideo.style.opacity = '1';
                             nextVideo.style.zIndex = '10';
@@ -250,9 +261,9 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
                             setActivePlayer(nextPlayer);
                         });
                 } else {
-                    // Fallback: swap immediately (may flash)
+                    // Fallback: swap immediately
                     const gapFrames = Math.round((nextV1Segment.inSec - currentV1Segment.outSec) * fps);
-                    console.log(`[TimelinePreview] IMMEDIATE SWAP (no RVFC) at ${formatTimecode(playheadSec, fps)} | Gap: ${gapFrames} frames`);
+                    console.log(`[TimelinePreview] IMMEDIATE SWAP | Gap: ${gapFrames} frames`);
 
                     nextVideo.style.opacity = '1';
                     nextVideo.style.zIndex = '10';
@@ -262,10 +273,12 @@ export const TimelinePreview: React.FC<TimelinePreviewProps> = ({
 
                     setActivePlayer(nextPlayer);
                 }
-            } else if (inactiveVideo.paused && distToCut <= 0) {
-                // HOLD LAST FRAME: Next video not ready, keep current visible
-                // This prevents black flash - we accept late swap over black
-                console.log(`[TimelinePreview] HOLD: Next not ready at cut point, keeping current frame | readyState: ${inactiveVideo.readyState}`);
+            } else if (!isNextReady && distToCut <= 0) {
+                // HOLD: Next not ready, keep current visible
+                // Only log once per second to avoid spam
+                if (Math.floor(playheadSec * 2) % 2 === 0) {
+                    console.log(`[TimelinePreview] HOLD: Waiting for next video (readyState: ${nextVideo.readyState}, paused: ${nextVideo.paused})`);
+                }
             }
         }
     }, [isPlaying, playheadSec, currentV1Segment, nextV1Segment, activePlayer, fps]);
